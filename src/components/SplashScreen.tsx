@@ -85,7 +85,7 @@ export default function SplashScreen({ onComplete }: Props) {
                   className="text-sm font-medium mt-2"
                   style={{ color: 'rgba(200,190,220,0.7)' }}
                 >
-                  Share your moment with the world
+                  Find your next adventure
                 </motion.p>
               )}
             </AnimatePresence>
