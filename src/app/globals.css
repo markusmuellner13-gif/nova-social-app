@@ -52,6 +52,7 @@ body {
   background: linear-gradient(135deg, #8b5cf6, #ec4899);
 }
 
+/* Story rings */
 .story-ring {
   background: linear-gradient(135deg, #8b5cf6, #ec4899, #f97316);
   padding: 2.5px;
@@ -64,48 +65,87 @@ body {
   border-radius: 9999px;
 }
 
+/* Glass morphism */
 .glass {
-  background: rgba(26, 26, 36, 0.85);
+  background: rgba(26, 26, 36, 0.88);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
 }
 
 .glass-nav {
-  background: rgba(10, 10, 15, 0.94);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border-top: 1px solid rgba(255,255,255,0.07);
+  background: rgba(10, 10, 15, 0.96);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border-top: 1px solid rgba(255,255,255,0.06);
 }
 
+/* Animations */
 .heart-pop {
   animation: heartPop 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 @keyframes heartPop {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.45); }
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.5); }
   100% { transform: scale(1); }
 }
 
+/* Notification badge pulse */
+.badge-pulse {
+  animation: badgePulse 2s ease-in-out infinite;
+}
+
+@keyframes badgePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(236,72,153,0.6); }
+  50%       { box-shadow: 0 0 0 6px rgba(236,72,153,0); }
+}
+
+/* Pulse dot (used on map markers) */
 .pulse-dot {
   animation: pulseDot 2s ease-in-out infinite;
 }
 
 @keyframes pulseDot {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.6); opacity: 0.5; }
+  0%, 100% { transform: scale(1);   opacity: 1; }
+  50%       { transform: scale(1.7); opacity: 0.4; }
 }
 
-.feed-scroll {
-  overflow-y: auto;
-  scroll-snap-type: y proximity;
+/* Story progress animation */
+@keyframes storyProgress {
+  from { width: 0%; }
+  to   { width: 100%; }
 }
 
+/* Slide up */
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+/* Tab content scroll */
 .tab-content {
   overflow-y: auto;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
+/* Shimmer skeleton */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, #1a1a24 25%, #252530 50%, #1a1a24 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s infinite;
+}
+
+/* Range slider styling */
 input[type=range] {
   -webkit-appearance: none;
   appearance: none;
@@ -122,22 +162,58 @@ input[type=range]::-webkit-slider-runnable-track {
 input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: linear-gradient(135deg, #8b5cf6, #ec4899);
-  margin-top: -8px;
+  margin-top: -9px;
   cursor: pointer;
-  box-shadow: 0 0 8px rgba(139,92,246,0.5);
+  box-shadow: 0 0 10px rgba(139,92,246,0.55);
 }
 
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+input[type=range]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #2a2a38;
 }
 
-.shimmer {
-  background: linear-gradient(90deg, #1a1a24 25%, #252530 50%, #1a1a24 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
+input[type=range]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 0 10px rgba(139,92,246,0.55);
+}
+
+/* Nova glow button */
+.nova-btn {
+  background: linear-gradient(135deg, #8b5cf6, #ec4899);
+  color: white;
+  font-weight: 700;
+  border-radius: 16px;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+}
+
+.nova-btn:active {
+  transform: scale(0.97);
+  opacity: 0.9;
+}
+
+/* Drag handle */
+.drag-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: #2a2a38;
+  margin: 8px auto 4px;
+}
+
+/* Feed scroll (snap proximity) */
+.feed-scroll {
+  overflow-y: auto;
+  scroll-snap-type: y proximity;
 }

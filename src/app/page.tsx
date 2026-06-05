@@ -6,22 +6,35 @@ import SplashScreen from '@/components/SplashScreen';
 import BottomNav, { Tab } from '@/components/BottomNav';
 import FeedTab from '@/components/FeedTab';
 import SearchTab from '@/components/SearchTab';
-import SavedTab from '@/components/SavedTab';
-import PreferencesTab from '@/components/PreferencesTab';
-import { UserPreferences } from '@/types';
-import { DEFAULT_PREFERENCES } from '@/data/mockData';
+import NotificationsTab from '@/components/NotificationsTab';
+import ProfileTab from '@/components/ProfileTab';
+import Onboarding from '@/components/Onboarding';
+import CreateTab from '@/components/CreateTab';
+import ToastContainer from '@/components/ToastContainer';
+import { useApp } from '@/context/AppContext';
 
-export default function Page() {
-  const [ready, setReady] = useState(false);
+function AppShell() {
+  const { state } = useApp();
+  const [splashDone, setSplashDone] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('feed');
-  const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES as UserPreferences);
+  const [prevTab, setPrevTab] = useState<Tab>('feed');
+  const [showCreate, setShowCreate] = useState(false);
 
   const handleTabChange = useCallback((tab: Tab) => {
+    if (tab === 'create') {
+      setShowCreate(true);
+      return;
+    }
+    setPrevTab(activeTab);
     setActiveTab(tab);
-  }, []);
+  }, [activeTab]);
 
-  if (!ready) {
-    return <SplashScreen onComplete={() => setReady(true)} />;
+  if (!splashDone) {
+    return <SplashScreen onComplete={() => setSplashDone(true)} />;
+  }
+
+  if (!state.hasOnboarded) {
+    return <Onboarding />;
   }
 
   return (
@@ -46,21 +59,33 @@ export default function Page() {
             transition={{ duration: 0.18, ease: 'easeInOut' }}
             style={{ position: 'absolute', inset: 0 }}
           >
-            {activeTab === 'feed' && <FeedTab preferences={preferences} />}
-            {activeTab === 'search' && <SearchTab />}
-            {activeTab === 'saved' && <SavedTab />}
-            {activeTab === 'preferences' && (
-              <PreferencesTab
-                preferences={preferences}
-                onPreferencesChange={setPreferences}
-              />
-            )}
+            {activeTab === 'feed'          && <FeedTab />}
+            {activeTab === 'explore'       && <SearchTab />}
+            {activeTab === 'notifications' && <NotificationsTab />}
+            {activeTab === 'profile'       && <ProfileTab />}
           </motion.div>
         </AnimatePresence>
       </div>
 
       {/* Bottom navigation */}
       <BottomNav active={activeTab} onChange={handleTabChange} />
+
+      {/* Toast container */}
+      <ToastContainer />
+
+      {/* Create sheet overlay */}
+      <AnimatePresence>
+        {showCreate && (
+          <CreateTab
+            onClose={() => setShowCreate(false)}
+            onPosted={() => { setShowCreate(false); setActiveTab('feed'); }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
+}
+
+export default function Page() {
+  return <AppShell />;
 }

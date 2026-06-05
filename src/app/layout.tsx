@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { AppProvider } from '@/context/AppContext';
 
 export const metadata: Metadata = {
-  title: 'Nova — Share Your Moment',
-  description: 'Nova is a social app for sharing moments, discovering creators, and connecting with the world.',
+  title: 'Nova — Your World, Curated',
+  description: 'Nova is an AI-powered social discovery app for sharing moments, exploring events, and connecting with the world.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
@@ -28,7 +29,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body style={{ height: '100%', margin: 0, overflow: 'hidden' }}>
-        {children}
+        <AppProvider>
+          {children}
+        </AppProvider>
       </body>
     </html>
   );

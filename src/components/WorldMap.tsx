@@ -17,9 +17,10 @@ const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json'
 
 interface Props {
   posts: Post[];
+  onPostOpen?: (post: Post) => void;
 }
 
-export default function WorldMap({ posts }: Props) {
+export default function WorldMap({ posts, onPostOpen }: Props) {
   const [selected, setSelected] = useState<Post | null>(null);
   const [zoom, setZoom] = useState(1);
   const [center, setCenter] = useState<[number, number]>([10, 20]);
@@ -166,13 +167,20 @@ export default function WorldMap({ posts }: Props) {
                 <span className="text-xs ml-2" style={{ color: '#555566' }}>📍 {selected.location.name}</span>
               </div>
             </div>
-            <button
-              onClick={() => setSelected(null)}
-              className="flex-shrink-0 self-start p-0.5"
-              style={{ color: '#555566' }}
-            >
-              <X size={16} />
-            </button>
+            <div className="flex flex-col gap-1 flex-shrink-0">
+              {onPostOpen && (
+                <button
+                  onClick={() => { onPostOpen(selected); setSelected(null); }}
+                  className="px-2 py-1 rounded-lg text-xs font-bold text-white"
+                  style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}
+                >
+                  Open
+                </button>
+              )}
+              <button onClick={() => setSelected(null)} className="p-0.5" style={{ color: '#555566' }}>
+                <X size={16} />
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

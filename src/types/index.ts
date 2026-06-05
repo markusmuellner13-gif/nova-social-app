@@ -20,7 +20,8 @@ export type Category =
   | 'fitness'
   | 'music'
   | 'pets'
-  | 'lifestyle';
+  | 'lifestyle'
+  | 'events';
 
 export interface PostLocation {
   name: string;
@@ -41,12 +42,24 @@ export interface Post {
   location: PostLocation;
   saved: boolean;
   liked: boolean;
+  isEvent?: boolean;
+  eventDate?: string;
+  eventVenue?: string;
+}
+
+export interface Comment {
+  id: string;
+  user: User;
+  text: string;
+  timestamp: number;
+  likes: number;
 }
 
 export interface Story {
   id: string;
   user: User;
   seen: boolean;
+  image: string;
 }
 
 export interface UserPreferences {
@@ -60,14 +73,42 @@ export interface UserPreferences {
   music: number;
   pets: number;
   lifestyle: number;
+  events: number;
 }
 
-export interface Notification {
+export interface NovaNotification {
   id: string;
   user: User;
-  type: 'like' | 'comment' | 'follow' | 'mention';
+  type: 'like' | 'comment' | 'follow' | 'mention' | 'ai_suggestion' | 'event';
   postImage?: string;
   text: string;
   timestamp: number;
   read: boolean;
+  postId?: string;
+}
+
+export interface AIProfile {
+  categoryEngagement: Partial<Record<Category, number>>;
+  totalInteractions: number;
+  lastActive: number;
+  sessionCount: number;
+}
+
+export interface Toast {
+  id: string;
+  message: string;
+  type: 'success' | 'info' | 'error';
+  icon?: string;
+}
+
+export interface AppPersistedState {
+  preferences: UserPreferences;
+  likedPosts: string[];
+  savedPosts: string[];
+  followedUsers: string[];
+  seenStories: string[];
+  hasOnboarded: boolean;
+  aiProfile: AIProfile;
+  notifications: NovaNotification[];
+  createdPosts: Post[];
 }
