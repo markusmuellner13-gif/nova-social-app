@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Star, Bookmark, MessageCircle, Share2, BadgeCheck, MapPin, Calendar } from 'lucide-react';
+import { Star, Bookmark, MessageCircle, Share2, BadgeCheck, MapPin, Calendar, ExternalLink, Sparkles } from 'lucide-react';
 import { Post as PostType } from '@/types';
 import { formatCount, timeAgo } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
@@ -220,10 +220,41 @@ export default function Post({ post, showHint = false }: Props) {
             </p>
           )}
 
-          {/* Timestamp */}
-          <p className="text-xs mt-2 pb-3" style={{ color: '#444455' }}>
+            {/* Timestamp */}
+          <p className="text-xs mt-2" style={{ color: '#444455' }}>
             {timeAgo(post.timestamp)}
           </p>
+
+          {/* AI source badge + Get Tickets CTA */}
+          {post.isAIGenerated && (
+            <div className="flex items-center gap-2 mt-2 mb-1 flex-wrap">
+              <div className="flex items-center gap-1 px-2 py-0.5 rounded-full" style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)' }}>
+                <Sparkles size={10} style={{ color: '#a78bfa' }} />
+                <span className="text-xs font-semibold" style={{ color: '#a78bfa' }}>AI Discovered</span>
+              </div>
+              {post.price && (
+                <span className="text-xs font-medium" style={{ color: '#555566' }}>{post.price}</span>
+              )}
+            </div>
+          )}
+
+          {post.isEvent && post.eventUrl && (
+            <a
+              href={post.eventUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-bold text-white mt-2 mb-3"
+              style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ExternalLink size={14} />
+              Get Tickets &amp; Info
+            </a>
+          )}
+          {post.isEvent && !post.eventUrl && (
+            <div style={{ height: 12 }} />
+          )}
+          {!post.isEvent && <div style={{ height: 12 }} />}
         </div>
       </article>
 

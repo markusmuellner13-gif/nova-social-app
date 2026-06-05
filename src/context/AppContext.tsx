@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useReducer, useEffect, useRef, useCallback } from 'react';
-import { AppPersistedState, UserPreferences, Category, NovaNotification, Post, Toast, AIProfile } from '@/types';
+import { AppPersistedState, UserPreferences, Category, NovaNotification, Post, Toast, AIProfile, LocationState } from '@/types';
 import { DEFAULT_PREFERENCES, MOCK_NOTIFICATIONS, MOCK_POSTS } from '@/data/mockData';
 import { learnFromInteraction, generateAINotification, getTopCategories } from '@/lib/aiEngine';
 
@@ -91,6 +91,9 @@ function migrateState(raw: Partial<AppPersistedState>): AppPersistedState {
     },
     notifications: raw.notifications ?? MOCK_NOTIFICATIONS,
     createdPosts: raw.createdPosts ?? [],
+    location: raw.location ?? null,
+    locationEnabled: raw.locationEnabled ?? false,
+    hasSeenLocationPrompt: raw.hasSeenLocationPrompt ?? false,
   };
 }
 
@@ -106,6 +109,9 @@ const DEFAULT_STATE: AppPersistedState = {
   aiProfile: { categoryEngagement: {}, totalInteractions: 0, lastActive: Date.now(), sessionCount: 1 },
   notifications: MOCK_NOTIFICATIONS,
   createdPosts: [],
+  location: null,
+  locationEnabled: false,
+  hasSeenLocationPrompt: false,
 };
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
@@ -122,6 +128,9 @@ type Action =
   | { type: 'MARK_READ'; id: string }
   | { type: 'ADD_CREATED_POST'; post: Post }
   | { type: 'COMPLETE_ONBOARDING'; prefs: UserPreferences }
+  | { type: 'SET_LOCATION'; location: LocationState }
+  | { type: 'SET_LOCATION_ENABLED'; enabled: boolean }
+  | { type: 'SET_SEEN_LOCATION_PROMPT' }
   | { type: 'CLEAR_ALL_DATA' };
 
 function reducer(state: AppPersistedState, action: Action): AppPersistedState {
@@ -180,6 +189,15 @@ function reducer(state: AppPersistedState, action: Action): AppPersistedState {
     case 'COMPLETE_ONBOARDING':
       return { ...state, hasOnboarded: true, preferences: action.prefs };
 
+    case 'SET_LOCATION':
+      return { ...state, location: action.location, locationEnabled: true };
+
+    case 'SET_LOCATION_ENABLED':
+      return { ...state, locationEnabled: action.enabled, location: action.enabled ? state.location : null };
+
+    case 'SET_SEEN_LOCATION_PROMPT':
+      return { ...state, hasSeenLocationPrompt: true };
+
     case 'CLEAR_ALL_DATA':
       return { ...DEFAULT_STATE, hasOnboarded: false };
 
@@ -206,6 +224,9 @@ interface AppContextValue {
   markRead: (id: string) => void;
   addCreatedPost: (post: Post) => void;
   completeOnboarding: (prefs: UserPreferences) => void;
+  setLocation: (loc: LocationState) => void;
+  setLocationEnabled: (enabled: boolean) => void;
+  markSeenLocationPrompt: () => void;
   clearAllData: () => void;
   // Toasts
   toasts: Toast[];
@@ -322,6 +343,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     markRead: (id) => dispatch({ type: 'MARK_READ', id }),
     addCreatedPost: (post) => dispatch({ type: 'ADD_CREATED_POST', post }),
     completeOnboarding: (prefs) => dispatch({ type: 'COMPLETE_ONBOARDING', prefs }),
+    setLocation: (location) => dispatch({ type: 'SET_LOCATION', location }),
+    setLocationEnabled: (enabled) => dispatch({ type: 'SET_LOCATION_ENABLED', enabled }),
+    markSeenLocationPrompt: () => dispatch({ type: 'SET_SEEN_LOCATION_PROMPT' }),
     clearAllData: () => {
       dispatch({ type: 'CLEAR_ALL_DATA' });
       localStorage.removeItem(DATA_STORE);

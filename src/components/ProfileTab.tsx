@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Settings, Grid3X3, BookmarkIcon, ChevronDown, ChevronUp,
-  BadgeCheck, Camera, Sliders, LogOut, Shield, Bell, Trash2, X
+  BadgeCheck, Camera, Sliders, LogOut, Shield, Bell, Trash2, X, MapPin, MapPinOff
 } from 'lucide-react';
 import { CURRENT_USER, MOCK_POSTS, formatCount } from '@/data/mockData';
 import { Category } from '@/types';
@@ -27,7 +27,7 @@ const PREF_CONFIG: { key: Category; emoji: string; label: string; desc: string; 
 type ProfileSection = 'posts' | 'saved';
 
 export default function ProfileTab() {
-  const { state, setPreferences, clearAllData, addToast } = useApp();
+  const { state, setPreferences, clearAllData, addToast, setLocationEnabled } = useApp();
   const { preferences, savedPosts: savedIds, createdPosts } = state;
 
   const [activeSection, setActiveSection] = useState<ProfileSection>('posts');
@@ -84,6 +84,7 @@ export default function ProfileTab() {
             {[
               { icon: Camera, label: 'Change Profile Photo', action: () => addToast('Coming soon', 'info', '📸') },
               { icon: BadgeCheck, label: 'Request Verification', action: () => addToast('Application submitted ✓', 'success') },
+              { icon: state.locationEnabled ? MapPin : MapPinOff, label: state.locationEnabled ? `Location: ${state.location?.city ?? 'On'}` : 'Enable Location', action: () => { setLocationEnabled(!state.locationEnabled); addToast(state.locationEnabled ? 'Location disabled' : 'Location enabled', 'info', '📍'); } },
               { icon: Shield, label: 'Privacy & Security', action: () => addToast('Your data is AES-256 encrypted on this device', 'info', '🔒') },
               { icon: Bell, label: 'Notification Settings', action: () => { } },
               { icon: Trash2, label: 'Clear All Data', danger: true, action: () => setShowClearConfirm(true) },

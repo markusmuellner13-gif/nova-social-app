@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from 'next';
+import Script from 'next/script';
 import './globals.css';
 import { AppProvider } from '@/context/AppContext';
 
 export const metadata: Metadata = {
-  title: 'Nova — Your World, Curated',
-  description: 'Nova is an AI-powered social discovery app for sharing moments, exploring events, and connecting with the world.',
+  title: 'Nova — Your World, Curated by AI',
+  description: 'Nova is an AI-powered social discovery app. Find events, concerts, exhibitions and things to do wherever you are.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
@@ -21,12 +22,37 @@ export const viewport: Viewport = {
   themeColor: '#0a0a0f',
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GOOGLE ADSENSE SETUP INSTRUCTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. Apply at https://adsense.google.com (free, takes 1-3 days to approve)
+// 2. Once approved, get your Publisher ID: ca-pub-XXXXXXXXXXXXXXXXX
+// 3. Add to Vercel Environment Variables:
+//      NEXT_PUBLIC_ADSENSE_CLIENT_ID   = ca-pub-XXXXXXXXXXXXXXXXX
+//      NEXT_PUBLIC_ADSENSE_SLOT_FEED   = (slot ID from AdSense dashboard)
+//      NEXT_PUBLIC_ADSENSE_SLOT_SQUARE = (second slot ID)
+// 4. Uncomment the <Script> tag below and replace YOUR_PUBLISHER_ID
+// 5. Redeploy — ads will appear automatically in the feed
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ADSENSE_ID = process.env.NEXT_PUBLIC_ADSENSE_CLIENT_ID ?? '';
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" style={{ height: '100%' }}>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+
+        {/* Google AdSense — loads only when publisher ID is set */}
+        {ADSENSE_ID && (
+          // eslint-disable-next-line @next/next/no-sync-scripts
+          <script
+            async
+            src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_ID}`}
+            crossOrigin="anonymous"
+          />
+        )}
       </head>
       <body style={{ height: '100%', margin: 0, overflow: 'hidden' }}>
         <AppProvider>

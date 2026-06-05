@@ -43,8 +43,12 @@ export interface Post {
   saved: boolean;
   liked: boolean;
   isEvent?: boolean;
+  isAIGenerated?: boolean;
   eventDate?: string;
   eventVenue?: string;
+  eventUrl?: string;
+  organizer?: string;
+  price?: string;
 }
 
 export interface Comment {
@@ -101,6 +105,15 @@ export interface Toast {
   icon?: string;
 }
 
+export interface LocationState {
+  lat: number;
+  lng: number;
+  city: string;
+  country: string;
+  countryCode: string;
+  enabled: boolean;
+}
+
 export interface AppPersistedState {
   preferences: UserPreferences;
   likedPosts: string[];
@@ -111,4 +124,7 @@ export interface AppPersistedState {
   aiProfile: AIProfile;
   notifications: NovaNotification[];
   createdPosts: Post[];
+  location: LocationState | null;
+  locationEnabled: boolean;
+  hasSeenLocationPrompt: boolean;
 }

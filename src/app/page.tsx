@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import SplashScreen from '@/components/SplashScreen';
 import BottomNav, { Tab } from '@/components/BottomNav';
@@ -11,23 +11,55 @@ import ProfileTab from '@/components/ProfileTab';
 import Onboarding from '@/components/Onboarding';
 import CreateTab from '@/components/CreateTab';
 import ToastContainer from '@/components/ToastContainer';
+import AIChatBar from '@/components/AIChatBar';
+import LocationPermissionPrompt from '@/components/LocationPermissionPrompt';
 import { useApp } from '@/context/AppContext';
+import { useLocation } from '@/hooks/useLocation';
 
 function AppShell() {
-  const { state } = useApp();
+  const { state, setLocation, markSeenLocationPrompt } = useApp();
   const [splashDone, setSplashDone] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('feed');
-  const [prevTab, setPrevTab] = useState<Tab>('feed');
   const [showCreate, setShowCreate] = useState(false);
+  const [showLocationPrompt, setShowLocationPrompt] = useState(false);
+
+  const { location, permission, requestLocation } = useLocation();
+
+  // Sync geolocation into context
+  useEffect(() => {
+    if (location && location.enabled) {
+      setLocation(location);
+    }
+  }, [location, setLocation]);
+
+  // Show location prompt once after onboarding if not yet seen
+  useEffect(() => {
+    if (
+      splashDone &&
+      state.hasOnboarded &&
+      !state.hasSeenLocationPrompt &&
+      permission === 'prompt'
+    ) {
+      const t = setTimeout(() => setShowLocationPrompt(true), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [splashDone, state.hasOnboarded, state.hasSeenLocationPrompt, permission]);
+
+  async function handleEnableLocation() {
+    setShowLocationPrompt(false);
+    markSeenLocationPrompt();
+    await requestLocation();
+  }
+
+  function handleDismissLocation() {
+    setShowLocationPrompt(false);
+    markSeenLocationPrompt();
+  }
 
   const handleTabChange = useCallback((tab: Tab) => {
-    if (tab === 'create') {
-      setShowCreate(true);
-      return;
-    }
-    setPrevTab(activeTab);
+    if (tab === 'create') { setShowCreate(true); return; }
     setActiveTab(tab);
-  }, [activeTab]);
+  }, []);
 
   if (!splashDone) {
     return <SplashScreen onComplete={() => setSplashDone(true)} />;
@@ -59,7 +91,7 @@ function AppShell() {
             transition={{ duration: 0.18, ease: 'easeInOut' }}
             style={{ position: 'absolute', inset: 0 }}
           >
-            {activeTab === 'feed'          && <FeedTab />}
+            {activeTab === 'feed'          && <FeedTab onOpenLocationPrompt={() => setShowLocationPrompt(true)} />}
             {activeTab === 'explore'       && <SearchTab />}
             {activeTab === 'notifications' && <NotificationsTab />}
             {activeTab === 'profile'       && <ProfileTab />}
@@ -70,15 +102,30 @@ function AppShell() {
       {/* Bottom navigation */}
       <BottomNav active={activeTab} onChange={handleTabChange} />
 
-      {/* Toast container */}
+      {/* Toasts */}
       <ToastContainer />
 
-      {/* Create sheet overlay */}
+      {/* AI Chat (visible when not in create flow) */}
+      {!showCreate && (
+        <AIChatBar location={state.location} />
+      )}
+
+      {/* Create sheet */}
       <AnimatePresence>
         {showCreate && (
           <CreateTab
             onClose={() => setShowCreate(false)}
             onPosted={() => { setShowCreate(false); setActiveTab('feed'); }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Location permission prompt */}
+      <AnimatePresence>
+        {showLocationPrompt && (
+          <LocationPermissionPrompt
+            onEnable={handleEnableLocation}
+            onDismiss={handleDismissLocation}
           />
         )}
       </AnimatePresence>
