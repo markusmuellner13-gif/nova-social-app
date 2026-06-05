@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import {
   ComposableMap,
   Geographies,
@@ -9,11 +9,39 @@ import {
   ZoomableGroup,
 } from 'react-simple-maps';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Post } from '@/types';
+import { X, ExternalLink, Plus, Minus, Locate } from 'lucide-react';
+import { Post, Category } from '@/types';
 import { formatCount } from '@/data/mockData';
-import { Heart, X } from 'lucide-react';
 
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
+
+const CATEGORY_EMOJI: Record<Category, string> = {
+  travel:    '✈️',
+  food:      '🍕',
+  fashion:   '👗',
+  sports:    '⚽',
+  art:       '🎨',
+  tech:      '💻',
+  fitness:   '💪',
+  music:     '🎵',
+  pets:      '🐾',
+  lifestyle: '🌟',
+  events:    '🎉',
+};
+
+const CATEGORY_COLOR: Record<Category, string> = {
+  travel:    '#3b82f6',
+  food:      '#f97316',
+  fashion:   '#ec4899',
+  sports:    '#22c55e',
+  art:       '#a855f7',
+  tech:      '#06b6d4',
+  fitness:   '#ef4444',
+  music:     '#8b5cf6',
+  pets:      '#f59e0b',
+  lifestyle: '#10b981',
+  events:    '#f43f5e',
+};
 
 interface Props {
   posts: Post[];
@@ -22,42 +50,56 @@ interface Props {
 
 export default function WorldMap({ posts, onPostOpen }: Props) {
   const [selected, setSelected] = useState<Post | null>(null);
-  const [zoom, setZoom] = useState(1);
-  const [center, setCenter] = useState<[number, number]>([10, 20]);
+  const [zoom, setZoom] = useState(1.2);
+  const [center, setCenter] = useState<[number, number]>([10, 25]);
+
+  const handleMoveEnd = useCallback(({ zoom: z, coordinates }: { zoom: number; coordinates: [number, number] }) => {
+    setZoom(z);
+    setCenter(coordinates);
+  }, []);
+
+  const zoomIn  = useCallback(() => setZoom(z => Math.min(z * 1.5, 12)), []);
+  const zoomOut = useCallback(() => setZoom(z => Math.max(z / 1.5, 0.8)), []);
+  const reset   = useCallback(() => { setZoom(1.2); setCenter([10, 25]); }, []);
+
+  // Scale marker size with zoom (bigger markers when zoomed in)
+  const markerR    = Math.max(3, Math.min(7, 6 / Math.sqrt(zoom)));
+  const pulseR     = markerR * 2.2;
+  const showEmoji  = zoom > 2.5;
+  const showAvatar = zoom > 5;
 
   return (
-    <div className="relative w-full" style={{ height: 340, background: '#08080f', borderRadius: 20, overflow: 'hidden' }}>
-      {/* Map */}
+    <div
+      className="relative w-full rounded-2xl overflow-hidden"
+      style={{ height: 340, background: '#06111f' }}
+    >
+      {/* Ocean background */}
+      <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse at 50% 60%, #0d1e33 0%, #060e18 100%)' }} />
+
       <ComposableMap
-        projection="geoOrthographic"
-        projectionConfig={{ scale: 180, center }}
+        projection="geoMercator"
+        projectionConfig={{ scale: 130, center: [0, 20] }}
         style={{ width: '100%', height: '100%' }}
       >
         <ZoomableGroup
           zoom={zoom}
           center={center}
-          onMoveEnd={({ zoom: z, coordinates }) => {
-            setZoom(z);
-            setCenter(coordinates as [number, number]);
-          }}
-          minZoom={0.6}
-          maxZoom={4}
+          onMoveEnd={handleMoveEnd}
+          minZoom={0.8}
+          maxZoom={12}
         >
-          {/* Ocean */}
-          <circle cx={0} cy={0} r={180} fill="#0d1a2d" />
-
           <Geographies geography={GEO_URL}>
             {({ geographies }) =>
               geographies.map((geo) => (
                 <Geography
                   key={geo.rsmKey}
                   geography={geo}
-                  fill="#1a1f35"
-                  stroke="#0d1220"
-                  strokeWidth={0.5}
+                  fill="#1c2a42"
+                  stroke="#0d1828"
+                  strokeWidth={0.4}
                   style={{
                     default: { outline: 'none' },
-                    hover: { fill: '#232a45', outline: 'none' },
+                    hover:   { fill: '#263550', outline: 'none' },
                     pressed: { outline: 'none' },
                   }}
                 />
@@ -66,119 +108,211 @@ export default function WorldMap({ posts, onPostOpen }: Props) {
           </Geographies>
 
           {/* Post markers */}
-          {posts.map((post) => (
-            <Marker
-              key={post.id}
-              coordinates={[post.location.lng, post.location.lat]}
-            >
-              <motion.g
-                onClick={() => setSelected(post)}
-                style={{ cursor: 'pointer' }}
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-              >
-                {/* Pulse ring */}
-                <circle
-                  r={9}
-                  fill="rgba(139,92,246,0.2)"
-                  className="pulse-dot"
-                />
-                {/* Dot */}
-                <circle
-                  r={5}
-                  fill="url(#markerGrad)"
-                  stroke="rgba(255,255,255,0.8)"
-                  strokeWidth={1.5}
-                />
-                {/* Thumb preview */}
-                <image
-                  href={post.image}
-                  x={-12}
-                  y={-28}
-                  width={24}
-                  height={24}
-                  clipPath="url(#thumbClip)"
-                  style={{ display: selected?.id === post.id ? 'none' : 'block' }}
-                />
-              </motion.g>
-            </Marker>
-          ))}
+          {posts.map((post) => {
+            const color = CATEGORY_COLOR[post.category] ?? '#8b5cf6';
+            const emoji = CATEGORY_EMOJI[post.category] ?? '📍';
+            const isSelected = selected?.id === post.id;
 
+            return (
+              <Marker
+                key={post.id}
+                coordinates={[post.location.lng, post.location.lat]}
+              >
+                <motion.g
+                  onClick={() => setSelected(isSelected ? null : post)}
+                  style={{ cursor: 'pointer' }}
+                  initial={{ scale: 0, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 20, delay: Math.random() * 0.3 }}
+                  whileHover={{ scale: 1.3 }}
+                  whileTap={{ scale: 0.9 }}
+                >
+                  {/* Outer pulse ring */}
+                  {!isSelected && (
+                    <circle
+                      r={pulseR}
+                      fill={`${color}30`}
+                      className="pulse-dot"
+                    />
+                  )}
+
+                  {/* Selection ring */}
+                  {isSelected && (
+                    <circle
+                      r={pulseR * 1.4}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={1.5}
+                      opacity={0.8}
+                    />
+                  )}
+
+                  {/* Main dot */}
+                  <circle
+                    r={markerR}
+                    fill={color}
+                    stroke="white"
+                    strokeWidth={1.2}
+                    style={{ filter: `drop-shadow(0 0 ${markerR}px ${color}88)` }}
+                  />
+
+                  {/* Category emoji (shows when zoomed in) */}
+                  {showEmoji && !showAvatar && (
+                    <text
+                      y={-(markerR + 4)}
+                      textAnchor="middle"
+                      style={{
+                        fontSize: Math.min(12, markerR * 2.2),
+                        pointerEvents: 'none',
+                        userSelect: 'none',
+                      }}
+                    >
+                      {emoji}
+                    </text>
+                  )}
+
+                  {/* Tiny avatar image (shows when very zoomed in) */}
+                  {showAvatar && (
+                    <image
+                      href={post.user.avatar}
+                      x={-markerR * 2}
+                      y={-(markerR * 2 + markerR * 4 + 2)}
+                      width={markerR * 4}
+                      height={markerR * 4}
+                      clipPath={`url(#avatarClip_${post.id})`}
+                    />
+                  )}
+
+                  <defs>
+                    <clipPath id={`avatarClip_${post.id}`}>
+                      <circle cx={0} cy={-(markerR * 4)} r={markerR * 2} />
+                    </clipPath>
+                  </defs>
+                </motion.g>
+              </Marker>
+            );
+          })}
+
+          {/* Gradient def for fallback dots */}
           <defs>
-            <linearGradient id="markerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#8b5cf6" />
-              <stop offset="100%" stopColor="#ec4899" />
-            </linearGradient>
-            <clipPath id="thumbClip">
-              <circle cx={0} cy={-16} r={12} />
-            </clipPath>
+            <radialGradient id="oceanGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#0d2244" />
+              <stop offset="100%" stopColor="#060e18" />
+            </radialGradient>
           </defs>
         </ZoomableGroup>
       </ComposableMap>
 
-      {/* Zoom controls */}
-      <div
-        className="absolute top-3 right-3 flex flex-col gap-1"
-      >
-        {[{ label: '+', action: () => setZoom((z) => Math.min(z + 0.5, 4)) },
-          { label: '−', action: () => setZoom((z) => Math.max(z - 0.5, 0.6)) }].map(({ label, action }) => (
-          <button
-            key={label}
-            onClick={action}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-lg"
-            style={{ background: 'rgba(26,26,36,0.85)', border: '1px solid #2a2a38' }}
-          >
-            {label}
-          </button>
-        ))}
+      {/* Map controls */}
+      <div className="absolute top-3 right-3 flex flex-col gap-1.5 z-10">
+        <button
+          onClick={zoomIn}
+          className="w-8 h-8 rounded-xl flex items-center justify-center"
+          style={{ background: 'rgba(13,20,30,0.9)', border: '1px solid rgba(255,255,255,0.1)', color: 'white' }}
+        >
+          <Plus size={14} />
+        </button>
+        <button
+          onClick={zoomOut}
+          className="w-8 h-8 rounded-xl flex items-center justify-center"
+          style={{ background: 'rgba(13,20,30,0.9)', border: '1px solid rgba(255,255,255,0.1)', color: 'white' }}
+        >
+          <Minus size={14} />
+        </button>
+        <button
+          onClick={reset}
+          className="w-8 h-8 rounded-xl flex items-center justify-center"
+          style={{ background: 'rgba(13,20,30,0.9)', border: '1px solid rgba(255,255,255,0.1)', color: 'white' }}
+        >
+          <Locate size={13} />
+        </button>
       </div>
 
-      {/* Overlay label */}
+      {/* Header label */}
       <div
         className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-semibold"
         style={{ background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.3)' }}
       >
-        🌍 {posts.length} posts worldwide
+        🌍 {posts.length} events worldwide
+      </div>
+
+      {/* Zoom hint */}
+      <div
+        className="absolute bottom-3 left-3 text-xs font-medium"
+        style={{ color: 'rgba(255,255,255,0.3)' }}
+      >
+        Pinch or scroll to zoom · Drag to pan
       </div>
 
       {/* Post preview popup */}
       <AnimatePresence>
         {selected && (
           <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.9 }}
+            initial={{ opacity: 0, y: 16, scale: 0.94 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.9 }}
-            transition={{ duration: 0.25 }}
-            className="absolute bottom-4 left-4 right-4 rounded-2xl overflow-hidden flex gap-3 p-3"
-            style={{ background: 'rgba(20,20,30,0.95)', border: '1px solid #2a2a38', backdropFilter: 'blur(20px)' }}
+            exit={{ opacity: 0, y: 16, scale: 0.94 }}
+            transition={{ duration: 0.22 }}
+            className="absolute bottom-4 left-3 right-3 rounded-2xl overflow-hidden flex gap-3 p-3 z-20"
+            style={{ background: 'rgba(13,18,28,0.97)', border: `1px solid ${CATEGORY_COLOR[selected.category]}44`, backdropFilter: 'blur(20px)' }}
           >
+            {/* Category color stripe */}
+            <div
+              className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl"
+              style={{ background: CATEGORY_COLOR[selected.category] }}
+            />
+
             <img
               src={selected.image}
               alt=""
-              className="w-16 h-16 rounded-xl object-cover flex-shrink-0"
+              className="w-14 h-14 rounded-xl object-cover flex-shrink-0 ml-1"
             />
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-white truncate">@{selected.user.username}</p>
-              <p className="text-xs mt-0.5 line-clamp-2" style={{ color: '#888899' }}>{selected.caption}</p>
-              <div className="flex items-center gap-1 mt-1">
-                <Heart size={11} style={{ color: '#ec4899' }} fill="#ec4899" />
-                <span className="text-xs" style={{ color: '#888899' }}>{formatCount(selected.likes)}</span>
-                <span className="text-xs ml-2" style={{ color: '#555566' }}>📍 {selected.location.name}</span>
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <img
+                  src={selected.user.avatar}
+                  alt=""
+                  className="w-4 h-4 rounded-full object-cover"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+                <span className="text-xs font-semibold text-white truncate">{selected.user.name}</span>
+              </div>
+              <p className="text-xs line-clamp-2 leading-snug" style={{ color: '#888899' }}>
+                {selected.caption.split('\n')[0]}
+              </p>
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className="text-xs" style={{ color: CATEGORY_COLOR[selected.category] }}>
+                  {CATEGORY_EMOJI[selected.category]} {selected.category}
+                </span>
+                <span className="text-xs" style={{ color: '#444455' }}>
+                  ⭐ {formatCount(selected.likes)}
+                </span>
               </div>
             </div>
+
             <div className="flex flex-col gap-1 flex-shrink-0">
               {onPostOpen && (
                 <button
                   onClick={() => { onPostOpen(selected); setSelected(null); }}
-                  className="px-2 py-1 rounded-lg text-xs font-bold text-white"
-                  style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}
+                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold text-white"
+                  style={{ background: `linear-gradient(135deg, ${CATEGORY_COLOR[selected.category]}, #8b5cf6)` }}
                 >
                   Open
                 </button>
               )}
-              <button onClick={() => setSelected(null)} className="p-0.5" style={{ color: '#555566' }}>
-                <X size={16} />
+              {selected.eventUrl && (
+                <a
+                  href={selected.eventUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1"
+                  style={{ background: '#1a1a24', color: '#a78bfa', border: '1px solid #2a2a38' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ExternalLink size={10} /> Info
+                </a>
+              )}
+              <button onClick={() => setSelected(null)} className="p-1 flex items-center justify-center" style={{ color: '#444455' }}>
+                <X size={14} />
               </button>
             </div>
           </motion.div>

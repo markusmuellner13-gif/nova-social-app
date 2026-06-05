@@ -98,7 +98,9 @@ function NotifRow({ notif, onPostOpen }: { notif: NovaNotification; onPostOpen: 
 
 export default function NotificationsTab() {
   const { state, markAllRead, addToast } = useApp();
-  const notifs = state.notifications;
+  // Only show AI discovery and event notifications — not social like/follow/mention
+  const ALLOWED_TYPES = new Set(['ai_suggestion', 'event', 'comment']);
+  const notifs = state.notifications.filter(n => ALLOWED_TYPES.has(n.type));
   const unread = notifs.filter(n => !n.read);
   const read = notifs.filter(n => n.read);
   const [openPostId, setOpenPostId] = useState<string | null>(null);

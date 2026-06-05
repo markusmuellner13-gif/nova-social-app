@@ -291,7 +291,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const randomPost = candidatePosts[Math.floor(Math.random() * candidatePosts.length)];
       const notifUser = randomPost.user;
       const generated = generateAINotification(randomPost, state.preferences, notifUser);
-      const notif: NovaNotification = { ...generated, id: `ai_${Date.now()}` };
+      const notif: NovaNotification = {
+        ...generated,
+        id: `ai_${Date.now()}`,
+        type: randomPost.isEvent ? 'event' : 'ai_suggestion',
+      };
 
       dispatch({ type: 'ADD_NOTIFICATION', notif });
 

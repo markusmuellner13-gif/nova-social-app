@@ -62,6 +62,8 @@ export default function FeedTab({ onOpenLocationPrompt }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialFetchDone = useRef(false);
   const adCounter = useRef(0);
+  const [scrollY, setScrollY] = useState(0);
+  const prevScrollYRef = useRef(0);
 
   // Initial AI feed fetch
   useEffect(() => {
@@ -127,21 +129,32 @@ export default function FeedTab({ onOpenLocationPrompt }: Props) {
     return items;
   }, [aiPosts, injectedPosts, curatedPool, visibleCurated]);
 
-  // Infinite scroll
+  // Infinite scroll + scroll-position tracking for refresh button
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 300;
+    const top = el.scrollTop;
+    setScrollY(top);
+
+    // Instagram-style: scrolled back to top after being far down → auto-refresh
+    if (top === 0 && prevScrollYRef.current > 400) {
+      resetAI();
+      adCounter.current = 0;
+      void fetchMore(activeCategory ?? undefined);
+      setInjectedPosts([]);
+      setVisibleCurated(PAGE_SIZE);
+    }
+    prevScrollYRef.current = top;
+
+    const nearBottom = el.scrollHeight - top - el.clientHeight < 300;
     if (!nearBottom) return;
-    // Load more curated
     if (visibleCurated < curatedPool.length) {
       setVisibleCurated(c => c + PAGE_SIZE);
     }
-    // Load more AI posts
     if (aiHasMore && !aiLoading) {
       void fetchMore(activeCategory ?? undefined);
     }
-  }, [visibleCurated, curatedPool.length, aiHasMore, aiLoading, fetchMore, activeCategory]);
+  }, [visibleCurated, curatedPool.length, aiHasMore, aiLoading, fetchMore, activeCategory, resetAI]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -377,6 +390,31 @@ export default function FeedTab({ onOpenLocationPrompt }: Props) {
       <AnimatePresence>
         {viewerOpen && (
           <StoryViewer stories={stories} initialIndex={viewerIndex} onClose={() => setViewerOpen(false)} />
+        )}
+      </AnimatePresence>
+
+      {/* Scroll-to-top refresh button — appears when scrolled down 300px+ */}
+      <AnimatePresence>
+        {scrollY > 300 && (
+          <motion.button
+            initial={{ opacity: 0, y: 8, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.9 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => {
+              scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+              // Actual refresh happens in handleScroll when scrollTop hits 0
+            }}
+            className="fixed left-1/2 z-30 flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold text-white shadow-xl"
+            style={{
+              top: 68,
+              transform: 'translateX(-50%)',
+              background: 'linear-gradient(135deg, #8b5cf6, #ec4899)',
+              boxShadow: '0 4px 16px rgba(139,92,246,0.45)',
+            }}
+          >
+            <RefreshCw size={13} /> Refresh feed
+          </motion.button>
         )}
       </AnimatePresence>
     </>

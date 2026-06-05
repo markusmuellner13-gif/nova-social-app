@@ -8,6 +8,7 @@ import { formatCount, timeAgo } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
 import CommentsSheet from './CommentsSheet';
 import UserProfileCard from './UserProfileCard';
+import Avatar from './Avatar';
 
 interface Props {
   post: PostType;
@@ -84,9 +85,9 @@ export default function Post({ post, showHint = false }: Props) {
             whileTap={{ scale: 0.95 }}
             onClick={() => setShowProfile(true)}
             className="flex-shrink-0 w-10 h-10 rounded-xl overflow-hidden border"
-            style={{ borderColor: '#2a2a38' }}
+            style={{ borderColor: '#2a2a38', background: '#13131a' }}
           >
-            <img src={post.user.avatar} alt={post.user.username} className="w-full h-full object-cover" loading="lazy" />
+            <Avatar src={post.user.avatar} name={post.user.name} size={40} className="w-full h-full rounded-xl" />
           </motion.button>
 
           <motion.button className="flex-1 min-w-0 text-left" whileTap={{ scale: 0.98 }} onClick={() => setShowProfile(true)}>
