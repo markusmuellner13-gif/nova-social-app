@@ -3,19 +3,20 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Post, LocationState } from '@/types';
 
-const CACHE_TTL_MS   = 10 * 60 * 1000; // 10 minutes
-const CACHE_PREFIX   = 'nova_feed_v2_';
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const CACHE_PREFIX = 'nova_feed_v3_';
 
 interface CacheEntry { posts: Post[]; timestamp: number; offset: number }
 
-function cacheKey(city: string): string {
-  return CACHE_PREFIX + city.toLowerCase().replace(/\s+/g, '_');
+function cacheKey(city: string, category?: string): string {
+  const cat = category || 'all';
+  return CACHE_PREFIX + city.toLowerCase().replace(/\s+/g, '_') + '_' + cat;
 }
 
-function readCache(city: string): CacheEntry | null {
+function readCache(city: string, category?: string): CacheEntry | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = sessionStorage.getItem(cacheKey(city));
+    const raw = sessionStorage.getItem(cacheKey(city, category));
     if (!raw) return null;
     const entry: CacheEntry = JSON.parse(raw);
     if (Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
@@ -25,10 +26,10 @@ function readCache(city: string): CacheEntry | null {
   }
 }
 
-function writeCache(city: string, posts: Post[], offset: number): void {
+function writeCache(city: string, posts: Post[], offset: number, category?: string): void {
   if (typeof window === 'undefined') return;
   try {
-    sessionStorage.setItem(cacheKey(city), JSON.stringify({ posts, timestamp: Date.now(), offset }));
+    sessionStorage.setItem(cacheKey(city, category), JSON.stringify({ posts, timestamp: Date.now(), offset }));
   } catch { /* storage full */ }
 }
 
@@ -41,7 +42,7 @@ interface UseAIFeedReturn {
 }
 
 export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
-  const [posts, setPosts]   = useState<Post[]>([]);
+  const [posts, setPosts]     = useState<Post[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const offsetRef    = useRef(0);
@@ -59,10 +60,8 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       setPosts(cached.posts);
       offsetRef.current = cached.offset;
       setHasMore(true);
-      // Stale-while-revalidate: refresh silently in background
       void fetchInBackground(city, location);
     } else {
-      // No cache — do a visible fetch
       setPosts([]);
       offsetRef.current = 0;
       setHasMore(true);
@@ -135,7 +134,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
           const existingIds = new Set(prev.map(p => p.id));
           const fresh = newPosts.filter(p => !existingIds.has(p.id));
           const merged = [...prev, ...fresh];
-          writeCache(city, merged, merged.length);
+          writeCache(city, merged, merged.length, category);
           return merged;
         });
         offsetRef.current += newPosts.length;

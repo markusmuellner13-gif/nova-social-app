@@ -63,8 +63,21 @@ export default function Post({ post, showHint = false }: Props) {
   return (
     <>
       <article className="w-full" style={{ borderBottom: '1px solid #1e1e2a' }}>
+        {/* Sponsored banner */}
+        {post.isSponsored && (
+          <div className="flex items-center gap-2 px-4 pt-3 pb-1">
+            <div
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold"
+              style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.35)' }}
+            >
+              ✨ PARTNER
+            </div>
+            <span className="text-xs font-medium" style={{ color: '#555566' }}>Sponsored</span>
+          </div>
+        )}
+
         {/* Event banner */}
-        {post.isEvent && (
+        {post.isEvent && !post.isSponsored && (
           <div className="flex items-center gap-2 px-4 pt-3 pb-1">
             <div
               className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold"
@@ -239,7 +252,20 @@ export default function Post({ post, showHint = false }: Props) {
             </div>
           )}
 
-          {post.isEvent && post.eventUrl && (
+          {post.isSponsored && post.eventUrl && (
+            <a
+              href={post.eventUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-bold mt-2 mb-3"
+              style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)', color: '#0a0a0f' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ExternalLink size={14} />
+              {post.sponsoredCta ?? 'Visit Website'}
+            </a>
+          )}
+          {post.isEvent && !post.isSponsored && post.eventUrl && (
             <a
               href={post.eventUrl}
               target="_blank"
@@ -252,10 +278,10 @@ export default function Post({ post, showHint = false }: Props) {
               Get Tickets &amp; Info
             </a>
           )}
-          {post.isEvent && !post.eventUrl && (
+          {post.isEvent && !post.isSponsored && !post.eventUrl && (
             <div style={{ height: 12 }} />
           )}
-          {!post.isEvent && <div style={{ height: 12 }} />}
+          {!post.isEvent && !post.isSponsored && <div style={{ height: 12 }} />}
         </div>
       </article>
 

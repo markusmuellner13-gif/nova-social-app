@@ -26,21 +26,23 @@ const CATEGORY_EMOJI: Record<Category, string> = {
   music:     '🎵',
   pets:      '🐾',
   lifestyle: '🌟',
-  events:    '🎉',
+  events:      '🎉',
+  sightseeing: '🏛️',
 };
 
 const CATEGORY_COLOR: Record<Category, string> = {
-  travel:    '#3b82f6',
-  food:      '#f97316',
-  fashion:   '#ec4899',
-  sports:    '#22c55e',
-  art:       '#a855f7',
-  tech:      '#06b6d4',
-  fitness:   '#ef4444',
-  music:     '#8b5cf6',
-  pets:      '#f59e0b',
-  lifestyle: '#10b981',
-  events:    '#f43f5e',
+  travel:      '#3b82f6',
+  food:        '#f97316',
+  fashion:     '#ec4899',
+  sports:      '#22c55e',
+  art:         '#a855f7',
+  tech:        '#06b6d4',
+  fitness:     '#ef4444',
+  music:       '#8b5cf6',
+  pets:        '#f59e0b',
+  lifestyle:   '#10b981',
+  events:      '#f43f5e',
+  sightseeing: '#14b8a6',
 };
 
 interface Props {

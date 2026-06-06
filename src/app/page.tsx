@@ -25,6 +25,8 @@ function AppShell() {
 
   const { location, permission, requestLocation } = useLocation();
 
+  const handleSplashComplete = useCallback(() => setSplashDone(true), []);
+
   // Sync geolocation into context
   useEffect(() => {
     if (location && location.enabled) {
@@ -62,7 +64,7 @@ function AppShell() {
   }, []);
 
   if (!splashDone) {
-    return <SplashScreen onComplete={() => setSplashDone(true)} />;
+    return <SplashScreen onComplete={handleSplashComplete} />;
   }
 
   if (!state.hasOnboarded) {

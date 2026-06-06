@@ -301,8 +301,116 @@ export const MOCK_NOTIFICATIONS: NovaNotification[] = [
 
 export const DEFAULT_PREFERENCES = {
   travel: 80, food: 60, fashion: 40, sports: 50, art: 70,
-  tech: 65, fitness: 55, music: 75, pets: 85, lifestyle: 60, events: 90,
+  tech: 65, fitness: 55, music: 75, pets: 85, lifestyle: 60, events: 90, sightseeing: 65,
 };
+
+// ── Partner / Sponsored Posts ────────────────────────────────────────────────
+function sponsorUser(name: string, domain: string, bio: string): User {
+  return {
+    id: `sp_${domain.replace(/\./g, '_')}`,
+    name,
+    username: domain.split('.')[0].toLowerCase(),
+    avatar: `https://logo.clearbit.com/${domain}`,
+    bio,
+    followers: Math.floor(Math.random() * 50000) + 5000,
+    following: 0,
+    posts: Math.floor(Math.random() * 500) + 50,
+    verified: true,
+  };
+}
+
+export const SPONSORED_POSTS: Post[] = [
+  {
+    id: 'sp1',
+    user: sponsorUser('La Maison Restaurant', 'lamaisonrestaurant.com', '🍽️ Award-winning European cuisine · Private dining available'),
+    image: 'https://picsum.photos/seed/restaurant_fine1/600/750',
+    caption: 'An unforgettable dining experience in the heart of the city. Chef Marco\'s tasting menu takes you on a 7-course journey through seasonal European flavours — paired with our sommelier-curated wine selection. Private events, birthday dinners, and corporate bookings welcome.\n\n📍 City Centre · Reservations recommended\n🕐 Tue–Sun, 12:00–23:00\n💳 From €45 per person',
+    likes: 4800, comments: 112, category: 'lifestyle',
+    hashtags: ['#finedining', '#restaurant', '#nova', '#sponsored', '#foodie'],
+    timestamp: Date.now() - 3600000,
+    location: { name: 'City Centre', lat: 0, lng: 0 },
+    saved: false, liked: false,
+    isSponsored: true,
+    eventUrl: 'https://lamaisonrestaurant.com',
+    sponsoredCta: 'Reserve a Table',
+    organizer: 'La Maison Restaurant',
+  },
+  {
+    id: 'sp2',
+    user: sponsorUser('SkyBar Rooftop', 'skybarrooftop.com', '🍸 City\'s best rooftop cocktail bar · Sunset views guaranteed'),
+    image: 'https://picsum.photos/seed/rooftopbar1/600/750',
+    caption: 'Craft cocktails with a view from 30 floors up. SkyBar is the city\'s most Instagrammed rooftop — sunset hour from 18:00–20:00 with 2-for-1 cocktails every Thursday and Friday. Walk-ins welcome, table reservations via our website.\n\n📍 30th Floor, Central Tower · Open daily\n🕐 16:00–01:00 · Happy Hour: 18:00–20:00\n🍸 Cocktails from €12',
+    likes: 7200, comments: 234, category: 'lifestyle',
+    hashtags: ['#rooftopbar', '#cocktails', '#skybar', '#nova', '#sponsored'],
+    timestamp: Date.now() - 7200000,
+    location: { name: 'Central Tower', lat: 0, lng: 0 },
+    saved: false, liked: false,
+    isSponsored: true,
+    eventUrl: 'https://skybarrooftop.com',
+    sponsoredCta: 'Book a Table',
+    organizer: 'SkyBar Rooftop',
+  },
+  {
+    id: 'sp3',
+    user: sponsorUser('DriveNow Rental', 'drivenow-rental.com', '🚗 Premium car rental · No hidden fees · Free cancellation'),
+    image: 'https://picsum.photos/seed/carrental_premium/600/750',
+    caption: 'Explore the region on your own terms. DriveNow offers a fleet of 200+ vehicles — from compact city cars to luxury SUVs and convertibles. Unlimited mileage, full insurance, and 24/7 roadside assistance included. Pick up at the airport or any city location.\n\n📍 Airport + 3 city locations · Open 06:00–23:00\n🚗 From €29/day · No deposit required\n✅ Free cancellation up to 24h before',
+    likes: 2900, comments: 87, category: 'travel',
+    hashtags: ['#carrental', '#roadtrip', '#travel', '#nova', '#sponsored'],
+    timestamp: Date.now() - 10800000,
+    location: { name: 'Airport & City', lat: 0, lng: 0 },
+    saved: false, liked: false,
+    isSponsored: true,
+    eventUrl: 'https://drivenow-rental.com',
+    sponsoredCta: 'Book Your Car',
+    organizer: 'DriveNow Rental',
+  },
+  {
+    id: 'sp4',
+    user: sponsorUser('Urban Suites Hotel', 'urbansuites.com', '🏨 Boutique hotel in the city centre · Rooftop pool · Free WiFi'),
+    image: 'https://picsum.photos/seed/boutiquehotel1/600/750',
+    caption: 'Wake up in the middle of everything. Urban Suites puts you steps from the city\'s best restaurants, galleries, and transport links. Rooftop pool, in-room spa treatments, complimentary breakfast, and a concierge team that knows every hidden gem in the city.\n\n📍 City Centre · 2-min walk from metro\n🏊 Rooftop pool May–Oct · Free cancellation\n🛏️ Rooms from €89/night · Breakfast included',
+    likes: 5600, comments: 148, category: 'travel',
+    hashtags: ['#hotel', '#boutique', '#citybreak', '#nova', '#sponsored'],
+    timestamp: Date.now() - 14400000,
+    location: { name: 'City Centre', lat: 0, lng: 0 },
+    saved: false, liked: false,
+    isSponsored: true,
+    eventUrl: 'https://urbansuites.com',
+    sponsoredCta: 'Check Availability',
+    organizer: 'Urban Suites Hotel',
+  },
+  {
+    id: 'sp5',
+    user: sponsorUser('Nova Tours', 'novatours.co', '🗺️ Local guided tours · Small groups · Expert guides'),
+    image: 'https://picsum.photos/seed/guidedtour1/600/750',
+    caption: 'See the city like a local. Nova Tours runs small-group walking tours (max 12 people) led by passionate local guides who know every story behind every street corner. Morning old-town walks, evening food tours, and private custom experiences available daily.\n\n📍 Meets at Central Square · Daily departures\n🕐 09:00 & 18:00 · Duration 2.5h\n🎟️ From €18/person · Kids under 12 free',
+    likes: 3400, comments: 95, category: 'sightseeing',
+    hashtags: ['#tour', '#sightseeing', '#localguide', '#nova', '#sponsored'],
+    timestamp: Date.now() - 18000000,
+    location: { name: 'Central Square', lat: 0, lng: 0 },
+    saved: false, liked: false,
+    isSponsored: true,
+    eventUrl: 'https://novatours.co',
+    sponsoredCta: 'Book a Tour',
+    organizer: 'Nova Tours',
+  },
+  {
+    id: 'sp6',
+    user: sponsorUser('Zen Wellness Spa', 'zenwellness-spa.com', '💆 Urban wellness retreat · Massage · Sauna · Float therapy'),
+    image: 'https://picsum.photos/seed/spa_wellness1/600/750',
+    caption: 'The city\'s most complete urban wellness escape. Zen Wellness offers traditional Thai massage, hot stone therapy, infrared sauna, and Europe\'s largest urban float tank. Day passes available — no booking required. Gift vouchers perfect for any occasion.\n\n📍 Near City Park · Free parking\n🕐 Mon–Sun 09:00–21:00\n💆 Massages from €55 · Day pass €35',
+    likes: 4100, comments: 118, category: 'lifestyle',
+    hashtags: ['#spa', '#wellness', '#selfcare', '#nova', '#sponsored'],
+    timestamp: Date.now() - 21600000,
+    location: { name: 'Near City Park', lat: 0, lng: 0 },
+    saved: false, liked: false,
+    isSponsored: true,
+    eventUrl: 'https://zenwellness-spa.com',
+    sponsoredCta: 'Book a Session',
+    organizer: 'Zen Wellness Spa',
+  },
+];
 
 const COMMENT_TEMPLATES: Record<string, string[]> = {
   travel: ['This is on my bucket list!! 😍', 'I went here last year — absolutely breathtaking ❤️', 'The photos don\'t even do it justice', 'Saving this for my next trip 🙏', 'Stunning. The world is wild.', 'How do I get tickets?', 'You\'re living my dream 😭', '🌅🌅🌅 unreal'],
@@ -316,6 +424,8 @@ const COMMENT_TEMPLATES: Record<string, string[]> = {
   pets: ['I am DECEASED 😭😭 so cute', 'This made my entire day', 'Animals are pure serotonin', 'I\'m buying tickets right now', 'Rescue pets are the best pets ❤️', 'The audacity of this absolute unit', 'Crying actual tears of joy', 'BEST EVENT EVER'],
   lifestyle: ['This is the life I\'m building 🙏', 'So peaceful and beautiful', 'Protect your peace always', 'The vibe is immaculate', 'Slow living is the only living', 'This is what it\'s all about', 'Goals for my whole life honestly', 'You\'re doing it perfectly'],
   events: ['ALREADY GOT MY TICKETS 🎟️', 'This is going to be legendary', 'SEE YOU THERE!!!', 'The lineup is unreal', 'I\'ve been waiting for this', 'This is THE one.', 'Nothing beats being there live', 'Screaming internally 😭'],
+  sightseeing: ['On my bucket list! 🗺️', 'I visited last year — absolutely stunning', 'How long did you spend here?', 'The history here is unreal', 'Worth every minute of the journey', 'This should be a UNESCO site if it isn\'t already', 'Photography goals 📸', 'Adding to my itinerary right now'],
+  sponsored: ['Just booked! Can\'t wait 🙌', 'Been here twice already — highly recommend', 'The service is outstanding', 'Great value for what you get', 'Already sent this to my travel group', 'This is exactly what I was looking for', 'Booking right now!', 'Is it as good in person? Looks incredible'],
 };
 
 export function getPostComments(post: Post): Comment[] {

@@ -21,7 +21,8 @@ export type Category =
   | 'music'
   | 'pets'
   | 'lifestyle'
-  | 'events';
+  | 'events'
+  | 'sightseeing';
 
 export interface PostLocation {
   name: string;
@@ -44,11 +45,14 @@ export interface Post {
   liked: boolean;
   isEvent?: boolean;
   isAIGenerated?: boolean;
+  isSponsored?: boolean;
   eventDate?: string;
+  eventDateRaw?: string;
   eventVenue?: string;
   eventUrl?: string;
   organizer?: string;
   price?: string;
+  sponsoredCta?: string;
 }
 
 export interface Comment {
@@ -78,6 +82,7 @@ export interface UserPreferences {
   pets: number;
   lifestyle: number;
   events: number;
+  sightseeing: number;
 }
 
 export interface NovaNotification {

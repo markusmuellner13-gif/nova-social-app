@@ -52,6 +52,7 @@ const AI_NOTIFICATION_MESSAGES: Record<string, string[]> = {
   pets: ['🐾 You\'re going to love this new pet post', 'The cutest animal post just dropped for you'],
   lifestyle: ['🌟 New lifestyle content curated for your vibe', 'Fresh slow-living post just dropped for you'],
   events: ['🎉 Hot event near you — don\'t miss out', 'New event just announced matching your interests'],
+  sightseeing: ['🏛️ Unmissable landmark experience near you', 'New sightseeing post that fits your travel taste'],
 };
 
 export function generateAINotification(
