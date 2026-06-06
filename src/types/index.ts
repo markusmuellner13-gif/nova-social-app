@@ -119,12 +119,22 @@ export interface LocationState {
   enabled: boolean;
 }
 
+export interface Reminder {
+  postId: string;
+  title: string;
+  venue: string;
+  eventDateRaw: string;
+  minutesBefore: number; // 1440 = 1 day before, 60 = 1 hour before
+}
+
 export interface AppPersistedState {
   preferences: UserPreferences;
   likedPosts: string[];
   savedPosts: string[];
   followedUsers: string[];
   seenStories: string[];
+  goingPosts: string[];
+  reminders: Reminder[];
   hasOnboarded: boolean;
   aiProfile: AIProfile;
   notifications: NovaNotification[];

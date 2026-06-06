@@ -2,10 +2,11 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Compass, Sparkles, RefreshCw, ChevronDown, MapPin, Loader2 } from 'lucide-react';
+import { Compass, Sparkles, RefreshCw, ChevronDown, MapPin, Loader2, SlidersHorizontal } from 'lucide-react';
 import { MOCK_POSTS, MOCK_STORIES, CURRENT_USER, SPONSORED_POSTS } from '@/data/mockData';
 import { Category, Post } from '@/types';
-import { sortFeed } from '@/lib/aiEngine';
+import { sortFeed, getTopCategories } from '@/lib/aiEngine';
+import { parseMinPrice } from './Post';
 import { useApp } from '@/context/AppContext';
 import { useAIFeed } from '@/hooks/useAIFeed';
 import PostComponent from './Post';
@@ -40,6 +41,40 @@ const DISCOVER_CHIPS: { emoji: string; label: string; cat: Category }[] = [
 
 const PAGE_SIZE = 10;
 
+type DateFilter  = 'all' | 'today' | 'weekend' | 'week' | 'month';
+type PriceFilter = 'all' | 'free' | 'u20' | 'u50';
+
+const DATE_FILTERS:  { id: DateFilter;  label: string }[] = [
+  { id: 'all', label: 'All dates' }, { id: 'today', label: 'Today' },
+  { id: 'weekend', label: 'Weekend' }, { id: 'week', label: 'This week' },
+  { id: 'month', label: 'This month' },
+];
+const PRICE_FILTERS: { id: PriceFilter; label: string }[] = [
+  { id: 'all', label: 'Any price' }, { id: 'free', label: 'Free' },
+  { id: 'u20', label: 'Under €20' }, { id: 'u50', label: 'Under €50' },
+];
+
+function applyEventFilters(posts: Post[], dateFilter: DateFilter, priceFilter: PriceFilter): Post[] {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return posts.filter(p => {
+    if (dateFilter !== 'all' && p.eventDateRaw) {
+      const ev = new Date(p.eventDateRaw);
+      const days = Math.floor((ev.getTime() - today.getTime()) / 86_400_000);
+      if (dateFilter === 'today'   && days !== 0) return false;
+      if (dateFilter === 'weekend' && (days > 7 || (ev.getDay() !== 0 && ev.getDay() !== 6))) return false;
+      if (dateFilter === 'week'    && days > 7)  return false;
+      if (dateFilter === 'month'   && days > 30) return false;
+    }
+    if (priceFilter !== 'all' && p.price) {
+      const min = parseMinPrice(p.price);
+      if (priceFilter === 'free' && min > 0)  return false;
+      if (priceFilter === 'u20'  && min >= 20) return false;
+      if (priceFilter === 'u50'  && min >= 50) return false;
+    }
+    return true;
+  });
+}
+
 function adIndex(i: number): boolean {
   return i >= AD_START && (i - AD_START) % AD_EVERY === 0;
 }
@@ -66,6 +101,9 @@ export default function FeedTab({ onOpenLocationPrompt }: Props) {
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('discover');
   const [activeChipCategory, setActiveChipCategory] = useState<Category | null>(null);
   const [sortMode, setSortMode] = useState<'for_you' | 'recent'>('for_you');
+  const [dateFilter,  setDateFilter]  = useState<DateFilter>('all');
+  const [priceFilter, setPriceFilter] = useState<PriceFilter>('all');
+  const [showFilters, setShowFilters] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [visibleCurated, setVisibleCurated] = useState(PAGE_SIZE);
@@ -112,6 +150,33 @@ export default function FeedTab({ onOpenLocationPrompt }: Props) {
     const t = setTimeout(() => setShowNewBanner(true), 30_000);
     return () => clearTimeout(t);
   }, [activeMainTab]);
+
+  // Feature 4 — Push notification when background refresh adds matching events
+  const prevAiIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (aiPosts.length === 0) return;
+    if (prevAiIdsRef.current.size === 0) {
+      prevAiIdsRef.current = new Set(aiPosts.map(p => p.id));
+      return;
+    }
+    const newPosts = aiPosts.filter(p => !prevAiIdsRef.current.has(p.id));
+    prevAiIdsRef.current = new Set(aiPosts.map(p => p.id));
+    if (newPosts.length === 0) return;
+
+    const topCats = getTopCategories(preferences, aiProfile, 3);
+    const match = newPosts.find(p => topCats.includes(p.category as Category));
+    if (!match) return;
+
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        new Notification('Nova — New event just listed ✨', {
+          body: match.caption.split('\n')[0].slice(0, 80),
+          icon: '/favicon.ico',
+        });
+      } catch { /* permission revoked */ }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiPosts.length]);
 
   const stories = useMemo(
     () => MOCK_STORIES.map(s => ({ ...s, seen: isStorySeen(s.id) })),
@@ -177,7 +242,11 @@ export default function FeedTab({ onOpenLocationPrompt }: Props) {
       : sortByEventDate(aiPosts);
 
     // Interleave: show AI posts first (they're location-aware), then mock
-    const combined = [...aiSorted, ...combinedRaw];
+    const combinedAll = [...aiSorted, ...combinedRaw];
+    // Feature 3 — apply date+price filters on event tabs
+    const combined = (activeMainTab === 'events' || activeMainTab === 'sport')
+      ? applyEventFilters(combinedAll, dateFilter, priceFilter)
+      : combinedAll;
 
     combined.forEach((post, i) => {
       if (adIndex(i)) items.push({ type: 'ad', index: adIdx++ });
@@ -185,7 +254,7 @@ export default function FeedTab({ onOpenLocationPrompt }: Props) {
     });
 
     return items;
-  }, [activeMainTab, aiPosts, injectedPosts, curatedPool, visibleCurated, mockTabPool]);
+  }, [activeMainTab, aiPosts, injectedPosts, curatedPool, visibleCurated, mockTabPool, dateFilter, priceFilter]);
 
   // Infinite scroll + scroll-position tracking
   const handleScroll = useCallback(() => {
@@ -261,6 +330,9 @@ export default function FeedTab({ onOpenLocationPrompt }: Props) {
     setVisibleCurated(PAGE_SIZE);
     setInjectedPosts([]);
     setShowNewBanner(false);
+    setDateFilter('all');
+    setPriceFilter('all');
+    setShowFilters(false);
     scrollRef.current?.scrollTo({ top: 0 });
   }
 
@@ -414,6 +486,94 @@ export default function FeedTab({ onOpenLocationPrompt }: Props) {
                   </motion.button>
                 );
               })}
+            </div>
+          )}
+
+          {/* Feature 3 — Date + Price filters for Events and Sport tabs */}
+          {(activeMainTab === 'events' || activeMainTab === 'sport') && (
+            <div>
+              {/* Filter toggle bar */}
+              <div className="flex items-center gap-2 px-4 py-2.5" style={{ borderBottom: '1px solid #1a1a24' }}>
+                <motion.button
+                  whileTap={{ scale: 0.94 }}
+                  onClick={() => setShowFilters(f => !f)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold"
+                  style={{
+                    background: (dateFilter !== 'all' || priceFilter !== 'all') ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : '#1a1a24',
+                    color: (dateFilter !== 'all' || priceFilter !== 'all') ? 'white' : '#888899',
+                    border: '1px solid #2a2a38',
+                  }}
+                >
+                  <SlidersHorizontal size={12} />
+                  Filters
+                  {(dateFilter !== 'all' || priceFilter !== 'all') && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                  )}
+                </motion.button>
+
+                {/* Active filter chips */}
+                {dateFilter !== 'all' && (
+                  <motion.button whileTap={{ scale: 0.94 }} onClick={() => setDateFilter('all')}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                    style={{ background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.35)' }}>
+                    {DATE_FILTERS.find(f => f.id === dateFilter)?.label} ✕
+                  </motion.button>
+                )}
+                {priceFilter !== 'all' && (
+                  <motion.button whileTap={{ scale: 0.94 }} onClick={() => setPriceFilter('all')}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                    style={{ background: 'rgba(236,72,153,0.2)', color: '#f9a8d4', border: '1px solid rgba(236,72,153,0.35)' }}>
+                    {PRICE_FILTERS.find(f => f.id === priceFilter)?.label} ✕
+                  </motion.button>
+                )}
+              </div>
+
+              {/* Expanded filter panel */}
+              <AnimatePresence>
+                {showFilters && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden"
+                    style={{ borderBottom: '1px solid #1a1a24', background: '#0d0d16' }}
+                  >
+                    <div className="px-4 pt-3 pb-2">
+                      <p className="text-xs font-bold mb-2" style={{ color: '#666677' }}>DATE</p>
+                      <div className="flex gap-2 flex-wrap mb-3">
+                        {DATE_FILTERS.map(f => (
+                          <motion.button key={f.id} whileTap={{ scale: 0.93 }}
+                            onClick={() => setDateFilter(f.id)}
+                            className="px-3 py-1.5 rounded-full text-xs font-semibold"
+                            style={{
+                              background: dateFilter === f.id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : '#1a1a24',
+                              color: dateFilter === f.id ? 'white' : '#888899',
+                              border: dateFilter === f.id ? 'none' : '1px solid #2a2a38',
+                            }}>
+                            {f.label}
+                          </motion.button>
+                        ))}
+                      </div>
+                      <p className="text-xs font-bold mb-2" style={{ color: '#666677' }}>PRICE</p>
+                      <div className="flex gap-2 flex-wrap">
+                        {PRICE_FILTERS.map(f => (
+                          <motion.button key={f.id} whileTap={{ scale: 0.93 }}
+                            onClick={() => setPriceFilter(f.id)}
+                            className="px-3 py-1.5 rounded-full text-xs font-semibold"
+                            style={{
+                              background: priceFilter === f.id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : '#1a1a24',
+                              color: priceFilter === f.id ? 'white' : '#888899',
+                              border: priceFilter === f.id ? 'none' : '1px solid #2a2a38',
+                            }}>
+                            {f.label}
+                          </motion.button>
+                        ))}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           )}
 

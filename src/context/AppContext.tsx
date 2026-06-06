@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useReducer, useEffect, useRef, useCallback } from 'react';
-import { AppPersistedState, UserPreferences, Category, NovaNotification, Post, Toast, AIProfile, LocationState } from '@/types';
+import { AppPersistedState, UserPreferences, Category, NovaNotification, Post, Toast, AIProfile, LocationState, Reminder } from '@/types';
 import { DEFAULT_PREFERENCES, MOCK_NOTIFICATIONS, MOCK_POSTS } from '@/data/mockData';
 import { learnFromInteraction, generateAINotification, getTopCategories } from '@/lib/aiEngine';
 
@@ -82,6 +82,8 @@ function migrateState(raw: Partial<AppPersistedState>): AppPersistedState {
     savedPosts: raw.savedPosts ?? DEFAULT_STATE.savedPosts,
     followedUsers: raw.followedUsers ?? [],
     seenStories: raw.seenStories ?? ['s3', 's5', 's8'],
+    goingPosts: raw.goingPosts ?? [],
+    reminders: raw.reminders ?? [],
     hasOnboarded: raw.hasOnboarded ?? false,
     aiProfile: {
       categoryEngagement: raw.aiProfile?.categoryEngagement ?? {},
@@ -105,6 +107,8 @@ const DEFAULT_STATE: AppPersistedState = {
   savedPosts: MOCK_POSTS.filter(p => p.saved).map(p => p.id),
   followedUsers: [],
   seenStories: ['s3', 's5', 's8'],
+  goingPosts: [],
+  reminders: [],
   hasOnboarded: false,
   aiProfile: { categoryEngagement: {}, totalInteractions: 0, lastActive: Date.now(), sessionCount: 1 },
   notifications: MOCK_NOTIFICATIONS,
@@ -122,6 +126,9 @@ type Action =
   | { type: 'SAVE_POST'; id: string; category: Category }
   | { type: 'FOLLOW_USER'; id: string }
   | { type: 'MARK_STORY_SEEN'; id: string }
+  | { type: 'MARK_GOING'; id: string }
+  | { type: 'ADD_REMINDER'; reminder: Reminder }
+  | { type: 'REMOVE_REMINDER'; postId: string }
   | { type: 'SET_PREFERENCES'; prefs: UserPreferences }
   | { type: 'ADD_NOTIFICATION'; notif: NovaNotification }
   | { type: 'MARK_ALL_READ' }
@@ -167,6 +174,19 @@ function reducer(state: AppPersistedState, action: Action): AppPersistedState {
     case 'MARK_STORY_SEEN':
       if (state.seenStories.includes(action.id)) return state;
       return { ...state, seenStories: [...state.seenStories, action.id] };
+
+    case 'MARK_GOING': {
+      const has = state.goingPosts.includes(action.id);
+      return { ...state, goingPosts: has ? state.goingPosts.filter(id => id !== action.id) : [...state.goingPosts, action.id] };
+    }
+
+    case 'ADD_REMINDER': {
+      const filtered = state.reminders.filter(r => r.postId !== action.reminder.postId);
+      return { ...state, reminders: [...filtered, action.reminder] };
+    }
+
+    case 'REMOVE_REMINDER':
+      return { ...state, reminders: state.reminders.filter(r => r.postId !== action.postId) };
 
     case 'SET_PREFERENCES':
       return { ...state, preferences: action.prefs };
@@ -214,11 +234,16 @@ interface AppContextValue {
   isSaved: (id: string) => boolean;
   isFollowed: (id: string) => boolean;
   isStorySeen: (id: string) => boolean;
+  isGoing: (id: string) => boolean;
+  hasReminder: (id: string) => boolean;
   unreadCount: number;
   likePost: (id: string, category: Category) => void;
   savePost: (id: string, category: Category) => void;
   followUser: (id: string) => void;
   markStorySeen: (id: string) => void;
+  goPost: (id: string) => void;
+  addReminder: (reminder: Reminder) => void;
+  removeReminder: (postId: string) => void;
   setPreferences: (prefs: UserPreferences) => void;
   markAllRead: () => void;
   markRead: (id: string) => void;
@@ -318,6 +343,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.preferences, state.aiProfile]);
 
+  // Reminder scheduler — re-runs whenever reminders change
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const now = Date.now();
+
+    for (const r of state.reminders) {
+      if (!r.eventDateRaw) continue;
+      // Parse event date at noon (time-of-day unknown, noon is safe)
+      const eventMs = new Date(`${r.eventDateRaw}T12:00:00`).getTime();
+      const fireMs  = eventMs - r.minutesBefore * 60 * 1000;
+      const msUntil = fireMs - now;
+      // Only schedule if within the next 7 days and still in the future
+      if (msUntil <= 0 || msUntil > 7 * 24 * 60 * 60 * 1000) continue;
+
+      const t = setTimeout(() => {
+        if (Notification.permission === 'granted') {
+          try {
+            new Notification('Nova — Upcoming event 🎉', {
+              body: `${r.title}${r.venue ? ` at ${r.venue}` : ''} — ${r.minutesBefore === 1440 ? 'tomorrow!' : 'in 1 hour!'}`,
+              icon: '/favicon.ico',
+              badge: '/favicon.ico',
+            });
+          } catch { /* permission revoked mid-session */ }
+        }
+      }, msUntil);
+      timers.push(t);
+    }
+
+    return () => timers.forEach(clearTimeout);
+  }, [state.reminders]);
+
   // Toast helpers
   const addToast = useCallback((message: string, type: Toast['type'] = 'success', icon?: string) => {
     const id = `t_${Date.now()}`;
@@ -337,11 +394,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     isSaved: (id) => state.savedPosts.includes(id),
     isFollowed: (id) => state.followedUsers.includes(id),
     isStorySeen: (id) => state.seenStories.includes(id),
+    isGoing: (id) => state.goingPosts.includes(id),
+    hasReminder: (id) => state.reminders.some(r => r.postId === id),
     unreadCount,
     likePost: (id, category) => dispatch({ type: 'LIKE_POST', id, category }),
     savePost: (id, category) => dispatch({ type: 'SAVE_POST', id, category }),
     followUser: (id) => dispatch({ type: 'FOLLOW_USER', id }),
     markStorySeen: (id) => dispatch({ type: 'MARK_STORY_SEEN', id }),
+    goPost: (id) => dispatch({ type: 'MARK_GOING', id }),
+    addReminder: (reminder) => dispatch({ type: 'ADD_REMINDER', reminder }),
+    removeReminder: (postId) => dispatch({ type: 'REMOVE_REMINDER', postId }),
     setPreferences: (prefs) => dispatch({ type: 'SET_PREFERENCES', prefs }),
     markAllRead: () => dispatch({ type: 'MARK_ALL_READ' }),
     markRead: (id) => dispatch({ type: 'MARK_READ', id }),
