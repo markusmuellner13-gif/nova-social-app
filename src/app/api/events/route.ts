@@ -510,48 +510,64 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ── EVENTS / SPORTS / MUSIC: Ticketmaster (real events + real images) ─────
-  if (tmKey && category !== 'sightseeing') {
-    try {
-      const { events: tmEvents, totalPages } = await fetchTicketmaster(lat, lng, category, page, radius, tmKey);
+  // ── EVENTS / SPORTS / MUSIC: Ticketmaster + Claude running in parallel ──────
+  // Claude starts immediately alongside Ticketmaster so TM latency doesn't eat
+  // into Claude's budget. We use TM result if it has events, else Claude.
+  if (category !== 'sightseeing') {
+    // Fire Claude immediately (don't wait for TM to finish first)
+    const claudePromise: Promise<unknown[] | null> = claudeKey
+      ? generateWithClaude(city, country, today, count, page, category, claudeKey).catch(() => null)
+      : Promise.resolve(null);
 
-      if (tmEvents.length > 0) {
-        // Enrich descriptions with Claude (one batch call)
-        const enrichInput = tmEvents.map(ev => ({
-          name: ev.name,
-          venue: ev._embedded?.venues?.[0]?.name ?? city,
-          date: ev.dates?.start?.localDate ?? today,
-          time: ev.dates?.start?.localTime?.slice(0, 5) ?? '',
-          genre: ev.classifications?.[0]?.genre?.name ?? ev.classifications?.[0]?.segment?.name ?? 'Event',
-          price: ev.priceRanges?.[0]
-            ? `${ev.priceRanges[0].currency} ${ev.priceRanges[0].min.toFixed(0)}–${ev.priceRanges[0].max.toFixed(0)}`
-            : 'See website',
-        }));
+    // Attempt Ticketmaster (fast timeout — Claude is already warming up in parallel)
+    if (tmKey) {
+      try {
+        const { events: tmEvents, totalPages } = await fetchTicketmaster(lat, lng, category, page, radius, tmKey);
 
-        const descriptions = claudeKey
-          ? await enrichEventDescriptions(enrichInput, city, claudeKey)
-              .catch(() => tmEvents.map(ev => `${ev.name} at ${ev._embedded?.venues?.[0]?.name ?? city}.`))
-          : tmEvents.map(ev => `${ev.name} at ${ev._embedded?.venues?.[0]?.name ?? city}.`);
+        if (tmEvents.length > 0) {
+          // TM has events — enrich with Claude and return real data
+          const enrichInput = tmEvents.map(ev => ({
+            name: ev.name,
+            venue: ev._embedded?.venues?.[0]?.name ?? city,
+            date: ev.dates?.start?.localDate ?? today,
+            time: ev.dates?.start?.localTime?.slice(0, 5) ?? '',
+            genre: ev.classifications?.[0]?.genre?.name ?? ev.classifications?.[0]?.segment?.name ?? 'Event',
+            price: ev.priceRanges?.[0]
+              ? `${ev.priceRanges[0].currency} ${ev.priceRanges[0].min.toFixed(0)}–${ev.priceRanges[0].max.toFixed(0)}`
+              : 'See website',
+          }));
 
-        const posts = tmEvents.map((ev, i) => tmEventToPost(ev, descriptions[i] ?? '', city, country));
-        const hasMore = page < totalPages - 1;
-        return NextResponse.json({ posts, city, country, source: 'ticketmaster', hasMore, totalPages }, { headers: NO_CACHE });
+          const descriptions = claudeKey
+            ? await enrichEventDescriptions(enrichInput, city, claudeKey)
+                .catch(() => tmEvents.map(ev => `${ev.name} at ${ev._embedded?.venues?.[0]?.name ?? city}.`))
+            : tmEvents.map(ev => `${ev.name} at ${ev._embedded?.venues?.[0]?.name ?? city}.`);
+
+          const posts = tmEvents.map((ev, i) => tmEventToPost(ev, descriptions[i] ?? '', city, country));
+          return NextResponse.json({ posts, city, country, source: 'ticketmaster', hasMore: page < totalPages - 1, totalPages }, { headers: NO_CACHE });
+        }
+        // TM returned 0 → fall through to use claudePromise result
+      } catch (err) {
+        console.error('[events/ticketmaster]', err);
+        // Fall through to use claudePromise result
       }
-      // Ticketmaster returned 0 events → fall through to Claude for this category
-      console.log(`[events] TM returned 0 events for ${category} in ${city}, falling back to Claude`);
-    } catch (err) {
-      console.error('[events/ticketmaster]', err);
-      // Fall through to Claude
+    }
+
+    // No TM results — use the Claude generation that was already running
+    const claudePosts = await claudePromise;
+    if (claudePosts && claudePosts.length > 0) {
+      return NextResponse.json({ posts: claudePosts, city, country, source: 'claude', hasMore: page < 10 }, { headers: NO_CACHE });
     }
   }
 
-  // ── CLAUDE GENERATION: covers all categories when other sources fail ───────
-  if (claudeKey) {
+  // ── SIGHTSEEING Claude fallback (if Wikipedia failed above) ───────────────
+  if (category === 'sightseeing' && claudeKey) {
     try {
       const posts = await generateWithClaude(city, country, today, count, page, category, claudeKey);
-      return NextResponse.json({ posts, city, country, source: 'claude', hasMore: page < 10 }, { headers: NO_CACHE });
+      if (posts.length > 0) {
+        return NextResponse.json({ posts, city, country, source: 'claude', hasMore: page < 10 }, { headers: NO_CACHE });
+      }
     } catch (err) {
-      console.error('[events/claude]', err);
+      console.error('[events/sightseeing/claude]', err);
     }
   }
 
