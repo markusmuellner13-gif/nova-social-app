@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// Prevent Vercel CDN from caching — events must always be fresh
+const NO_CACHE = { 'Cache-Control': 'no-store, max-age=0' };
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -170,7 +173,7 @@ async function fetchTicketmaster(
     `&sort=date,asc&locale=*`,
   ].join('');
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(3500) });
   if (!res.ok) throw new Error(`TM ${res.status}`);
   const d = await res.json() as {
     _embedded?: { events?: TmEvent[] };
@@ -452,7 +455,7 @@ export async function GET(request: NextRequest) {
       // Paginate through the 50 results
       const pagePOIs = nearby.slice(page * count, page * count + count);
       if (pagePOIs.length === 0) {
-        return NextResponse.json({ posts: [], city, country, source: 'wikipedia', hasMore: false });
+        return NextResponse.json({ posts: [], city, country, source: 'wikipedia', hasMore: false }, { headers: NO_CACHE });
       }
 
       // Fetch summaries (real descriptions + real Wikipedia photos) in parallel
@@ -500,7 +503,7 @@ export async function GET(request: NextRequest) {
       }));
 
       const hasMore = (page + 1) * count < nearby.length;
-      return NextResponse.json({ posts, city, country, source: 'wikipedia', hasMore });
+      return NextResponse.json({ posts, city, country, source: 'wikipedia', hasMore }, { headers: NO_CACHE });
     } catch (err) {
       console.error('[events/sightseeing/wikipedia]', err);
       // Fall through to Claude for sightseeing
@@ -532,7 +535,7 @@ export async function GET(request: NextRequest) {
 
         const posts = tmEvents.map((ev, i) => tmEventToPost(ev, descriptions[i] ?? '', city, country));
         const hasMore = page < totalPages - 1;
-        return NextResponse.json({ posts, city, country, source: 'ticketmaster', hasMore, totalPages });
+        return NextResponse.json({ posts, city, country, source: 'ticketmaster', hasMore, totalPages }, { headers: NO_CACHE });
       }
       // Ticketmaster returned 0 events → fall through to Claude for this category
       console.log(`[events] TM returned 0 events for ${category} in ${city}, falling back to Claude`);
@@ -546,7 +549,7 @@ export async function GET(request: NextRequest) {
   if (claudeKey) {
     try {
       const posts = await generateWithClaude(city, country, today, count, page, category, claudeKey);
-      return NextResponse.json({ posts, city, country, source: 'claude', hasMore: page < 10 });
+      return NextResponse.json({ posts, city, country, source: 'claude', hasMore: page < 10 }, { headers: NO_CACHE });
     } catch (err) {
       console.error('[events/claude]', err);
     }
@@ -556,5 +559,5 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     posts: hardFallback(city, country, page, count),
     city, country, source: 'fallback', hasMore: page < 5,
-  });
+  }, { headers: NO_CACHE });
 }
