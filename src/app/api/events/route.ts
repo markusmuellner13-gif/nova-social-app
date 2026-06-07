@@ -92,6 +92,20 @@ function picsumUrl(seed: string) {
   return `https://picsum.photos/seed/${seed.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 32)}/600/750`;
 }
 
+// Route rate-limited image sources (Unsplash, Pexels, Wikipedia) through our
+// CDN-cached proxy so repeated views are served from edge cache, not the origin API.
+function proxyImage(url: string): string {
+  if (!url) return url;
+  if (
+    url.includes('images.unsplash.com') ||
+    url.includes('images.pexels.com')   ||
+    url.includes('upload.wikimedia.org')
+  ) {
+    return `/api/image-proxy?url=${encodeURIComponent(url)}`;
+  }
+  return url;
+}
+
 function todayStr() { return new Date().toISOString().split('T')[0]; }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -123,8 +137,8 @@ async function fetchPexelsImage(query: string, key: string): Promise<string | nu
 }
 
 async function getImage(query: string, unsplashKey?: string, pexelsKey?: string, seed?: string): Promise<string> {
-  if (unsplashKey) { const u = await fetchUnsplashImage(query, unsplashKey); if (u) return u; }
-  if (pexelsKey)   { const u = await fetchPexelsImage(query, pexelsKey);     if (u) return u; }
+  if (unsplashKey) { const u = await fetchUnsplashImage(query, unsplashKey); if (u) return proxyImage(u); }
+  if (pexelsKey)   { const u = await fetchPexelsImage(query, pexelsKey);     if (u) return proxyImage(u); }
   return picsumUrl(seed ?? query);
 }
 
@@ -690,9 +704,10 @@ export async function GET(request: NextRequest) {
         const wikiUrl = summary?.content_urls?.desktop?.page
           ?? `https://en.wikipedia.org/wiki/${encodeURIComponent(poi.title.replace(/ /g, '_'))}`;
 
-        // Prefer Wikipedia's own image; fall back to Unsplash/Pexels/picsum
+        // Prefer Wikipedia's own image (proxied); fall back to Unsplash/Pexels/picsum
         const image = wikiImg
-          ?? await getImage(`${poi.title} ${city} landmark`, unsplashKey, pexelsKey, `wiki_${poi.pageid}`);
+          ? proxyImage(wikiImg)
+          : await getImage(`${poi.title} ${city} landmark`, unsplashKey, pexelsKey, `wiki_${poi.pageid}`);
 
         const desc = descriptions[i] ?? poiData[i].extract.slice(0, 300);
 

@@ -3,13 +3,13 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
   appId: 'com.nova.discover',
   appName: 'Nova',
-  webDir: 'out',
-  // Use bundled assets, no live-reload in production
+  // The app is server-rendered (Next.js App Router) so Capacitor loads the
+  // live Vercel URL inside a native WebView rather than bundled static files.
+  webDir: 'public',
   server: {
+    url: 'https://nova-phi-liart.vercel.app',
     androidScheme: 'https',
-    // For local dev with live-reload:
-    // url: 'http://192.168.x.x:3000',
-    // cleartext: true,
+    cleartext: false,
   },
   plugins: {
     SplashScreen: {
