@@ -4,6 +4,11 @@ import React, { createContext, useContext, useReducer, useEffect, useRef, useCal
 import { AppPersistedState, UserPreferences, Category, NovaNotification, Post, Toast, AIProfile, LocationState, Reminder } from '@/types';
 import { DEFAULT_PREFERENCES, MOCK_NOTIFICATIONS, MOCK_POSTS } from '@/data/mockData';
 import { learnFromInteraction, generateAINotification, getTopCategories } from '@/lib/aiEngine';
+import { upsertInteraction, deleteInteraction } from '@/lib/supabase';
+
+// Module-level user ID for Supabase sync — set by AppShell when auth state changes
+let _supabaseUserId: string | null = null;
+export function setSupabaseUser(id: string | null) { _supabaseUserId = id; }
 
 // ── Encryption (AES-GCM via Web Crypto API) ──────────────────────────────────
 
@@ -138,6 +143,7 @@ type Action =
   | { type: 'SET_LOCATION'; location: LocationState }
   | { type: 'SET_LOCATION_ENABLED'; enabled: boolean }
   | { type: 'SET_SEEN_LOCATION_PROMPT' }
+  | { type: 'SYNC_INTERACTIONS'; liked: string[]; saved: string[]; going: string[] }
   | { type: 'CLEAR_ALL_DATA' };
 
 function reducer(state: AppPersistedState, action: Action): AppPersistedState {
@@ -218,6 +224,14 @@ function reducer(state: AppPersistedState, action: Action): AppPersistedState {
     case 'SET_SEEN_LOCATION_PROMPT':
       return { ...state, hasSeenLocationPrompt: true };
 
+    case 'SYNC_INTERACTIONS':
+      return {
+        ...state,
+        likedPosts: Array.from(new Set([...state.likedPosts, ...action.liked])),
+        savedPosts: Array.from(new Set([...state.savedPosts, ...action.saved])),
+        goingPosts: Array.from(new Set([...state.goingPosts, ...action.going])),
+      };
+
     case 'CLEAR_ALL_DATA':
       return { ...DEFAULT_STATE, hasOnboarded: false };
 
@@ -253,6 +267,7 @@ interface AppContextValue {
   setLocationEnabled: (enabled: boolean) => void;
   markSeenLocationPrompt: () => void;
   clearAllData: () => void;
+  syncInteractions: (data: { likedPosts: string[]; savedPosts: string[]; goingPosts: string[] }) => void;
   // Toasts
   toasts: Toast[];
   addToast: (message: string, type?: Toast['type'], icon?: string) => void;
@@ -397,11 +412,35 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     isGoing: (id) => state.goingPosts.includes(id),
     hasReminder: (id) => state.reminders.some(r => r.postId === id),
     unreadCount,
-    likePost: (id, category) => dispatch({ type: 'LIKE_POST', id, category }),
-    savePost: (id, category) => dispatch({ type: 'SAVE_POST', id, category }),
+    likePost: (id, category) => {
+      dispatch({ type: 'LIKE_POST', id, category });
+      if (_supabaseUserId) {
+        (state.likedPosts.includes(id)
+          ? deleteInteraction(_supabaseUserId, id, 'like')
+          : upsertInteraction(_supabaseUserId, id, 'like')
+        ).catch(console.error);
+      }
+    },
+    savePost: (id, category) => {
+      dispatch({ type: 'SAVE_POST', id, category });
+      if (_supabaseUserId) {
+        (state.savedPosts.includes(id)
+          ? deleteInteraction(_supabaseUserId, id, 'save')
+          : upsertInteraction(_supabaseUserId, id, 'save')
+        ).catch(console.error);
+      }
+    },
     followUser: (id) => dispatch({ type: 'FOLLOW_USER', id }),
     markStorySeen: (id) => dispatch({ type: 'MARK_STORY_SEEN', id }),
-    goPost: (id) => dispatch({ type: 'MARK_GOING', id }),
+    goPost: (id) => {
+      dispatch({ type: 'MARK_GOING', id });
+      if (_supabaseUserId) {
+        (state.goingPosts.includes(id)
+          ? deleteInteraction(_supabaseUserId, id, 'going')
+          : upsertInteraction(_supabaseUserId, id, 'going')
+        ).catch(console.error);
+      }
+    },
     addReminder: (reminder) => dispatch({ type: 'ADD_REMINDER', reminder }),
     removeReminder: (postId) => dispatch({ type: 'REMOVE_REMINDER', postId }),
     setPreferences: (prefs) => dispatch({ type: 'SET_PREFERENCES', prefs }),
@@ -412,6 +451,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setLocation: (location) => dispatch({ type: 'SET_LOCATION', location }),
     setLocationEnabled: (enabled) => dispatch({ type: 'SET_LOCATION_ENABLED', enabled }),
     markSeenLocationPrompt: () => dispatch({ type: 'SET_SEEN_LOCATION_PROMPT' }),
+    syncInteractions: (data) => dispatch({ type: 'SYNC_INTERACTIONS', liked: data.likedPosts, saved: data.savedPosts, going: data.goingPosts }),
     clearAllData: () => {
       dispatch({ type: 'CLEAR_ALL_DATA' });
       localStorage.removeItem(DATA_STORE);

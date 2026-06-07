@@ -14,15 +14,17 @@ import CityExplorer from '@/components/CityExplorer';
 import ToastContainer from '@/components/ToastContainer';
 import AIChatBar from '@/components/AIChatBar';
 import LocationPermissionPrompt from '@/components/LocationPermissionPrompt';
-import { useApp } from '@/context/AppContext';
-import { AuthProvider } from '@/context/AuthContext';
+import { useApp, setSupabaseUser } from '@/context/AppContext';
+import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { LanguageProvider } from '@/context/LanguageContext';
+import { getUserInteractions } from '@/lib/supabase';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { useLocation } from '@/hooks/useLocation';
 import { LocationState } from '@/types';
 
 function AppShell() {
-  const { state, setLocation, markSeenLocationPrompt } = useApp();
+  const { state, setLocation, markSeenLocationPrompt, syncInteractions } = useApp();
+  const { user } = useAuth();
   const [splashDone,         setSplashDone]         = useState(false);
   const [activeTab,          setActiveTab]           = useState<Tab>('feed');
   const [showAuth,           setShowAuth]            = useState(false);
@@ -31,6 +33,17 @@ function AppShell() {
 
   const { location, permission, requestLocation } = useLocation();
   const handleSplashComplete = useCallback(() => setSplashDone(true), []);
+
+  // Sync Supabase user ID and load remote interactions when auth state changes
+  useEffect(() => {
+    setSupabaseUser(user?.id ?? null);
+    if (user) {
+      getUserInteractions(user.id).then(data => {
+        if (data) syncInteractions(data);
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   // Sync geolocation into context
   useEffect(() => {

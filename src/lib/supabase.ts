@@ -184,3 +184,34 @@ export async function removeEventFromGroup(groupId: string, postId: string) {
   if (!supabase) return;
   await supabase.from('group_events').delete().eq('group_id', groupId).eq('post_id', postId);
 }
+
+// ── Post interactions (likes, saves, going) ───────────────────────────────────
+
+export type InteractionType = 'like' | 'save' | 'going';
+
+export async function upsertInteraction(userId: string, postId: string, type: InteractionType) {
+  if (!supabase) return;
+  await supabase.from('post_interactions').upsert({
+    user_id: userId, post_id: postId, interaction_type: type,
+  });
+}
+
+export async function deleteInteraction(userId: string, postId: string, type: InteractionType) {
+  if (!supabase) return;
+  await supabase.from('post_interactions').delete()
+    .eq('user_id', userId).eq('post_id', postId).eq('interaction_type', type);
+}
+
+export async function getUserInteractions(userId: string): Promise<{ likedPosts: string[]; savedPosts: string[]; goingPosts: string[] } | null> {
+  if (!supabase) return null;
+  const { data } = await supabase
+    .from('post_interactions')
+    .select('post_id, interaction_type')
+    .eq('user_id', userId);
+  if (!data) return null;
+  return {
+    likedPosts: data.filter((r: { interaction_type: string }) => r.interaction_type === 'like').map((r: { post_id: string }) => r.post_id),
+    savedPosts: data.filter((r: { interaction_type: string }) => r.interaction_type === 'save').map((r: { post_id: string }) => r.post_id),
+    goingPosts: data.filter((r: { interaction_type: string }) => r.interaction_type === 'going').map((r: { post_id: string }) => r.post_id),
+  };
+}

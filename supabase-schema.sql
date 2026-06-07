@@ -123,3 +123,21 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- ── Post Interactions (likes, saves, going) ───────────────────────────────────
+-- Persists per-user interactions across devices when signed in.
+create table if not exists public.post_interactions (
+  user_id          uuid not null references auth.users on delete cascade,
+  post_id          text not null,
+  interaction_type text not null check (interaction_type in ('like', 'save', 'going')),
+  created_at       timestamptz default now(),
+  primary key (user_id, post_id, interaction_type)
+);
+
+alter table public.post_interactions enable row level security;
+
+create policy "Users manage own interactions"
+  on public.post_interactions
+  for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
