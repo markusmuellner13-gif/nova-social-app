@@ -70,6 +70,8 @@ create policy "Users can unfollow"           on follows for delete using (auth.u
 create policy "Group members can view group" on groups for select using (
   exists (select 1 from group_members where group_id = groups.id and user_id = auth.uid())
 );
+-- Allow any signed-in user to look up a group by invite code (needed for joinGroup before membership exists)
+create policy "Authenticated users can discover groups" on groups for select using (auth.uid() is not null);
 create policy "Auth users can create groups" on groups for insert with check (auth.uid() is not null);
 
 -- group_members

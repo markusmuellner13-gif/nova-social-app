@@ -59,7 +59,7 @@ export async function signInGoogle() {
   if (!supabase) throw new Error('Supabase not configured');
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
-    options: { redirectTo: `${window.location.origin}/` },
+    options: { redirectTo: `${window.location.origin}/auth/callback` },
   });
   if (error) throw error;
 }
