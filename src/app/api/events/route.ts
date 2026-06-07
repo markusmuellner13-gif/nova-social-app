@@ -211,7 +211,7 @@ function tmEventToPost(ev: TmEvent, description: string, city: string, country: 
     likes: Math.floor(Math.random() * 20_000) + 1_000,
     comments: Math.floor(Math.random() * 800) + 30,
     category,
-    hashtags: [`#${city.replace(/\s/g, '')}`, `#${genre.toLowerCase().replace(/\s/g, '')}`, '#nova', '#events', '#local'],
+    hashtags: [`#${city.replace(/\s/g, '')}`, ...(genre && genre !== 'undefined' ? [`#${genre.toLowerCase().replace(/\s+/g, '')}`] : []), '#nova', '#events', '#local'],
     timestamp: Date.now() - Math.random() * 7_200_000,
     location: { name: `${venueName}, ${city}`, lat, lng },
     saved: false, liked: false,
