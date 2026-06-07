@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const maxDuration = 60; // Vercel Pro: allow up to 60s for web-search API calls
+
 // Prevent Vercel CDN from caching — events must always be fresh
 const NO_CACHE = { 'Cache-Control': 'no-store, max-age=0' };
 
@@ -283,62 +285,75 @@ Respond ONLY with a JSON array of ${pois.length} strings. No markdown.`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Claude — generate events when Ticketmaster has no coverage
+// Claude + web search — find REAL events when Ticketmaster has no coverage
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CATEGORY_GUIDANCE: Record<string, string> = {
-  events:      'Mix of concerts, club nights, comedy, theatre, festivals, pop-up markets, cultural celebrations.',
-  music:       'Concerts, club nights, jazz evenings, open mic nights, DJ sets, music festivals, live bands.',
-  sports:      'Football/soccer matches, athletics, tennis, basketball, cycling, swimming, martial arts, rugby, fun runs. Include local league matches, not just big international events.',
-  fitness:     'Outdoor yoga, running clubs, cycling events, gym open days, hiking groups, wellness retreats.',
-  food:        'Restaurant weeks, food festivals, pop-up dining, wine tastings, cooking masterclasses, street food markets.',
-  art:         'Gallery openings, museum exhibitions, street art tours, art fairs, photography exhibits, artist talks.',
-  sightseeing: 'Guided landmark tours, museum timed entries, viewpoint access, historic site visits, river cruises, architectural walks.',
-  lifestyle:   'Night markets, open-air cinema, pop-up boutiques, craft fairs, wellness events, community gatherings.',
-  discover:    'Best mix of local events: concerts, food festivals, art openings, sports, markets, fitness classes.',
+  events:      'concerts, club nights, comedy shows, theatre, festivals, pop-up markets, cultural celebrations',
+  music:       'concerts, club nights, jazz evenings, open mic nights, DJ sets, music festivals, live bands',
+  sports:      'football/soccer matches, athletics, tennis, basketball, cycling, martial arts, fun runs, local league matches',
+  fitness:     'outdoor yoga, running clubs, cycling events, gym open days, hiking groups, wellness retreats',
+  food:        'restaurant weeks, food festivals, pop-up dining, wine tastings, cooking masterclasses, street food markets',
+  art:         'gallery openings, museum exhibitions, street art tours, art fairs, photography exhibits, artist talks',
+  sightseeing: 'guided landmark tours, museum timed entries, viewpoint access, historic site visits, river cruises, architectural walks',
+  lifestyle:   'night markets, open-air cinema, pop-up boutiques, craft fairs, wellness events, community gatherings',
+  discover:    'concerts, food festivals, art openings, sports matches, markets, fitness classes',
 };
 
-async function generateWithClaude(
+async function searchRealEventsWithClaude(
   city: string, country: string, today: string, count: number, page: number, category: string, apiKey: string,
   unsplashKey?: string, pexelsKey?: string, userLat?: number, userLng?: number
-) {
+): Promise<unknown[]> {
   const guidance = CATEGORY_GUIDANCE[category] ?? CATEGORY_GUIDANCE.events;
 
-  const prompt = `You are a hyper-local event discovery engine for Nova.
+  const prompt = `Search the web for ${count} REAL upcoming events in ${city}, ${country} happening after ${today}.
 
-Generate exactly ${count} unique, realistic upcoming events/experiences in ${city}, ${country}. Today is ${today}.
-Skip the first ${page * count} most obvious results for variety across pages.
+Search for: ${guidance}
 
-Category focus: ${guidance}
+${page > 0 ? `Page ${page + 1}: find different events from earlier results — search for less obvious/mainstream options.` : ''}
 
-For each item return exactly this JSON:
-{
-  "title": "specific event/experience title",
-  "organizer": "real venue or organisation in ${city}",
-  "website": "real organiser domain (e.g. 'ra.co', 'timeout.com', 'seatgeek.com')",
-  "venue": "specific venue name in ${city}",
-  "address": "street address or district",
-  "date": "YYYY-MM-DD (within next 45 days)",
-  "time": "HH:MM",
-  "price": "specific price or Free",
-  "description": "3 vivid sentences: what it is, why unmissable, what it feels like",
-  "url": "realistic ticket/info URL for this specific event",
+For each real event you find, extract the exact details from the real event pages. Return ONLY a valid JSON array of ${count} objects:
+[{
+  "title": "exact real event name",
+  "organizer": "exact organiser or promoter name",
+  "website": "domain of the ticket or event site (e.g. 'eventbrite.com')",
+  "venue": "exact venue name in ${city}",
+  "address": "street address or district in ${city}",
+  "date": "YYYY-MM-DD (within next 60 days)",
+  "time": "HH:MM or empty string if unknown",
+  "price": "exact price from the event page, or Free",
+  "description": "2-3 sentences about this specific real event",
+  "url": "exact URL to buy tickets or find info",
   "category": "${category}",
-  "hashtags": ["#tag1","#tag2","#tag3","#tag4","#tag5"],
-  "imageQuery": "3-word portrait photo search query"
-}
+  "hashtags": ["#tag1","#tag2","#tag3","#tag4"],
+  "imageQuery": "3-word atmospheric photo search query matching this event type"
+}]
 
-Respond ONLY with a valid JSON array. No markdown.`;
+IMPORTANT: Only include events you confirmed exist via web search. Do not invent events.
+Return only the raw JSON array, no markdown, no extra text.`;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 6000, messages: [{ role: 'user', content: prompt }] }),
-    signal: AbortSignal.timeout(9000),
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'web-search-2025-03-05',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 8000,
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 4 }],
+      messages: [{ role: 'user', content: prompt }],
+    }),
+    signal: AbortSignal.timeout(25000),
   });
-  if (!res.ok) throw new Error(`Claude gen ${res.status}`);
-  const d = await res.json() as { content?: { text?: string }[] };
-  const match = (d.content?.[0]?.text ?? '').match(/\[[\s\S]*\]/);
+  if (!res.ok) throw new Error(`Claude web search ${res.status}`);
+
+  const d = await res.json() as { content?: { type: string; text?: string }[] };
+  // Concatenate all text blocks (the final response after tool use)
+  const text = d.content?.filter(b => b.type === 'text').map(b => b.text ?? '').join('') ?? '';
+  const match = text.match(/\[[\s\S]*\]/);
   if (!match) return [];
 
   const events = JSON.parse(match[0]) as Record<string, unknown>[];
@@ -351,7 +366,7 @@ Respond ONLY with a valid JSON array. No markdown.`;
     const venue    = String(ev.venue ?? city);
     const address  = String(ev.address ?? '');
     const date     = String(ev.date ?? '');
-    const time     = String(ev.time ?? '19:00');
+    const time     = String(ev.time ?? '');
     const price    = String(ev.price ?? 'See website');
     const desc     = String(ev.description ?? '');
     const url      = String(ev.url ?? '#');
@@ -360,15 +375,15 @@ Respond ONLY with a valid JSON array. No markdown.`;
     const imgQ     = String(ev.imageQuery ?? `${cat} ${city} event`);
 
     let eventDateStr = 'Date TBC';
-    if (date) { try { eventDateStr = new Date(`${date}T${time}:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); } catch { /* ignore */ } }
+    if (date) { try { eventDateStr = new Date(`${date}T${time || '00:00'}:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); } catch { /* ignore */ } }
 
     const image = await Promise.race([
       getImage(imgQ, unsplashKey, pexelsKey, `${city}_${cat}_${page}_${i}`),
-      new Promise<string>(resolve => setTimeout(() => resolve(picsumUrl(`${city}_${cat}_${page}_${i}`)), 3000)),
+      new Promise<string>(resolve => setTimeout(() => resolve(picsumUrl(`${city}_${cat}_${page}_${i}`)), 4000)),
     ]);
 
     return {
-      id: `cl_${city}_p${page}_${i}_${Date.now()}`,
+      id: `ws_${city}_p${page}_${i}_${Date.now()}`,
       user: makeUser(org, website || undefined),
       image,
       caption: `${desc}\n\n📅 ${eventDateStr}${time ? ` · ${time}` : ''}\n📍 ${venue}${address ? `, ${address}` : ''}\n🎟️ ${price}\n🔗 Tickets & info: ${url}`,
@@ -379,7 +394,7 @@ Respond ONLY with a valid JSON array. No markdown.`;
       timestamp: now - Math.random() * 10_800_000,
       location: { name: `${venue}, ${city}`, lat: userLat ?? 0, lng: userLng ?? 0 },
       saved: false, liked: false,
-      isEvent: true, isAIGenerated: true,
+      isEvent: true, isAIGenerated: false,
       eventDate: `${eventDateStr}${time ? ` · ${time}` : ''}`,
       eventDateRaw: date || null,
       eventVenue: `${venue}${address ? `, ${address}` : ''}`,
@@ -390,35 +405,42 @@ Respond ONLY with a valid JSON array. No markdown.`;
   }));
 }
 
-// Hardcoded last-resort fallback
-function hardFallback(city: string, country: string, page: number, count: number) {
+// Last-resort fallback — only fires when every API fails. Uses real Unsplash/Pexels images.
+async function hardFallback(
+  city: string, country: string, page: number, count: number,
+  unsplashKey?: string, pexelsKey?: string, userLat?: number, userLng?: number
+) {
   const templates = [
-    { title: 'Live Music Night', cat: 'music', domain: 'ra.co', price: '€15' },
-    { title: `${city} Food Festival`, cat: 'food', domain: 'eventbrite.com', price: 'Free' },
-    { title: 'Art Exhibition Opening', cat: 'art', domain: 'artfair.com', price: '€12' },
-    { title: 'City Half Marathon', cat: 'sports', domain: 'active.com', price: '€25' },
-    { title: 'Tech Meetup', cat: 'events', domain: 'meetup.com', price: 'Free' },
-    { title: 'Night Market', cat: 'lifestyle', domain: 'timeout.com', price: 'Free' },
-    { title: 'Open Air Cinema', cat: 'events', domain: 'timeout.com', price: '€12' },
-    { title: 'Sightseeing Tour', cat: 'sightseeing', domain: 'viator.com', price: '€18' },
+    { title: 'Live Music Night', cat: 'music', domain: 'ra.co', price: '€15', imgQ: 'live music concert crowd' },
+    { title: `${city} Food Festival`, cat: 'food', domain: 'eventbrite.com', price: 'Free', imgQ: 'street food festival market' },
+    { title: 'Art Exhibition Opening', cat: 'art', domain: 'artfair.com', price: '€12', imgQ: 'art gallery exhibition opening' },
+    { title: 'City Half Marathon', cat: 'sports', domain: 'active.com', price: '€25', imgQ: 'city marathon running race' },
+    { title: 'Tech Meetup', cat: 'events', domain: 'meetup.com', price: 'Free', imgQ: 'tech meetup networking event' },
+    { title: 'Night Market', cat: 'lifestyle', domain: 'timeout.com', price: 'Free', imgQ: 'night market lights crowd' },
+    { title: 'Open Air Cinema', cat: 'events', domain: 'timeout.com', price: '€12', imgQ: 'outdoor cinema evening' },
+    { title: 'Sightseeing Tour', cat: 'sightseeing', domain: 'viator.com', price: '€18', imgQ: 'city tour landmark architecture' },
   ];
   const now = Date.now();
-  return templates.slice(0, count).map((t, i) => {
+  return Promise.all(templates.slice(0, count).map(async (t, i) => {
     const daysAhead = ((page * count + i) % 30) + 1;
     const eventDate = new Date(now + daysAhead * 86_400_000);
     const rawDate = eventDate.toISOString().split('T')[0];
     const dateStr = eventDate.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+    const image = await Promise.race([
+      getImage(t.imgQ, unsplashKey, pexelsKey, `fb_${city}_${t.cat}_${page}_${i}`),
+      new Promise<string>(resolve => setTimeout(() => resolve(picsumUrl(`fb_${city}_${t.cat}_${page}_${i}`)), 3000)),
+    ]);
     return {
       id: `fb_${city}_p${page}_${i}`,
       user: makeUser(t.title, t.domain),
-      image: picsumUrl(`${city}_${t.cat}_${page}_${i}`),
+      image,
       caption: `Local ${t.title.toLowerCase()} happening in ${city}.\n\n📅 ${dateStr}, 19:00\n📍 ${city}, ${country}\n🎟️ ${t.price}\n🔗 https://${t.domain}`,
       likes: Math.floor(Math.random() * 5_000) + 100,
       comments: Math.floor(Math.random() * 100) + 5,
       category: t.cat,
       hashtags: [`#${city.replace(/\s/g, '')}`, `#${t.cat}`, '#nova', '#local'],
       timestamp: now - Math.random() * 7_200_000,
-      location: { name: `${city}, ${country}`, lat: 0, lng: 0 },
+      location: { name: `${city}, ${country}`, lat: userLat ?? 0, lng: userLng ?? 0 },
       saved: false, liked: false,
       isEvent: true, isAIGenerated: true,
       eventDate: `${dateStr} · 19:00`,
@@ -428,7 +450,7 @@ function hardFallback(city: string, country: string, page: number, count: number
       organizer: t.title,
       price: t.price,
     };
-  });
+  }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -525,7 +547,7 @@ export async function GET(request: NextRequest) {
   if (category !== 'sightseeing') {
     // Fire Claude immediately (don't wait for TM to finish first)
     const claudePromise: Promise<unknown[] | null> = claudeKey
-      ? generateWithClaude(city, country, today, count, page, category, claudeKey, unsplashKey, pexelsKey, lat, lng).catch(() => null)
+      ? searchRealEventsWithClaude(city, country, today, count, page, category, claudeKey, unsplashKey, pexelsKey, lat, lng).catch(() => null)
       : Promise.resolve(null);
 
     // Attempt Ticketmaster (fast timeout — Claude is already warming up in parallel)
@@ -581,7 +603,7 @@ export async function GET(request: NextRequest) {
   // ── SIGHTSEEING Claude fallback (if Wikipedia failed above) ───────────────
   if (category === 'sightseeing' && claudeKey) {
     try {
-      const posts = await generateWithClaude(city, country, today, count, page, category, claudeKey, unsplashKey, pexelsKey, lat, lng);
+      const posts = await searchRealEventsWithClaude(city, country, today, count, page, category, claudeKey, unsplashKey, pexelsKey, lat, lng);
       if (posts.length > 0) {
         return NextResponse.json({ posts, city, country, source: 'claude', hasMore: page < 10 }, { headers: NO_CACHE });
       }
@@ -590,9 +612,10 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ── LAST RESORT: hardcoded templates ─────────────────────────────────────
+  // ── LAST RESORT: hardcoded templates with real images ────────────────────
+  const fallbackPosts = await hardFallback(city, country, page, count, unsplashKey, pexelsKey, lat, lng);
   return NextResponse.json({
-    posts: hardFallback(city, country, page, count),
+    posts: fallbackPosts,
     city, country, source: 'fallback', hasMore: page < 5,
   }, { headers: NO_CACHE });
 }
