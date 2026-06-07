@@ -38,6 +38,17 @@ const DISCOVER_CHIP_CATS: { emoji: string; catKey: string; cat: Category }[] = [
   { emoji: '👗',  catKey: 'fashion',     cat: 'fashion'   },
 ];
 
+const PARTNER_CHIP_CATS: { emoji: string; label: string; cat: Category | null }[] = [
+  { emoji: '✨',  label: 'All',           cat: null          },
+  { emoji: '🍽️', label: 'Dining',        cat: 'food'        },
+  { emoji: '🍸',  label: 'Bars',          cat: 'venues'      },
+  { emoji: '🌊',  label: 'Water Sports',  cat: 'sports'      },
+  { emoji: '🐾',  label: 'Pets',          cat: 'pets'        },
+  { emoji: '💆',  label: 'Wellness',      cat: 'lifestyle'   },
+  { emoji: '🏨',  label: 'Stays',         cat: 'travel'      },
+  { emoji: '🗺️', label: 'Experiences',   cat: 'sightseeing' },
+];
+
 const PAGE_SIZE = 10;
 
 type DateFilter  = 'all' | 'today' | 'weekend' | 'week' | 'month';
@@ -104,6 +115,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
   const [showNewBanner, setShowNewBanner] = useState(false);
   const [injectedPosts, setInjectedPosts] = useState<Post[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [partnerCatFilter, setPartnerCatFilter] = useState<Category | null>(null);
   const [touchStart, setTouchStart] = useState<number | null>(null);
   const [pullDistance, setPullDistance] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -200,8 +212,11 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
     let adIdx = 0;
 
     if (activeMainTab === 'partners') {
-      // Partners: sponsored posts only, ad every 3
-      SPONSORED_POSTS.forEach((post, i) => {
+      // Partners: sponsored posts filtered by category chip, ad every 3
+      const filtered = partnerCatFilter
+        ? SPONSORED_POSTS.filter(p => p.category === partnerCatFilter)
+        : SPONSORED_POSTS;
+      filtered.forEach((post, i) => {
         if (i > 0 && i % 3 === 0) items.push({ type: 'ad', index: adIdx++ });
         items.push({ type: 'post', post });
       });
@@ -248,7 +263,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
     });
 
     return items;
-  }, [activeMainTab, aiPosts, injectedPosts, curatedPool, visibleCurated, mockTabPool, dateFilter, priceFilter]);
+  }, [activeMainTab, aiPosts, injectedPosts, curatedPool, visibleCurated, mockTabPool, dateFilter, priceFilter, partnerCatFilter]);
 
   // Infinite scroll + scroll-position tracking
   const handleScroll = useCallback(() => {
@@ -327,6 +342,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
     setDateFilter('all');
     setPriceFilter('all');
     setShowFilters(false);
+    setPartnerCatFilter(null);
     scrollRef.current?.scrollTo({ top: 0 });
   }
 
@@ -587,8 +603,8 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
               {activeMainTab === 'partners' ? (
                 <>
                   <span style={{ color: '#f59e0b' }}>✨</span>
-                  <span className="text-xs font-bold" style={{ color: '#f59e0b' }}>{t.feed.featuredPartners}</span>
-                  <span className="text-xs ml-auto" style={{ color: '#444455' }}>{t.feed.sponsoredPlacements}</span>
+                  <span className="text-xs font-bold" style={{ color: '#f59e0b' }}>Local Businesses &amp; Partners</span>
+                  <span className="text-xs ml-auto px-2 py-0.5 rounded-full" style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)' }}>Promoted</span>
                 </>
               ) : (
                 <>
@@ -605,6 +621,33 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
                   {!aiLoading && <div className="w-1.5 h-1.5 rounded-full ml-auto" style={{ background: '#22c55e' }} />}
                 </>
               )}
+            </div>
+          )}
+
+          {/* Partner category filter chips */}
+          {activeMainTab === 'partners' && (
+            <div
+              className="flex gap-2 px-4 py-3 overflow-x-auto flex-shrink-0"
+              style={{ borderBottom: '1px solid #1a1a24', background: '#0d0d16' }}
+            >
+              {PARTNER_CHIP_CATS.map(({ emoji, label, cat }) => {
+                const isActive = partnerCatFilter === cat;
+                return (
+                  <motion.button
+                    key={cat ?? 'all'}
+                    whileTap={{ scale: 0.92 }}
+                    onClick={() => setPartnerCatFilter(cat)}
+                    className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold"
+                    style={{
+                      background: isActive ? 'linear-gradient(135deg, #f59e0b, #ec4899)' : '#1a1a24',
+                      color: isActive ? 'white' : '#888899',
+                      border: isActive ? 'none' : '1px solid #2a2a38',
+                    }}
+                  >
+                    {emoji} {label}
+                  </motion.button>
+                );
+              })}
             </div>
           )}
 
@@ -678,11 +721,11 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
                     <Sparkles size={20} style={{ color: '#8b5cf6' }} />
                   </div>
                   <p className="text-sm font-semibold text-white">
-                    {activeMainTab === 'partners' ? t.feed.wantFeatured : t.feed.allCaughtUp}
+                    {activeMainTab === 'partners' ? '🏪 List your business on Nova' : t.feed.allCaughtUp}
                   </p>
                   <p className="text-xs mt-1 text-center" style={{ color: '#555566' }}>
                     {activeMainTab === 'partners'
-                      ? t.feed.contactUs
+                      ? 'Restaurants, bars, rentals & more — reach thousands of users. contact@nova-app.com'
                       : t.feed.pullRefresh}
                   </p>
                 </div>
