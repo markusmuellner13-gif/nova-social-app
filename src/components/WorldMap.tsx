@@ -28,6 +28,9 @@ const CATEGORY_EMOJI: Record<Category, string> = {
   lifestyle: '🌟',
   events:      '🎉',
   sightseeing: '🏛️',
+  shops:       '🛍️',
+  venues:      '🎭',
+  community:   '🤝',
 };
 
 const CATEGORY_COLOR: Record<Category, string> = {
@@ -43,6 +46,9 @@ const CATEGORY_COLOR: Record<Category, string> = {
   lifestyle:   '#10b981',
   events:      '#f43f5e',
   sightseeing: '#14b8a6',
+  shops:       '#d946ef',
+  venues:      '#f43f5e',
+  community:   '#14b8a6',
 };
 
 interface Props {

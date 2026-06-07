@@ -59,6 +59,7 @@ export interface AppTranslations {
     travel: string; food: string; fashion: string; sports: string; art: string;
     tech: string; fitness: string; music: string; pets: string; lifestyle: string;
     events: string; sightseeing: string;
+    shops: string; venues: string; community: string;
   };
 }
 
@@ -124,6 +125,7 @@ const en: AppTranslations = {
     travel: 'Travel', food: 'Food', fashion: 'Fashion', sports: 'Sports', art: 'Art',
     tech: 'Tech', fitness: 'Fitness', music: 'Music', pets: 'Pets', lifestyle: 'Lifestyle',
     events: 'Events', sightseeing: 'Sightseeing',
+    shops: 'Shops', venues: 'Venues', community: 'Community',
   },
 };
 
@@ -189,6 +191,7 @@ const de: AppTranslations = {
     travel: 'Reisen', food: 'Essen', fashion: 'Mode', sports: 'Sport', art: 'Kunst',
     tech: 'Tech', fitness: 'Fitness', music: 'Musik', pets: 'Haustiere', lifestyle: 'Lifestyle',
     events: 'Events', sightseeing: 'Sehenswürdigkeiten',
+    shops: 'Läden', venues: 'Veranstaltungsorte', community: 'Community',
   },
 };
 
@@ -254,6 +257,7 @@ const es: AppTranslations = {
     travel: 'Viajes', food: 'Comida', fashion: 'Moda', sports: 'Deportes', art: 'Arte',
     tech: 'Tecnología', fitness: 'Fitness', music: 'Música', pets: 'Mascotas', lifestyle: 'Estilo de vida',
     events: 'Eventos', sightseeing: 'Turismo',
+    shops: 'Tiendas', venues: 'Locales', community: 'Comunidad',
   },
 };
 
@@ -319,6 +323,7 @@ const fr: AppTranslations = {
     travel: 'Voyages', food: 'Cuisine', fashion: 'Mode', sports: 'Sports', art: 'Art',
     tech: 'Tech', fitness: 'Fitness', music: 'Musique', pets: 'Animaux', lifestyle: 'Lifestyle',
     events: 'Événements', sightseeing: 'Tourisme',
+    shops: 'Boutiques', venues: 'Salles', community: 'Communauté',
   },
 };
 
@@ -384,6 +389,7 @@ const it: AppTranslations = {
     travel: 'Viaggi', food: 'Cibo', fashion: 'Moda', sports: 'Sport', art: 'Arte',
     tech: 'Tecnologia', fitness: 'Fitness', music: 'Musica', pets: 'Animali', lifestyle: 'Lifestyle',
     events: 'Eventi', sightseeing: 'Turismo',
+    shops: 'Negozi', venues: 'Location', community: 'Comunità',
   },
 };
 
@@ -449,6 +455,7 @@ const pt: AppTranslations = {
     travel: 'Viagens', food: 'Comida', fashion: 'Moda', sports: 'Esportes', art: 'Arte',
     tech: 'Tecnologia', fitness: 'Fitness', music: 'Música', pets: 'Pets', lifestyle: 'Estilo de vida',
     events: 'Eventos', sightseeing: 'Turismo',
+    shops: 'Lojas', venues: 'Locais', community: 'Comunidade',
   },
 };
 
@@ -514,6 +521,7 @@ const nl: AppTranslations = {
     travel: 'Reizen', food: 'Eten', fashion: 'Mode', sports: 'Sport', art: 'Kunst',
     tech: 'Tech', fitness: 'Fitness', music: 'Muziek', pets: 'Huisdieren', lifestyle: 'Lifestyle',
     events: 'Evenementen', sightseeing: 'Bezienswaardigheden',
+    shops: 'Winkels', venues: 'Locaties', community: 'Gemeenschap',
   },
 };
 
@@ -579,6 +587,7 @@ const ja: AppTranslations = {
     travel: '旅行', food: 'グルメ', fashion: 'ファッション', sports: 'スポーツ', art: 'アート',
     tech: 'テック', fitness: 'フィットネス', music: '音楽', pets: 'ペット', lifestyle: 'ライフスタイル',
     events: 'イベント', sightseeing: '観光',
+    shops: 'ショップ', venues: '会場', community: 'コミュニティ',
   },
 };
 

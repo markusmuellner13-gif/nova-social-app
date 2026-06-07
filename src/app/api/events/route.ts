@@ -2,12 +2,29 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const maxDuration = 60; // Vercel Pro: allow up to 60s for web-search API calls
 
-// Prevent Vercel CDN from caching — events must always be fresh
-const NO_CACHE = { 'Cache-Control': 'no-store, max-age=0' };
+// Cache headers — events/community: no cache (live data); places: 1h client / 24h CDN
+const NO_CACHE    = { 'Cache-Control': 'no-store, max-age=0' };
+const PLACE_CACHE = { 'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600' };
+const WIKI_CACHE  = { 'Cache-Control': 'public, max-age=3600, s-maxage=3600' };
+
+// Valid categories — prevents injection via query params
+const VALID_CATEGORIES = new Set([
+  'events','music','sports','art','fitness','food',
+  'sightseeing','lifestyle','discover','shops','venues','community',
+]);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
+
+interface OverpassElement {
+  type: 'node' | 'way' | 'relation';
+  id: number;
+  lat?: number;
+  lon?: number;
+  center?: { lat: number; lon: number };
+  tags?: Record<string, string>;
+}
 
 interface TmImage { url: string; width: number; height: number; ratio?: string; fallback?: boolean }
 interface TmEvent {
@@ -144,6 +161,114 @@ async function fetchWikipediaSummary(title: string): Promise<WikiSummary | null>
     if (!res.ok) return null;
     return await res.json() as WikiSummary;
   } catch { return null; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Overpass (OpenStreetMap) — real shops, venues, community spaces (no API key)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const OVERPASS_QUERIES: Record<string, string> = {
+  shops: `[out:json][timeout:12];(
+    node["shop"~"second_hand|vintage|charity|antiques|thrift"](around:RADIUS,LAT,LNG);
+    way["shop"~"second_hand|vintage|charity|antiques|thrift"](around:RADIUS,LAT,LNG);
+    node["shop"="clothes"]["second_hand"="yes"](around:RADIUS,LAT,LNG);
+    node["shop"="books"]["second_hand"="yes"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+  venues: `[out:json][timeout:12];(
+    node["amenity"~"theatre|concert_hall|nightclub|music_venue|arts_centre|cinema|events_venue"](around:RADIUS,LAT,LNG);
+    way["amenity"~"theatre|concert_hall|nightclub|music_venue|arts_centre|cinema|events_venue"](around:RADIUS,LAT,LNG);
+    node["leisure"~"stadium|sports_hall|arena"](around:RADIUS,LAT,LNG);
+    way["leisure"~"stadium|sports_hall|arena"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+};
+
+async function fetchOverpassPlaces(lat: number, lng: number, category: string, radiusM: number): Promise<OverpassElement[]> {
+  const query = (OVERPASS_QUERIES[category] ?? OVERPASS_QUERIES.venues)
+    .replace(/LAT/g, String(lat))
+    .replace(/LNG/g, String(lng))
+    .replace(/RADIUS/g, String(Math.min(radiusM, 10000)));
+
+  const res = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `data=${encodeURIComponent(query)}`,
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) throw new Error(`Overpass ${res.status}`);
+  const d = await res.json() as { elements?: OverpassElement[] };
+  return (d.elements ?? []).filter(e => e.tags?.name);
+}
+
+async function enrichPlaceDescriptions(
+  places: { name: string; type: string; address: string }[],
+  city: string, category: string, apiKey: string
+): Promise<string[]> {
+  const catLabel = category === 'shops' ? 'second-hand/vintage shop' : 'venue or entertainment space';
+  const prompt = `Write a punchy 2-sentence description for each of these ${places.length} real ${catLabel}s in ${city} for a social discovery app.
+Sentence 1: what makes this place special and worth visiting.
+Sentence 2: what the vibe and experience feels like.
+
+${places.map((p, i) => `${i + 1}. "${p.name}" (${p.type}) at ${p.address || city}`).join('\n')}
+
+Respond ONLY with a JSON array of ${places.length} strings. No markdown.`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1500, messages: [{ role: 'user', content: prompt }] }),
+    signal: AbortSignal.timeout(7000),
+  });
+  if (!res.ok) throw new Error(`Claude place desc ${res.status}`);
+  const d = await res.json() as { content?: { text?: string }[] };
+  const match = (d.content?.[0]?.text ?? '').match(/\[[\s\S]*\]/);
+  if (!match) return places.map(p => `${p.name} is a great local ${catLabel} in ${city}.`);
+  return JSON.parse(match[0]) as string[];
+}
+
+async function overpassToPost(
+  el: OverpassElement, city: string, category: string, description: string,
+  unsplashKey?: string, pexelsKey?: string
+) {
+  const elLat = el.lat ?? el.center?.lat ?? 0;
+  const elLng = el.lon ?? el.center?.lon ?? 0;
+  const tags  = el.tags ?? {};
+  const name  = tags.name ?? 'Unknown';
+  const addr  = [tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join(' ');
+  const website = tags.website ?? tags['contact:website'] ?? tags['contact:url'] ?? '';
+  const hours   = tags.opening_hours ?? '';
+  const domain  = website ? (() => { try { return new URL(website).hostname; } catch { return ''; } })() : '';
+
+  const IMG_QUERIES: Record<string, string> = {
+    shops:  'vintage thrift store interior clothing racks',
+    venues: 'concert hall theatre interior stage lights',
+  };
+  const imgQ = IMG_QUERIES[category] ?? `${category} place interior`;
+
+  const image = await Promise.race([
+    getImage(imgQ, unsplashKey, pexelsKey, `osm_${el.id}`),
+    new Promise<string>(resolve => setTimeout(() => resolve(picsumUrl(`osm_${el.id}`)), 3000)),
+  ]);
+
+  const typeLabel: Record<string, string> = { shops: '🛍️', venues: '🎭', community: '🤝' };
+  const osmUrl = `https://www.openstreetmap.org/${el.type}/${el.id}`;
+
+  return {
+    id: `osm_${el.id}`,
+    user: makeUser(name, domain || undefined),
+    image,
+    caption: `${description}\n\n${typeLabel[category] ?? '📍'} ${name}${addr ? `\n📍 ${addr}, ${city}` : `\n📍 ${city}`}${hours ? `\n⏰ ${hours}` : ''}${website ? `\n🔗 ${website}` : `\n🗺️ ${osmUrl}`}`,
+    likes: Math.floor(Math.random() * 8_000) + 200,
+    comments: Math.floor(Math.random() * 200) + 10,
+    category: category as import('@/types').Category,
+    hashtags: [`#${city.replace(/\s/g, '')}`, `#${category}`, '#nova', '#local', '#discover'],
+    timestamp: Date.now() - Math.random() * 86_400_000,
+    location: { name: `${name}, ${city}`, lat: elLat, lng: elLng },
+    saved: false, liked: false,
+    isEvent: false, isAIGenerated: false,
+    eventUrl: website || osmUrl,
+    organizer: name,
+    price: '',
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -298,6 +423,7 @@ const CATEGORY_GUIDANCE: Record<string, string> = {
   sightseeing: 'guided landmark tours, museum timed entries, viewpoint access, historic site visits, river cruises, architectural walks',
   lifestyle:   'night markets, open-air cinema, pop-up boutiques, craft fairs, wellness events, community gatherings',
   discover:    'concerts, food festivals, art openings, sports matches, markets, fitness classes',
+  community:   'free community meetups, neighbourhood gatherings, swap meets, volunteer events, local markets, cultural festivals, block parties, language exchanges, community clean-ups',
 };
 
 async function searchRealEventsWithClaude(
@@ -459,20 +585,75 @@ async function hardFallback(
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const city     = searchParams.get('city')     || 'Vienna';
-  const country  = searchParams.get('country')  || 'Austria';
-  const lat      = parseFloat(searchParams.get('lat') || '48.2082');
-  const lng      = parseFloat(searchParams.get('lng') || '16.3738');
-  const page     = parseInt(searchParams.get('page')   || '0', 10);
-  const radius   = parseInt(searchParams.get('radius') || '25', 10);
-  const count    = parseInt(searchParams.get('count')  || '8', 10);
-  const category = searchParams.get('category') || 'events';
+
+  // Sanitize all inputs — prevents injection via URL params
+  const city    = (searchParams.get('city')    || 'Vienna').slice(0, 100).replace(/[<>'"\\]/g, '');
+  const country = (searchParams.get('country') || 'Austria').slice(0, 100).replace(/[<>'"\\]/g, '');
+  const lat     = Math.max(-90,  Math.min(90,  parseFloat(searchParams.get('lat') || '48.2082')));
+  const lng     = Math.max(-180, Math.min(180, parseFloat(searchParams.get('lng') || '16.3738')));
+  const page    = Math.max(0, Math.min(20, parseInt(searchParams.get('page')   || '0',  10)));
+  const radius  = Math.max(1, Math.min(200, parseInt(searchParams.get('radius') || '25', 10)));
+  const count   = Math.max(1, Math.min(20, parseInt(searchParams.get('count')  || '8',  10)));
+  const rawCat  = searchParams.get('category') ?? 'events';
+  const category = VALID_CATEGORIES.has(rawCat) ? rawCat : 'events';
 
   const tmKey       = process.env.TICKETMASTER_API_KEY;
   const claudeKey   = process.env.ANTHROPIC_API_KEY;
   const unsplashKey = process.env.UNSPLASH_ACCESS_KEY;
   const pexelsKey   = process.env.PEXELS_API_KEY;
   const today       = todayStr();
+
+  // ── SHOPS / VENUES: OpenStreetMap Overpass (free, no key, real places) ────
+  if (category === 'shops' || category === 'venues') {
+    try {
+      const radiusM = Math.min(radius * 1000, 10000);
+      const elements = await fetchOverpassPlaces(lat, lng, category, radiusM);
+
+      if (elements.length === 0) throw new Error('No OSM places found nearby');
+
+      const pageEls = elements.slice(page * count, page * count + count);
+      if (pageEls.length === 0) {
+        return NextResponse.json({ posts: [], city, country, source: 'osm', hasMore: false }, { headers: PLACE_CACHE });
+      }
+
+      const placeData = pageEls.map(el => ({
+        name: el.tags?.name ?? 'Unknown',
+        type: el.tags?.shop ?? el.tags?.amenity ?? el.tags?.leisure ?? category,
+        address: [el.tags?.['addr:street'], el.tags?.['addr:housenumber']].filter(Boolean).join(' '),
+      }));
+
+      const descriptions = claudeKey
+        ? await enrichPlaceDescriptions(placeData, city, category, claudeKey)
+            .catch(() => placeData.map(p => `${p.name} is a popular ${p.type} in ${city}.`))
+        : placeData.map(p => `${p.name} is a popular ${p.type} in ${city}.`);
+
+      const posts = await Promise.all(
+        pageEls.map((el, i) => overpassToPost(el, city, category, descriptions[i] ?? '', unsplashKey, pexelsKey))
+      );
+
+      const hasMore = (page + 1) * count < elements.length;
+      return NextResponse.json({ posts, city, country, source: 'osm', hasMore }, { headers: PLACE_CACHE });
+    } catch (err) {
+      console.error('[events/overpass]', err);
+      // Fall through to Claude web search as fallback
+    }
+  }
+
+  // ── COMMUNITY: Claude web search for real local gatherings/meetups ─────────
+  if (category === 'community') {
+    if (claudeKey) {
+      try {
+        const posts = await searchRealEventsWithClaude(city, country, today, count, page, 'community', claudeKey, unsplashKey, pexelsKey, lat, lng);
+        if (posts.length > 0) {
+          return NextResponse.json({ posts, city, country, source: 'web_search', hasMore: page < 8 }, { headers: NO_CACHE });
+        }
+      } catch (err) {
+        console.error('[events/community]', err);
+      }
+    }
+    const fallbackPosts = await hardFallback(city, country, page, count, unsplashKey, pexelsKey, lat, lng);
+    return NextResponse.json({ posts: fallbackPosts, city, country, source: 'fallback', hasMore: false }, { headers: NO_CACHE });
+  }
 
   // ── SIGHTSEEING: Wikipedia GeoSearch + Summary API (free, real photos) ────
   if (category === 'sightseeing') {
@@ -486,7 +667,7 @@ export async function GET(request: NextRequest) {
       // Paginate through the 50 results
       const pagePOIs = nearby.slice(page * count, page * count + count);
       if (pagePOIs.length === 0) {
-        return NextResponse.json({ posts: [], city, country, source: 'wikipedia', hasMore: false }, { headers: NO_CACHE });
+        return NextResponse.json({ posts: [], city, country, source: 'wikipedia', hasMore: false }, { headers: WIKI_CACHE });
       }
 
       // Fetch summaries (real descriptions + real Wikipedia photos) in parallel
@@ -534,7 +715,7 @@ export async function GET(request: NextRequest) {
       }));
 
       const hasMore = (page + 1) * count < nearby.length;
-      return NextResponse.json({ posts, city, country, source: 'wikipedia', hasMore }, { headers: NO_CACHE });
+      return NextResponse.json({ posts, city, country, source: 'wikipedia', hasMore }, { headers: WIKI_CACHE });
     } catch (err) {
       console.error('[events/sightseeing/wikipedia]', err);
       // Fall through to Claude for sightseeing

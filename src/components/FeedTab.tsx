@@ -24,15 +24,18 @@ type MainTab = 'discover' | 'events' | 'sightseeing' | 'sport' | 'partners';
 // Labels are set dynamically via t.feed in the render
 
 const DISCOVER_CHIP_CATS: { emoji: string; catKey: string; cat: Category }[] = [
-  { emoji: '✈️', catKey: 'travel',      cat: 'travel'    },
-  { emoji: '🍕', catKey: 'food',        cat: 'food'      },
-  { emoji: '🎨', catKey: 'art',         cat: 'art'       },
-  { emoji: '💪', catKey: 'fitness',     cat: 'fitness'   },
-  { emoji: '🌿', catKey: 'lifestyle',   cat: 'lifestyle' },
-  { emoji: '🎵', catKey: 'music',       cat: 'music'     },
-  { emoji: '💻', catKey: 'tech',        cat: 'tech'      },
-  { emoji: '🐾', catKey: 'pets',        cat: 'pets'      },
-  { emoji: '👗', catKey: 'fashion',     cat: 'fashion'   },
+  { emoji: '✈️',  catKey: 'travel',      cat: 'travel'    },
+  { emoji: '🍕',  catKey: 'food',        cat: 'food'      },
+  { emoji: '🎨',  catKey: 'art',         cat: 'art'       },
+  { emoji: '💪',  catKey: 'fitness',     cat: 'fitness'   },
+  { emoji: '🌿',  catKey: 'lifestyle',   cat: 'lifestyle' },
+  { emoji: '🎵',  catKey: 'music',       cat: 'music'     },
+  { emoji: '🛍️', catKey: 'shops',       cat: 'shops'     },
+  { emoji: '🎭',  catKey: 'venues',      cat: 'venues'    },
+  { emoji: '🤝',  catKey: 'community',   cat: 'community' },
+  { emoji: '💻',  catKey: 'tech',        cat: 'tech'      },
+  { emoji: '🐾',  catKey: 'pets',        cat: 'pets'      },
+  { emoji: '👗',  catKey: 'fashion',     cat: 'fashion'   },
 ];
 
 const PAGE_SIZE = 10;

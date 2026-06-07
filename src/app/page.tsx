@@ -17,6 +17,7 @@ import LocationPermissionPrompt from '@/components/LocationPermissionPrompt';
 import { useApp } from '@/context/AppContext';
 import { AuthProvider } from '@/context/AuthContext';
 import { LanguageProvider } from '@/context/LanguageContext';
+import ErrorBoundary from '@/components/ErrorBoundary';
 import { useLocation } from '@/hooks/useLocation';
 import { LocationState } from '@/types';
 
@@ -73,11 +74,13 @@ function AppShell() {
           <motion.div key={activeTab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: 'easeInOut' }}
             style={{ position: 'absolute', inset: 0 }}>
-            {activeTab === 'feed'          && <FeedTab onOpenLocationPrompt={() => setShowLocationPrompt(true)} onOpenCityExplorer={() => setShowCityExplorer(true)} />}
-            {activeTab === 'explore'       && <SearchTab />}
-            {activeTab === 'groups'        && <GroupsTab onOpenAuth={() => setShowAuth(true)} />}
-            {activeTab === 'notifications' && <NotificationsTab />}
-            {activeTab === 'profile'       && <ProfileTab onOpenAuth={() => setShowAuth(true)} />}
+            <ErrorBoundary>
+              {activeTab === 'feed'          && <FeedTab onOpenLocationPrompt={() => setShowLocationPrompt(true)} onOpenCityExplorer={() => setShowCityExplorer(true)} />}
+              {activeTab === 'explore'       && <SearchTab />}
+              {activeTab === 'groups'        && <GroupsTab onOpenAuth={() => setShowAuth(true)} />}
+              {activeTab === 'notifications' && <NotificationsTab />}
+              {activeTab === 'profile'       && <ProfileTab onOpenAuth={() => setShowAuth(true)} />}
+            </ErrorBoundary>
           </motion.div>
         </AnimatePresence>
       </div>

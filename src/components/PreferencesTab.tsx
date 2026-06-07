@@ -22,6 +22,9 @@ const PREF_CONFIG: { key: Category; emoji: string; label: string; color: string;
   { key: 'music',     emoji: '🎵', label: 'Music & Events',        color: '#8b5cf6', desc: 'Concerts, festivals & artists' },
   { key: 'pets',      emoji: '🐾', label: 'Pets & Animals',        color: '#f59e0b', desc: 'Wildlife, sanctuaries & pets' },
   { key: 'lifestyle', emoji: '🌟', label: 'Lifestyle',             color: '#10b981', desc: 'Mindfulness, home & slow living' },
+  { key: 'shops',     emoji: '🛍️', label: 'Thrift & Vintage',     color: '#d946ef', desc: 'Second-hand, vintage & charity shops' },
+  { key: 'venues',    emoji: '🎭', label: 'Venues & Nightlife',    color: '#f43f5e', desc: 'Theatres, clubs & concert halls' },
+  { key: 'community', emoji: '🤝', label: 'Community',             color: '#14b8a6', desc: 'Meetups, gatherings & local events' },
 ];
 
 const savedPosts = MOCK_POSTS.filter((p) => p.saved);
