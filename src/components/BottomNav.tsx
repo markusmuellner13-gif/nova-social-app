@@ -3,6 +3,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { Compass, Search, Users, Bell, User } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
+import { useLanguage } from '@/context/LanguageContext';
 
 export type Tab = 'feed' | 'explore' | 'groups' | 'notifications' | 'profile';
 
@@ -40,13 +41,14 @@ function NavButton({ id, Icon, label, isActive, onClick, badge }: {
 
 export default function BottomNav({ active, onChange }: Props) {
   const { unreadCount } = useApp();
+  const { t } = useLanguage();
 
   const tabs: { id: Tab; Icon: React.ElementType; label: string; badge?: number; center?: boolean }[] = [
-    { id: 'feed',          Icon: Compass, label: 'Discover'  },
-    { id: 'explore',       Icon: Search,  label: 'Explore'   },
-    { id: 'groups',        Icon: Users,   label: 'Groups',   center: true },
-    { id: 'notifications', Icon: Bell,    label: 'Activity',  badge: unreadCount },
-    { id: 'profile',       Icon: User,    label: 'Profile'   },
+    { id: 'feed',          Icon: Compass, label: t.nav.discover  },
+    { id: 'explore',       Icon: Search,  label: t.nav.explore   },
+    { id: 'groups',        Icon: Users,   label: t.nav.groups,   center: true },
+    { id: 'notifications', Icon: Bell,    label: t.nav.activity,  badge: unreadCount },
+    { id: 'profile',       Icon: User,    label: t.nav.profile   },
   ];
 
   return (
@@ -59,7 +61,7 @@ export default function BottomNav({ active, onChange }: Props) {
               style={{ width: 52, height: 40, background: active === id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : 'linear-gradient(135deg, rgba(139,92,246,0.6), rgba(236,72,153,0.6))', boxShadow: '0 4px 16px rgba(139,92,246,0.35)' }}>
               <Icon size={24} color="white" strokeWidth={active === id ? 2.5 : 1.8} />
             </motion.div>
-            <span className="text-xs font-semibold mt-1" style={{ color: active === id ? '#a78bfa' : '#55556a' }}>Groups</span>
+            <span className="text-xs font-semibold mt-1" style={{ color: active === id ? '#a78bfa' : '#55556a' }}>{t.nav.groups}</span>
           </button>
         ) : (
           <NavButton key={id} id={id} Icon={Icon} label={label} isActive={active === id} onClick={() => onChange(id)} badge={badge} />

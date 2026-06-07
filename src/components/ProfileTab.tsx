@@ -6,69 +6,71 @@ import {
   Settings, Grid3X3, BookmarkIcon, ChevronDown, ChevronUp,
   BadgeCheck, Camera, Sliders, LogOut, Shield, Bell, Trash2,
   MapPin, MapPinOff, Calendar, Users, Star, Trophy, Search,
-  UserPlus, UserCheck, X, LogIn,
+  UserPlus, UserCheck, X, LogIn, Globe, Heart, Check,
 } from 'lucide-react';
 import { CURRENT_USER, MOCK_POSTS, formatCount } from '@/data/mockData';
 import { Category, Post } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
+import { useLanguage } from '@/context/LanguageContext';
+import { LOCALE_NAMES, LOCALE_FLAGS, Locale } from '@/lib/translations';
 import { supabase, searchProfiles, followUser, unfollowUser, SupabaseProfile, signOut } from '@/lib/supabase';
 
-const PREF_CONFIG: { key: Category; emoji: string; label: string; color: string }[] = [
-  { key: 'travel',      emoji: '✈️', label: 'Travel',      color: '#3b82f6' },
-  { key: 'food',        emoji: '🍕', label: 'Food',        color: '#f97316' },
-  { key: 'fashion',     emoji: '👗', label: 'Fashion',     color: '#ec4899' },
-  { key: 'sports',      emoji: '⚽', label: 'Sports',      color: '#22c55e' },
-  { key: 'art',         emoji: '🎨', label: 'Art',         color: '#a855f7' },
-  { key: 'tech',        emoji: '💻', label: 'Tech',        color: '#06b6d4' },
-  { key: 'fitness',     emoji: '💪', label: 'Fitness',     color: '#ef4444' },
-  { key: 'music',       emoji: '🎵', label: 'Music',       color: '#8b5cf6' },
-  { key: 'pets',        emoji: '🐾', label: 'Pets',        color: '#f59e0b' },
-  { key: 'lifestyle',   emoji: '🌟', label: 'Lifestyle',   color: '#10b981' },
-  { key: 'events',      emoji: '🎉', label: 'Events',      color: '#f43f5e' },
-  { key: 'sightseeing', emoji: '🏛️', label: 'Sightseeing', color: '#14b8a6' },
+const ALL_LOCALES = Object.keys(LOCALE_NAMES) as Locale[];
+
+const PREF_CONFIG: { key: Category; emoji: string; labelKey: keyof ReturnType<typeof useLanguage>['t']['categories']; color: string }[] = [
+  { key: 'travel',      emoji: '✈️', labelKey: 'travel',      color: '#3b82f6' },
+  { key: 'food',        emoji: '🍕', labelKey: 'food',        color: '#f97316' },
+  { key: 'fashion',     emoji: '👗', labelKey: 'fashion',     color: '#ec4899' },
+  { key: 'sports',      emoji: '⚽', labelKey: 'sports',      color: '#22c55e' },
+  { key: 'art',         emoji: '🎨', labelKey: 'art',         color: '#a855f7' },
+  { key: 'tech',        emoji: '💻', labelKey: 'tech',        color: '#06b6d4' },
+  { key: 'fitness',     emoji: '💪', labelKey: 'fitness',     color: '#ef4444' },
+  { key: 'music',       emoji: '🎵', labelKey: 'music',       color: '#8b5cf6' },
+  { key: 'pets',        emoji: '🐾', labelKey: 'pets',        color: '#f59e0b' },
+  { key: 'lifestyle',   emoji: '🌟', labelKey: 'lifestyle',   color: '#10b981' },
+  { key: 'events',      emoji: '🎉', labelKey: 'events',      color: '#f43f5e' },
+  { key: 'sightseeing', emoji: '🏛️', labelKey: 'sightseeing', color: '#14b8a6' },
 ];
 
-// ── Badge definitions ────────────────────────────────────────────────────────
-interface BadgeDef { id: string; emoji: string; name: string; desc: string; color: string; check: (s: BadgeStats) => boolean }
+interface BadgeDef { id: string; emoji: string; nameKey: string; desc: string; color: string; check: (s: BadgeStats) => boolean }
 interface BadgeStats { saved: number; going: number; liked: number; reminders: number; followedUsers: number }
 
 const BADGES: BadgeDef[] = [
-  { id: 'explorer',    emoji: '🗺️', name: 'Explorer',      color: '#3b82f6', desc: 'Saved your first event',   check: s => s.saved >= 1 },
-  { id: 'discoverer',  emoji: '🔍', name: 'Discoverer',    color: '#8b5cf6', desc: 'Saved 5 events',           check: s => s.saved >= 5 },
-  { id: 'adventurer',  emoji: '🏔️', name: 'Adventurer',    color: '#f97316', desc: 'Saved 15 events',          check: s => s.saved >= 15 },
-  { id: 'event_goer',  emoji: '🎟️', name: 'Event Goer',    color: '#ec4899', desc: 'Marked going to 1 event',  check: s => s.going >= 1 },
-  { id: 'socialite',   emoji: '🥂', name: 'Socialite',     color: '#f43f5e', desc: 'Going to 5 events',        check: s => s.going >= 5 },
-  { id: 'fan',         emoji: '⭐', name: 'Fan',           color: '#f59e0b', desc: 'Liked 10 posts',           check: s => s.liked >= 10 },
-  { id: 'super_fan',   emoji: '🌟', name: 'Super Fan',     color: '#f59e0b', desc: 'Liked 50 posts',           check: s => s.liked >= 50 },
-  { id: 'planner',     emoji: '📅', name: 'Planner',       color: '#22c55e', desc: 'Set 3 event reminders',    check: s => s.reminders >= 3 },
-  { id: 'connector',   emoji: '🤝', name: 'Connector',     color: '#06b6d4', desc: 'Following 5 people',       check: s => s.followedUsers >= 5 },
+  { id: 'explorer',    emoji: '🗺️', nameKey: 'Explorer',      color: '#3b82f6', desc: 'Saved your first event',   check: s => s.saved >= 1 },
+  { id: 'discoverer',  emoji: '🔍', nameKey: 'Discoverer',    color: '#8b5cf6', desc: 'Saved 5 events',           check: s => s.saved >= 5 },
+  { id: 'adventurer',  emoji: '🏔️', nameKey: 'Adventurer',    color: '#f97316', desc: 'Saved 15 events',          check: s => s.saved >= 15 },
+  { id: 'event_goer',  emoji: '🎟️', nameKey: 'Event Goer',    color: '#ec4899', desc: 'Marked going to 1 event',  check: s => s.going >= 1 },
+  { id: 'socialite',   emoji: '🥂', nameKey: 'Socialite',     color: '#f43f5e', desc: 'Going to 5 events',        check: s => s.going >= 5 },
+  { id: 'fan',         emoji: '⭐', nameKey: 'Fan',           color: '#f59e0b', desc: 'Liked 10 posts',           check: s => s.liked >= 10 },
+  { id: 'super_fan',   emoji: '🌟', nameKey: 'Super Fan',     color: '#f59e0b', desc: 'Liked 50 posts',           check: s => s.liked >= 50 },
+  { id: 'planner',     emoji: '📅', nameKey: 'Planner',       color: '#22c55e', desc: 'Set 3 event reminders',    check: s => s.reminders >= 3 },
+  { id: 'connector',   emoji: '🤝', nameKey: 'Connector',     color: '#06b6d4', desc: 'Following 5 people',       check: s => s.followedUsers >= 5 },
 ];
 
-type ProfileSection = 'posts' | 'saved' | 'calendar' | 'badges';
+type ProfileSection = 'liked' | 'saved' | 'calendar' | 'badges';
 
-interface Props {
-  onOpenAuth: () => void;
-}
+interface Props { onOpenAuth: () => void }
 
 export default function ProfileTab({ onOpenAuth }: Props) {
   const { state, setPreferences, clearAllData, addToast, setLocationEnabled } = useApp();
   const { user, profile, isSupabaseEnabled } = useAuth();
-  const { preferences, savedPosts: savedIds, goingPosts, reminders, createdPosts } = state;
+  const { t, locale, setLocale } = useLanguage();
+  const { preferences, savedPosts: savedIds, goingPosts, reminders } = state;
 
-  const [activeSection, setActiveSection] = useState<ProfileSection>('posts');
+  const [activeSection, setActiveSection] = useState<ProfileSection>('liked');
   const [showPrefs, setShowPrefs]         = useState(false);
   const [showSettings, setShowSettings]   = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showFollowSearch, setShowFollowSearch] = useState(false);
+  const [showLanguagePicker, setShowLanguagePicker] = useState(false);
   const [followQuery, setFollowQuery]     = useState('');
   const [followResults, setFollowResults] = useState<SupabaseProfile[]>([]);
   const [followingIds, setFollowingIds]   = useState<string[]>([]);
 
-  const myPosts   = [...createdPosts, ...MOCK_POSTS.slice(0, 9)];
-  const savedPosts = MOCK_POSTS.filter(p => savedIds.includes(p.id));
+  const likedPosts  = MOCK_POSTS.filter(p => state.likedPosts.includes(p.id));
+  const savedPosts  = MOCK_POSTS.filter(p => savedIds.includes(p.id));
 
-  // All events that are saved with a future date — the calendar
   const upcomingEvents: Post[] = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
     return [...savedPosts, ...state.goingPosts.map(id => MOCK_POSTS.find(p => p.id === id)).filter(Boolean) as Post[]]
@@ -76,7 +78,6 @@ export default function ProfileTab({ onOpenAuth }: Props) {
       .sort((a, b) => (a.eventDateRaw ?? '').localeCompare(b.eventDateRaw ?? ''));
   }, [savedPosts, state.goingPosts]);
 
-  // Badge calculation
   const badgeStats: BadgeStats = useMemo(() => ({
     saved: savedIds.length,
     going: goingPosts.length,
@@ -118,7 +119,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
   function handleClearData() {
     clearAllData();
     setShowClearConfirm(false);
-    addToast('All data cleared', 'info', '🗑️');
+    addToast(t.settings.clearData, 'info', '🗑️');
   }
 
   async function handleSignOut() {
@@ -146,13 +147,21 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25 }}
             className="overflow-hidden flex-shrink-0" style={{ background: '#13131a', borderBottom: '1px solid #1e1e2a' }}>
             {[
-              { icon: Camera, label: 'Change Profile Photo', action: () => addToast('Coming soon', 'info', '📸') },
-              { icon: BadgeCheck, label: 'Request Verification', action: () => addToast('Application submitted ✓', 'success') },
-              { icon: state.locationEnabled ? MapPin : MapPinOff, label: state.locationEnabled ? `Location: ${state.location?.city ?? 'On'}` : 'Enable Location', action: () => { setLocationEnabled(!state.locationEnabled); addToast(state.locationEnabled ? 'Location disabled' : 'Location enabled', 'info', '📍'); } },
-              { icon: Shield, label: 'Privacy & Security', action: () => addToast('Your data is AES-256 encrypted on this device', 'info', '🔒') },
-              { icon: Bell, label: 'Notification Settings', action: () => {} },
-              { icon: Trash2, label: 'Clear All Data', danger: true, action: () => setShowClearConfirm(true) },
-              ...(user ? [{ icon: LogOut, label: 'Sign Out', danger: true, action: handleSignOut }] : []),
+              { icon: Camera, label: t.settings.changePhoto, action: () => addToast(t.settings.comingSoon, 'info', '📸') },
+              { icon: BadgeCheck, label: t.settings.requestVerification, action: () => addToast(t.settings.verificationSent, 'success') },
+              {
+                icon: state.locationEnabled ? MapPin : MapPinOff,
+                label: state.locationEnabled ? `${t.settings.locationOn}: ${state.location?.city ?? 'On'}` : t.settings.locationOff,
+                action: () => {
+                  setLocationEnabled(!state.locationEnabled);
+                  addToast(state.locationEnabled ? t.settings.locationDisabled : t.settings.locationEnabled, 'info', '📍');
+                },
+              },
+              { icon: Shield, label: t.settings.privacy, action: () => addToast(t.settings.privacyMsg, 'info', '🔒') },
+              { icon: Bell, label: t.settings.notificationSettings, action: () => {} },
+              { icon: Globe, label: `${t.settings.language} · ${LOCALE_FLAGS[locale]} ${LOCALE_NAMES[locale]}`, action: () => setShowLanguagePicker(true) },
+              { icon: Trash2, label: t.settings.clearData, danger: true, action: () => setShowClearConfirm(true) },
+              ...(user ? [{ icon: LogOut, label: t.settings.signOut, danger: true, action: handleSignOut }] : []),
             ].map(({ icon: Icon, label, danger, action }) => (
               <button key={label} onClick={action}
                 className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-medium"
@@ -165,6 +174,41 @@ export default function ProfileTab({ onOpenAuth }: Props) {
         )}
       </AnimatePresence>
 
+      {/* Language picker modal */}
+      <AnimatePresence>
+        {showLanguagePicker && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-end justify-center" style={{ background: 'rgba(0,0,0,0.7)' }}>
+            <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+              className="w-full rounded-t-3xl px-5 pb-10 pt-5" style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}>
+              <div className="w-10 h-1 rounded-full mx-auto mb-5" style={{ background: '#3a3a4a' }} />
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-base font-bold text-white">{t.settings.selectLanguage}</p>
+                <button onClick={() => setShowLanguagePicker(false)}>
+                  <X size={20} style={{ color: '#666677' }} />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {ALL_LOCALES.map(l => (
+                  <motion.button key={l} whileTap={{ scale: 0.95 }}
+                    onClick={() => { setLocale(l); setShowLanguagePicker(false); addToast(`${LOCALE_FLAGS[l]} ${LOCALE_NAMES[l]}`, 'success'); }}
+                    className="flex items-center gap-3 px-4 py-3.5 rounded-2xl"
+                    style={{
+                      background: locale === l ? 'rgba(139,92,246,0.15)' : '#13131a',
+                      border: locale === l ? '1px solid rgba(139,92,246,0.4)' : '1px solid #2a2a38',
+                    }}>
+                    <span style={{ fontSize: 22 }}>{LOCALE_FLAGS[l]}</span>
+                    <span className="text-sm font-semibold" style={{ color: locale === l ? '#a78bfa' : '#d0d0e0' }}>{LOCALE_NAMES[l]}</span>
+                    {locale === l && <Check size={14} style={{ color: '#a78bfa', marginLeft: 'auto' }} />}
+                  </motion.button>
+                ))}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Clear confirm */}
       <AnimatePresence>
         {showClearConfirm && (
@@ -172,11 +216,17 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             className="fixed inset-0 z-50 flex items-center justify-center px-6" style={{ background: 'rgba(0,0,0,0.7)' }}>
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }}
               className="w-full max-w-sm rounded-3xl p-6" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
-              <h3 className="text-lg font-bold text-white mb-2">Clear all data?</h3>
-              <p className="text-sm mb-5" style={{ color: '#888899' }}>Deletes preferences, likes, saves, and local data. Cannot be undone.</p>
+              <h3 className="text-lg font-bold text-white mb-2">{t.settings.clearConfirmTitle}</h3>
+              <p className="text-sm mb-5" style={{ color: '#888899' }}>{t.settings.clearConfirmDesc}</p>
               <div className="flex gap-3">
-                <button onClick={() => setShowClearConfirm(false)} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ background: '#1a1a24', color: '#888899', border: '1px solid #2a2a38' }}>Cancel</button>
-                <button onClick={handleClearData} className="flex-1 py-3 rounded-xl text-sm font-semibold" style={{ background: '#ef4444', color: 'white' }}>Clear</button>
+                <button onClick={() => setShowClearConfirm(false)} className="flex-1 py-3 rounded-xl text-sm font-semibold"
+                  style={{ background: '#1a1a24', color: '#888899', border: '1px solid #2a2a38' }}>
+                  {t.settings.clearCancel}
+                </button>
+                <button onClick={handleClearData} className="flex-1 py-3 rounded-xl text-sm font-semibold"
+                  style={{ background: '#ef4444', color: 'white' }}>
+                  {t.settings.clearButton}
+                </button>
               </div>
             </motion.div>
           </motion.div>
@@ -192,7 +242,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
               <div className="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
                 <Search size={16} style={{ color: '#666677' }} />
                 <input type="text" value={followQuery} onChange={e => handleFollowSearch(e.target.value)}
-                  placeholder="Search by username…"
+                  placeholder={t.common.searchUsers}
                   className="flex-1 bg-transparent text-sm text-white outline-none" autoFocus />
               </div>
               <button onClick={() => { setShowFollowSearch(false); setFollowQuery(''); setFollowResults([]); }}>
@@ -215,12 +265,14 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                       background: followingIds.includes(p.id) ? 'rgba(139,92,246,0.15)' : 'linear-gradient(135deg, #8b5cf6, #ec4899)',
                       color: followingIds.includes(p.id) ? '#a78bfa' : 'white',
                     }}>
-                    {followingIds.includes(p.id) ? <><UserCheck size={12} /> Following</> : <><UserPlus size={12} /> Follow</>}
+                    {followingIds.includes(p.id)
+                      ? <><UserCheck size={12} /> {t.common.following}</>
+                      : <><UserPlus size={12} /> {t.common.follow}</>}
                   </motion.button>
                 </div>
               ))}
               {followQuery.length >= 2 && followResults.length === 0 && (
-                <p className="text-center text-sm py-8" style={{ color: '#555566' }}>No users found</p>
+                <p className="text-center text-sm py-8" style={{ color: '#555566' }}>{t.common.noUsersFound}</p>
               )}
             </div>
           </motion.div>
@@ -239,9 +291,9 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             </div>
             <div className="flex gap-4">
               {[
-                { label: 'Events',    value: savedIds.length },
-                { label: 'Going',     value: goingPosts.length },
-                { label: 'Following', value: state.followedUsers.length },
+                { label: t.profile.events,    value: savedIds.length },
+                { label: t.profile.going,     value: goingPosts.length },
+                { label: t.profile.following, value: state.followedUsers.length },
               ].map(({ label, value }) => (
                 <div key={label} className="flex flex-col items-center">
                   <span className="text-lg font-bold text-white">{formatCount(value)}</span>
@@ -263,10 +315,10 @@ export default function ProfileTab({ onOpenAuth }: Props) {
 
           {/* Top interests */}
           <div className="mt-3 flex gap-2 flex-wrap">
-            {topInterests.map(({ emoji, label, key, color }) => (
+            {topInterests.map(({ emoji, labelKey, key, color }) => (
               <span key={key} className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
                 style={{ background: `${color}18`, color, border: `1px solid ${color}33` }}>
-                {emoji} {label}
+                {emoji} {t.categories[labelKey]}
               </span>
             ))}
           </div>
@@ -276,13 +328,13 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             {user ? (
               <>
                 <button className="flex-1 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}>
-                  Edit Profile
+                  {t.profile.editProfile}
                 </button>
                 {supabase && (
                   <button onClick={() => setShowFollowSearch(true)}
                     className="flex-1 py-2 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-1.5"
                     style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}>
-                    <Users size={14} /> Find Friends
+                    <Users size={14} /> {t.profile.findFriends}
                   </button>
                 )}
               </>
@@ -290,7 +342,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
               <button onClick={onOpenAuth}
                 className="flex-1 py-2 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2"
                 style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
-                <LogIn size={14} /> Sign in to sync across devices
+                <LogIn size={14} /> {t.profile.signInSync}
               </button>
             )}
           </div>
@@ -302,10 +354,10 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <Trophy size={16} style={{ color: '#f59e0b' }} />
-                <p className="text-sm font-bold text-white">Badges</p>
+                <p className="text-sm font-bold text-white">{t.profile.badges_title}</p>
               </div>
               <button onClick={() => setActiveSection('badges')} className="text-xs font-semibold" style={{ color: '#a78bfa' }}>
-                See all →
+                {t.profile.seeAll}
               </button>
             </div>
             <div className="flex gap-2 flex-wrap">
@@ -327,7 +379,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             </div>
             {nextBadge && (
               <p className="text-xs mt-2" style={{ color: '#555566' }}>
-                Next: <span style={{ color: '#a78bfa' }}>{nextBadge.name}</span> — {nextBadge.desc}
+                {t.profile.nextBadge} <span style={{ color: '#a78bfa' }}>{nextBadge.nameKey}</span> — {nextBadge.desc}
               </p>
             )}
           </div>
@@ -341,8 +393,8 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                 <Sliders size={14} color="white" />
               </div>
               <div className="text-left">
-                <p className="text-sm font-semibold text-white">Feed Preferences</p>
-                <p className="text-xs" style={{ color: '#888899' }}>Tune your AI algorithm</p>
+                <p className="text-sm font-semibold text-white">{t.profile.feedPreferences}</p>
+                <p className="text-xs" style={{ color: '#888899' }}>{t.profile.feedPreferencesDesc}</p>
               </div>
             </div>
             {showPrefs ? <ChevronUp size={18} style={{ color: '#888899' }} /> : <ChevronDown size={18} style={{ color: '#888899' }} />}
@@ -353,12 +405,12 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                 exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.28 }} className="overflow-hidden">
                 <div className="px-4 pb-4 pt-1" style={{ borderTop: '1px solid #2a2a38' }}>
                   <div className="flex flex-col gap-4">
-                    {PREF_CONFIG.map(({ key, emoji, label, color }) => {
+                    {PREF_CONFIG.map(({ key, emoji, labelKey, color }) => {
                       const val = preferences[key as keyof typeof preferences] ?? 50;
                       return (
                         <div key={key}>
                           <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-sm font-medium text-white">{emoji} {label}</span>
+                            <span className="text-sm font-medium text-white">{emoji} {t.categories[labelKey]}</span>
                             <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: `${color}22`, color }}>{val}%</span>
                           </div>
                           <div className="relative">
@@ -381,20 +433,20 @@ export default function ProfileTab({ onOpenAuth }: Props) {
         {/* Security info */}
         {!user && isSupabaseEnabled && (
           <div className="mx-4 mb-4 px-4 py-3 rounded-2xl" style={{ background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.2)' }}>
-            <p className="text-xs font-semibold mb-1" style={{ color: '#a78bfa' }}>Your data is only on this device</p>
-            <p className="text-xs" style={{ color: '#555566' }}>Sign in to sync likes, saves, and reminders across all your devices.</p>
+            <p className="text-xs font-semibold mb-1" style={{ color: '#a78bfa' }}>{t.profile.dataOnDevice}</p>
+            <p className="text-xs" style={{ color: '#555566' }}>{t.profile.dataSyncHint}</p>
           </div>
         )}
 
         {/* Section tabs */}
         <div className="flex" style={{ borderTop: '1px solid #1e1e2a', borderBottom: '1px solid #1e1e2a' }}>
           {([
-            ['posts',    Grid3X3,       'Posts'],
-            ['saved',    BookmarkIcon,  'Saved'],
-            ['calendar', Calendar,      'Calendar'],
-            ['badges',   Trophy,        'Badges'],
+            ['liked',    Heart,        t.profile.liked    ],
+            ['saved',    BookmarkIcon, t.profile.saved    ],
+            ['calendar', Calendar,     t.profile.calendar ],
+            ['badges',   Trophy,       t.profile.badges   ],
           ] as const).map(([id, Icon, label]) => (
-            <button key={id} onClick={() => setActiveSection(id)}
+            <button key={id} onClick={() => setActiveSection(id as ProfileSection)}
               className="flex-1 flex items-center justify-center gap-1 py-3"
               style={{ color: activeSection === id ? '#a78bfa' : '#555566', borderBottom: activeSection === id ? '2px solid #8b5cf6' : '2px solid transparent' }}>
               <Icon size={17} />
@@ -403,15 +455,27 @@ export default function ProfileTab({ onOpenAuth }: Props) {
           ))}
         </div>
 
-        {/* Posts grid */}
-        {activeSection === 'posts' && (
+        {/* Liked grid */}
+        {activeSection === 'liked' && (
           <div className="grid grid-cols-3 gap-0.5 mt-0.5">
-            {myPosts.map((post, i) => (
+            {likedPosts.map((post, i) => (
               <motion.div key={post.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
                 className="relative overflow-hidden" style={{ aspectRatio: '1', background: '#13131a' }}>
-                <img src={post.image} alt="" className="w-full h-full object-cover" />
+                <img src={post.image} alt="" className="w-full h-full object-cover object-center" />
+                <div className="absolute top-1 right-1">
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
+                    <Star size={10} fill="#f59e0b" style={{ color: '#f59e0b' }} />
+                  </div>
+                </div>
               </motion.div>
             ))}
+            {likedPosts.length === 0 && (
+              <div className="col-span-3 flex flex-col items-center py-16">
+                <Heart size={36} style={{ color: '#2a2a38' }} />
+                <p className="text-sm font-semibold text-white mt-3">{t.profile.noLikedPosts}</p>
+                <p className="text-xs mt-1" style={{ color: '#888899' }}>{t.profile.noLikedHint}</p>
+              </div>
+            )}
           </div>
         )}
 
@@ -421,17 +485,20 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             {savedPosts.map((post, i) => (
               <motion.div key={post.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
                 className="relative overflow-hidden" style={{ aspectRatio: '1', background: '#13131a' }}>
-                <img src={post.image} alt="" className="w-full h-full object-cover" />
+                <img src={post.image} alt="" className="w-full h-full object-cover object-center" />
                 {post.isEvent && (
-                  <div className="absolute bottom-0 left-0 right-0 py-0.5 text-center font-bold" style={{ background: 'rgba(244,63,94,0.85)', color: 'white', fontSize: 9 }}>EVENT</div>
+                  <div className="absolute bottom-0 left-0 right-0 py-0.5 text-center font-bold"
+                    style={{ background: 'rgba(244,63,94,0.85)', color: 'white', fontSize: 9 }}>
+                    {t.common.event}
+                  </div>
                 )}
               </motion.div>
             ))}
             {savedPosts.length === 0 && (
               <div className="col-span-3 flex flex-col items-center py-16">
                 <BookmarkIcon size={36} style={{ color: '#2a2a38' }} />
-                <p className="text-sm font-semibold text-white mt-3">Nothing saved yet</p>
-                <p className="text-xs mt-1" style={{ color: '#888899' }}>Tap 🔖 on any post to save it</p>
+                <p className="text-sm font-semibold text-white mt-3">{t.profile.noSavedPosts}</p>
+                <p className="text-xs mt-1" style={{ color: '#888899' }}>{t.profile.noSavedHint}</p>
               </div>
             )}
           </div>
@@ -443,8 +510,8 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             {upcomingEvents.length === 0 ? (
               <div className="flex flex-col items-center py-16 gap-4">
                 <Calendar size={36} style={{ color: '#2a2a38' }} />
-                <p className="text-sm font-semibold text-white">No upcoming events</p>
-                <p className="text-xs text-center" style={{ color: '#888899' }}>Save events or mark "Going" to see them here</p>
+                <p className="text-sm font-semibold text-white">{t.profile.noUpcomingEvents}</p>
+                <p className="text-xs text-center" style={{ color: '#888899' }}>{t.profile.saveEventsHint}</p>
               </div>
             ) : (
               <div className="flex flex-col gap-4 pb-8">
@@ -453,24 +520,25 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                     ? Math.floor((new Date(event.eventDateRaw).getTime() - Date.now()) / 86_400_000)
                     : null;
                   const isGoing = goingPosts.includes(event.id);
+                  const daysLabel = days === 0 ? t.profile.today : days === 1 ? t.profile.tomorrow : days !== null ? `${days}${t.profile.daysAway}` : null;
                   return (
                     <div key={event.id} className="flex gap-3 p-4 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
                       <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
-                        <img src={event.image} alt="" className="w-full h-full object-cover" />
+                        <img src={event.image} alt="" className="w-full h-full object-cover object-center" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-white truncate">{event.caption.split('\n')[0].slice(0, 50)}</p>
                         <p className="text-xs mt-0.5 truncate" style={{ color: '#888899' }}>{event.eventVenue}</p>
                         <div className="flex items-center gap-2 mt-2">
-                          {days !== null && (
+                          {daysLabel && (
                             <span className="text-xs font-bold px-2 py-0.5 rounded-full"
-                              style={{ background: days <= 1 ? 'rgba(244,63,94,0.2)' : 'rgba(139,92,246,0.15)', color: days <= 1 ? '#f87171' : '#a78bfa' }}>
-                              {days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days}d away`}
+                              style={{ background: days !== null && days <= 1 ? 'rgba(244,63,94,0.2)' : 'rgba(139,92,246,0.15)', color: days !== null && days <= 1 ? '#f87171' : '#a78bfa' }}>
+                              {daysLabel}
                             </span>
                           )}
                           {isGoing && (
                             <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
-                              ✓ Going
+                              {t.profile.going_label}
                             </span>
                           )}
                         </div>
@@ -487,7 +555,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
         {activeSection === 'badges' && (
           <div className="px-4 pt-4 pb-8">
             <p className="text-xs font-bold mb-4" style={{ color: '#666677' }}>
-              EARNED — {earnedBadges.length} / {BADGES.length}
+              {t.profile.badgesEarned} — {earnedBadges.length} / {BADGES.length}
             </p>
             <div className="grid grid-cols-2 gap-3 mb-6">
               {BADGES.map(b => {
@@ -497,10 +565,10 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                     style={{ background: earned ? `${b.color}11` : '#13131a', border: `1px solid ${earned ? b.color + '44' : '#2a2a38'}`, opacity: earned ? 1 : 0.45 }}>
                     <div className="flex items-center gap-2 mb-2">
                       <span style={{ fontSize: 24, filter: earned ? 'none' : 'grayscale(1)' }}>{b.emoji}</span>
-                      <p className="text-sm font-bold" style={{ color: earned ? b.color : '#888899' }}>{b.name}</p>
+                      <p className="text-sm font-bold" style={{ color: earned ? b.color : '#888899' }}>{b.nameKey}</p>
                     </div>
                     <p className="text-xs" style={{ color: '#666677' }}>{b.desc}</p>
-                    {earned && <div className="flex items-center gap-1 mt-2"><Star size={10} fill="#f59e0b" style={{ color: '#f59e0b' }} /><span className="text-xs font-bold" style={{ color: '#f59e0b' }}>Earned</span></div>}
+                    {earned && <div className="flex items-center gap-1 mt-2"><Star size={10} fill="#f59e0b" style={{ color: '#f59e0b' }} /><span className="text-xs font-bold" style={{ color: '#f59e0b' }}>{t.profile.earned}</span></div>}
                   </div>
                 );
               })}

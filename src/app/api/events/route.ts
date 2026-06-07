@@ -113,7 +113,10 @@ function bestTmImage(images: TmImage[]): string {
   if (!images?.length) return picsumUrl('event_placeholder');
   const real = images.filter(i => !i.fallback && i.url);
   const pool = real.length ? real : images;
-  return pool.sort((a, b) => (b.width || 0) - (a.width || 0))[0].url;
+  const PORTRAIT_RATIOS = new Set(['3_2', '2_3', '1_1', '4_3']);
+  const portrait = pool.filter(i => i.ratio && PORTRAIT_RATIOS.has(i.ratio));
+  const source = portrait.length ? portrait : pool;
+  return source.sort((a, b) => (b.width || 0) - (a.width || 0))[0].url;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -296,7 +299,8 @@ const CATEGORY_GUIDANCE: Record<string, string> = {
 };
 
 async function generateWithClaude(
-  city: string, country: string, today: string, count: number, page: number, category: string, apiKey: string
+  city: string, country: string, today: string, count: number, page: number, category: string, apiKey: string,
+  unsplashKey?: string, pexelsKey?: string, userLat?: number, userLng?: number
 ) {
   const guidance = CATEGORY_GUIDANCE[category] ?? CATEGORY_GUIDANCE.events;
 
@@ -340,7 +344,7 @@ Respond ONLY with a valid JSON array. No markdown.`;
   const events = JSON.parse(match[0]) as Record<string, unknown>[];
   const now = Date.now();
 
-  return events.map((ev, i) => {
+  return Promise.all(events.map(async (ev, i) => {
     const title    = String(ev.title ?? `Event ${i + 1}`);
     const org      = String(ev.organizer ?? title);
     const website  = String(ev.website ?? '');
@@ -353,22 +357,27 @@ Respond ONLY with a valid JSON array. No markdown.`;
     const url      = String(ev.url ?? '#');
     const cat      = String(ev.category ?? category);
     const tags     = Array.isArray(ev.hashtags) ? ev.hashtags as string[] : [`#${city}`, '#events'];
-    const imgQ     = String(ev.imageQuery ?? `${cat} ${city}`);
+    const imgQ     = String(ev.imageQuery ?? `${cat} ${city} event`);
 
     let eventDateStr = 'Date TBC';
     if (date) { try { eventDateStr = new Date(`${date}T${time}:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); } catch { /* ignore */ } }
 
+    const image = await Promise.race([
+      getImage(imgQ, unsplashKey, pexelsKey, `${city}_${cat}_${page}_${i}`),
+      new Promise<string>(resolve => setTimeout(() => resolve(picsumUrl(`${city}_${cat}_${page}_${i}`)), 3000)),
+    ]);
+
     return {
       id: `cl_${city}_p${page}_${i}_${Date.now()}`,
       user: makeUser(org, website || undefined),
-      image: picsumUrl(`${city}_${cat}_${page}_${i}`),
+      image,
       caption: `${desc}\n\n📅 ${eventDateStr}${time ? ` · ${time}` : ''}\n📍 ${venue}${address ? `, ${address}` : ''}\n🎟️ ${price}\n🔗 Tickets & info: ${url}`,
       likes: Math.floor(Math.random() * 12_000) + 500,
       comments: Math.floor(Math.random() * 400) + 20,
       category: cat,
       hashtags: tags,
       timestamp: now - Math.random() * 10_800_000,
-      location: { name: `${venue}, ${city}`, lat: 0, lng: 0 },
+      location: { name: `${venue}, ${city}`, lat: userLat ?? 0, lng: userLng ?? 0 },
       saved: false, liked: false,
       isEvent: true, isAIGenerated: true,
       eventDate: `${eventDateStr}${time ? ` · ${time}` : ''}`,
@@ -378,7 +387,7 @@ Respond ONLY with a valid JSON array. No markdown.`;
       organizer: org,
       price,
     };
-  });
+  }));
 }
 
 // Hardcoded last-resort fallback
@@ -516,7 +525,7 @@ export async function GET(request: NextRequest) {
   if (category !== 'sightseeing') {
     // Fire Claude immediately (don't wait for TM to finish first)
     const claudePromise: Promise<unknown[] | null> = claudeKey
-      ? generateWithClaude(city, country, today, count, page, category, claudeKey).catch(() => null)
+      ? generateWithClaude(city, country, today, count, page, category, claudeKey, unsplashKey, pexelsKey, lat, lng).catch(() => null)
       : Promise.resolve(null);
 
     // Attempt Ticketmaster (fast timeout — Claude is already warming up in parallel)
@@ -572,7 +581,7 @@ export async function GET(request: NextRequest) {
   // ── SIGHTSEEING Claude fallback (if Wikipedia failed above) ───────────────
   if (category === 'sightseeing' && claudeKey) {
     try {
-      const posts = await generateWithClaude(city, country, today, count, page, category, claudeKey);
+      const posts = await generateWithClaude(city, country, today, count, page, category, claudeKey, unsplashKey, pexelsKey, lat, lng);
       if (posts.length > 0) {
         return NextResponse.json({ posts, city, country, source: 'claude', hasMore: page < 10 }, { headers: NO_CACHE });
       }

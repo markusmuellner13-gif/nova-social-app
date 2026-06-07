@@ -16,6 +16,7 @@ import AIChatBar from '@/components/AIChatBar';
 import LocationPermissionPrompt from '@/components/LocationPermissionPrompt';
 import { useApp } from '@/context/AppContext';
 import { AuthProvider } from '@/context/AuthContext';
+import { LanguageProvider } from '@/context/LanguageContext';
 import { useLocation } from '@/hooks/useLocation';
 import { LocationState } from '@/types';
 
@@ -113,8 +114,10 @@ function AppShell() {
 
 export default function Page() {
   return (
-    <AuthProvider>
-      <AppShell />
-    </AuthProvider>
+    <LanguageProvider>
+      <AuthProvider>
+        <AppShell />
+      </AuthProvider>
+    </LanguageProvider>
   );
 }

@@ -10,8 +10,9 @@ import { parseMinPrice } from './Post';
 import { useApp } from '@/context/AppContext';
 import { useAIFeed } from '@/hooks/useAIFeed';
 import PostComponent from './Post';
-import { StoryItem, YourStory } from './Story';
+import { StoryItem } from './Story';
 import StoryViewer from './StoryViewer';
+import { useLanguage } from '@/context/LanguageContext';
 import AdSlot from './AdSlot';
 
 // Ad placement: every AD_EVERY posts starting at AD_START
@@ -20,23 +21,18 @@ const AD_EVERY = 5;
 
 type MainTab = 'discover' | 'events' | 'sightseeing' | 'sport' | 'partners';
 
-const MAIN_TABS: { id: MainTab; label: string; emoji: string }[] = [
-  { id: 'events',      label: 'Events',      emoji: '🎉' },
-  { id: 'sightseeing', label: 'Sightseeing', emoji: '🏛️' },
-  { id: 'sport',       label: 'Sport',       emoji: '⚽' },
-  { id: 'partners',    label: 'Partners',    emoji: '✨' },
-];
+// Labels are set dynamically via t.feed in the render
 
-const DISCOVER_CHIPS: { emoji: string; label: string; cat: Category }[] = [
-  { emoji: '✈️', label: 'Travel',   cat: 'travel'    },
-  { emoji: '🍕', label: 'Food',     cat: 'food'      },
-  { emoji: '🎨', label: 'Art',      cat: 'art'       },
-  { emoji: '💪', label: 'Active',   cat: 'fitness'   },
-  { emoji: '🌿', label: 'Life',     cat: 'lifestyle' },
-  { emoji: '🎵', label: 'Music',    cat: 'music'     },
-  { emoji: '💻', label: 'Tech',     cat: 'tech'      },
-  { emoji: '🐾', label: 'Pets',     cat: 'pets'      },
-  { emoji: '👗', label: 'Fashion',  cat: 'fashion'   },
+const DISCOVER_CHIP_CATS: { emoji: string; catKey: string; cat: Category }[] = [
+  { emoji: '✈️', catKey: 'travel',      cat: 'travel'    },
+  { emoji: '🍕', catKey: 'food',        cat: 'food'      },
+  { emoji: '🎨', catKey: 'art',         cat: 'art'       },
+  { emoji: '💪', catKey: 'fitness',     cat: 'fitness'   },
+  { emoji: '🌿', catKey: 'lifestyle',   cat: 'lifestyle' },
+  { emoji: '🎵', catKey: 'music',       cat: 'music'     },
+  { emoji: '💻', catKey: 'tech',        cat: 'tech'      },
+  { emoji: '🐾', catKey: 'pets',        cat: 'pets'      },
+  { emoji: '👗', catKey: 'fashion',     cat: 'fashion'   },
 ];
 
 const PAGE_SIZE = 10;
@@ -44,15 +40,8 @@ const PAGE_SIZE = 10;
 type DateFilter  = 'all' | 'today' | 'weekend' | 'week' | 'month';
 type PriceFilter = 'all' | 'free' | 'u20' | 'u50';
 
-const DATE_FILTERS:  { id: DateFilter;  label: string }[] = [
-  { id: 'all', label: 'All dates' }, { id: 'today', label: 'Today' },
-  { id: 'weekend', label: 'Weekend' }, { id: 'week', label: 'This week' },
-  { id: 'month', label: 'This month' },
-];
-const PRICE_FILTERS: { id: PriceFilter; label: string }[] = [
-  { id: 'all', label: 'Any price' }, { id: 'free', label: 'Free' },
-  { id: 'u20', label: 'Under €20' }, { id: 'u50', label: 'Under €50' },
-];
+const DATE_FILTER_IDS: DateFilter[]  = ['all', 'today', 'weekend', 'week', 'month'];
+const PRICE_FILTER_IDS: PriceFilter[] = ['all', 'free', 'u20', 'u50'];
 
 function applyEventFilters(posts: Post[], dateFilter: DateFilter, priceFilter: PriceFilter): Post[] {
   const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -94,6 +83,7 @@ interface Props {
 
 export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Props) {
   const { state, isStorySeen } = useApp();
+  const { t } = useLanguage();
   const { preferences, aiProfile, createdPosts } = state;
   const location = state.location;
 
@@ -376,7 +366,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
                 className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full"
                 style={{ background: 'rgba(139,92,246,0.12)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.2)' }}
               >
-                {sortMode === 'for_you' ? <><Sparkles size={10} /> For You</> : <><RefreshCw size={10} /> Recent</>}
+                {sortMode === 'for_you' ? <><Sparkles size={10} /> {t.feed.forYou}</> : <><RefreshCw size={10} /> {t.feed.recent}</>}
                 <ChevronDown size={9} />
               </motion.button>
             )}
@@ -385,7 +375,12 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
 
         {/* ── Main category tabs ── */}
         <div className="flex flex-shrink-0" style={{ borderBottom: '1px solid #1e1e2a', background: '#0d0d16' }}>
-          {MAIN_TABS.map(({ id, label, emoji }) => {
+          {([
+            { id: 'events',      label: t.feed.events,      emoji: '🎉' },
+            { id: 'sightseeing', label: t.feed.sightseeing, emoji: '🏛️' },
+            { id: 'sport',       label: t.feed.sport,       emoji: '⚽' },
+            { id: 'partners',    label: t.feed.partners,    emoji: '✨' },
+          ] as { id: MainTab; label: string; emoji: string }[]).map(({ id, label, emoji }) => {
             const isActive = activeMainTab === id;
             return (
               <motion.button
@@ -422,7 +417,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
               className="flex items-center justify-center gap-2 w-full text-sm font-semibold overflow-hidden flex-shrink-0"
               style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.25), rgba(236,72,153,0.2))', color: '#c4b5fd', borderBottom: '1px solid rgba(139,92,246,0.2)' }}
             >
-              <Sparkles size={14} /> New content just dropped — tap to load
+              <Sparkles size={14} /> {t.feed.newContent}
             </motion.button>
           )}
         </AnimatePresence>
@@ -455,7 +450,6 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
           {/* Stories strip — discover mode only */}
           {activeMainTab === 'discover' && (
             <div className="flex gap-3 px-4 py-3 overflow-x-auto flex-shrink-0" style={{ borderBottom: '1px solid #1a1a24' }}>
-              <YourStory avatar={CURRENT_USER.avatar} />
               {stories.map((story, i) => (
                 <StoryItem key={story.id} story={story} onPress={() => { setViewerIndex(i); setViewerOpen(true); }} />
               ))}
@@ -465,8 +459,9 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
           {/* Category chips — discover mode only */}
           {activeMainTab === 'discover' && (
             <div className="flex gap-2 px-4 py-3 overflow-x-auto flex-shrink-0" style={{ borderBottom: '1px solid #1a1a24' }}>
-              {DISCOVER_CHIPS.map(({ emoji, label, cat }) => {
+              {DISCOVER_CHIP_CATS.map(({ emoji, catKey, cat }) => {
                 const isActive = activeChipCategory === cat;
+                const label = t.categories[catKey as keyof typeof t.categories] ?? catKey;
                 return (
                   <motion.button
                     key={cat}
@@ -505,7 +500,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
                   }}
                 >
                   <SlidersHorizontal size={12} />
-                  Filters
+                  {t.feed.filters}
                   {(dateFilter !== 'all' || priceFilter !== 'all') && (
                     <span className="w-1.5 h-1.5 rounded-full bg-white" />
                   )}
@@ -516,14 +511,14 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
                   <motion.button whileTap={{ scale: 0.94 }} onClick={() => setDateFilter('all')}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
                     style={{ background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.35)' }}>
-                    {DATE_FILTERS.find(f => f.id === dateFilter)?.label} ✕
+                    {dateFilter === 'today' ? t.feed.today : dateFilter === 'weekend' ? t.feed.weekend : dateFilter === 'week' ? t.feed.thisWeek : t.feed.thisMonth} ✕
                   </motion.button>
                 )}
                 {priceFilter !== 'all' && (
                   <motion.button whileTap={{ scale: 0.94 }} onClick={() => setPriceFilter('all')}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
                     style={{ background: 'rgba(236,72,153,0.2)', color: '#f9a8d4', border: '1px solid rgba(236,72,153,0.35)' }}>
-                    {PRICE_FILTERS.find(f => f.id === priceFilter)?.label} ✕
+                    {priceFilter === 'free' ? t.feed.free : priceFilter === 'u20' ? 'Under €20' : 'Under €50'} ✕
                   </motion.button>
                 )}
               </div>
@@ -540,35 +535,41 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
                     style={{ borderBottom: '1px solid #1a1a24', background: '#0d0d16' }}
                   >
                     <div className="px-4 pt-3 pb-2">
-                      <p className="text-xs font-bold mb-2" style={{ color: '#666677' }}>DATE</p>
+                      <p className="text-xs font-bold mb-2" style={{ color: '#666677' }}>{t.feed.date}</p>
                       <div className="flex gap-2 flex-wrap mb-3">
-                        {DATE_FILTERS.map(f => (
-                          <motion.button key={f.id} whileTap={{ scale: 0.93 }}
-                            onClick={() => setDateFilter(f.id)}
-                            className="px-3 py-1.5 rounded-full text-xs font-semibold"
-                            style={{
-                              background: dateFilter === f.id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : '#1a1a24',
-                              color: dateFilter === f.id ? 'white' : '#888899',
-                              border: dateFilter === f.id ? 'none' : '1px solid #2a2a38',
-                            }}>
-                            {f.label}
-                          </motion.button>
-                        ))}
+                        {DATE_FILTER_IDS.map(id => {
+                          const label = id === 'all' ? t.feed.allDates : id === 'today' ? t.feed.today : id === 'weekend' ? t.feed.weekend : id === 'week' ? t.feed.thisWeek : t.feed.thisMonth;
+                          return (
+                            <motion.button key={id} whileTap={{ scale: 0.93 }}
+                              onClick={() => setDateFilter(id)}
+                              className="px-3 py-1.5 rounded-full text-xs font-semibold"
+                              style={{
+                                background: dateFilter === id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : '#1a1a24',
+                                color: dateFilter === id ? 'white' : '#888899',
+                                border: dateFilter === id ? 'none' : '1px solid #2a2a38',
+                              }}>
+                              {label}
+                            </motion.button>
+                          );
+                        })}
                       </div>
-                      <p className="text-xs font-bold mb-2" style={{ color: '#666677' }}>PRICE</p>
+                      <p className="text-xs font-bold mb-2" style={{ color: '#666677' }}>{t.feed.price}</p>
                       <div className="flex gap-2 flex-wrap">
-                        {PRICE_FILTERS.map(f => (
-                          <motion.button key={f.id} whileTap={{ scale: 0.93 }}
-                            onClick={() => setPriceFilter(f.id)}
-                            className="px-3 py-1.5 rounded-full text-xs font-semibold"
-                            style={{
-                              background: priceFilter === f.id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : '#1a1a24',
-                              color: priceFilter === f.id ? 'white' : '#888899',
-                              border: priceFilter === f.id ? 'none' : '1px solid #2a2a38',
-                            }}>
-                            {f.label}
-                          </motion.button>
-                        ))}
+                        {PRICE_FILTER_IDS.map(id => {
+                          const label = id === 'all' ? t.feed.anyPrice : id === 'free' ? t.feed.free : id === 'u20' ? 'Under €20' : 'Under €50';
+                          return (
+                            <motion.button key={id} whileTap={{ scale: 0.93 }}
+                              onClick={() => setPriceFilter(id)}
+                              className="px-3 py-1.5 rounded-full text-xs font-semibold"
+                              style={{
+                                background: priceFilter === id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : '#1a1a24',
+                                color: priceFilter === id ? 'white' : '#888899',
+                                border: priceFilter === id ? 'none' : '1px solid #2a2a38',
+                              }}>
+                              {label}
+                            </motion.button>
+                          );
+                        })}
                       </div>
                     </div>
                   </motion.div>
@@ -583,19 +584,19 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
               {activeMainTab === 'partners' ? (
                 <>
                   <span style={{ color: '#f59e0b' }}>✨</span>
-                  <span className="text-xs font-bold" style={{ color: '#f59e0b' }}>Featured Partners</span>
-                  <span className="text-xs ml-auto" style={{ color: '#444455' }}>Sponsored placements</span>
+                  <span className="text-xs font-bold" style={{ color: '#f59e0b' }}>{t.feed.featuredPartners}</span>
+                  <span className="text-xs ml-auto" style={{ color: '#444455' }}>{t.feed.sponsoredPlacements}</span>
                 </>
               ) : (
                 <>
                   <Sparkles size={13} style={{ color: '#8b5cf6' }} />
                   <span className="text-xs font-bold" style={{ color: '#a78bfa' }}>
-                    {activeMainTab === 'events' && `Events near ${location?.city ?? 'you'}`}
-                    {activeMainTab === 'sightseeing' && `Sightseeing near ${location?.city ?? 'you'}`}
-                    {activeMainTab === 'sport' && `Sport near ${location?.city ?? 'you'}`}
+                    {activeMainTab === 'events' && `${t.feed.eventsNear} ${location?.city ?? 'you'}`}
+                    {activeMainTab === 'sightseeing' && `${t.feed.sightseeingNear} ${location?.city ?? 'you'}`}
+                    {activeMainTab === 'sport' && `${t.feed.sportNear} ${location?.city ?? 'you'}`}
                   </span>
                   {activeMainTab !== 'sightseeing' && (
-                    <span className="text-xs ml-2" style={{ color: '#444455' }}>Sorted by date</span>
+                    <span className="text-xs ml-2" style={{ color: '#444455' }}>{t.feed.sortedByDate}</span>
                   )}
                   {aiLoading && <Loader2 size={11} style={{ color: '#8b5cf6', marginLeft: 'auto' }} className="animate-spin" />}
                   {!aiLoading && <div className="w-1.5 h-1.5 rounded-full ml-auto" style={{ background: '#22c55e' }} />}
@@ -609,7 +610,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
             <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: 'rgba(139,92,246,0.05)', borderBottom: '1px solid #1a1a24' }}>
               <Sparkles size={13} style={{ color: '#8b5cf6' }} />
               <span className="text-xs font-semibold" style={{ color: '#6648aa' }}>
-                AI events near {location.city}
+                {t.feed.eventsNear} {location.city}
               </span>
               <div className="w-1.5 h-1.5 rounded-full ml-1" style={{ background: '#22c55e' }} />
               <span className="text-xs" style={{ color: '#444455' }}>Live</span>
@@ -622,8 +623,8 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
               <Loader2 size={28} style={{ color: '#8b5cf6' }} className="animate-spin" />
               <p className="text-sm font-medium" style={{ color: '#555566' }}>
                 {location?.city
-                  ? `Finding ${activeMainTab === 'discover' ? 'events' : activeMainTab} in ${location.city}…`
-                  : 'Loading…'}
+                  ? `${t.feed.findingEvents} ${location.city}…`
+                  : t.feed.loading}
               </p>
             </div>
           )}
@@ -642,7 +643,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
                       <div className="flex items-center gap-2 px-4 py-2" style={{ background: 'rgba(139,92,246,0.04)', borderBottom: '1px solid #1a1a24' }}>
                         <Sparkles size={12} style={{ color: '#8b5cf6' }} />
                         <span className="text-xs font-semibold" style={{ color: '#6648aa' }}>
-                          {i === 6 ? 'Based on your top interests' : i === 12 ? 'More you\'ll love' : 'Curated just for you'}
+                          {i === 6 ? t.feed.basedOnInterests : i === 12 ? t.feed.moreLove : t.feed.curatedForYou}
                         </span>
                       </div>
                     )}
@@ -662,7 +663,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
                 <div className="flex items-center justify-center gap-2 py-6">
                   <Loader2 size={20} style={{ color: '#8b5cf6' }} className="animate-spin" />
                   <span className="text-xs font-medium" style={{ color: '#555566' }}>
-                    {location?.city ? `Finding more in ${location.city}…` : 'Loading more…'}
+                    {location?.city ? `${t.feed.findingMore} ${location.city}…` : t.feed.loadingMore}
                   </span>
                 </div>
               )}
@@ -674,12 +675,12 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
                     <Sparkles size={20} style={{ color: '#8b5cf6' }} />
                   </div>
                   <p className="text-sm font-semibold text-white">
-                    {activeMainTab === 'partners' ? 'Want to be featured here?' : 'You\'re all caught up ✨'}
+                    {activeMainTab === 'partners' ? t.feed.wantFeatured : t.feed.allCaughtUp}
                   </p>
                   <p className="text-xs mt-1 text-center" style={{ color: '#555566' }}>
                     {activeMainTab === 'partners'
-                      ? 'Contact us at partners@nova-app.com · From €300/month'
-                      : 'Pull down to refresh for new content'}
+                      ? t.feed.contactUs
+                      : t.feed.pullRefresh}
                   </p>
                 </div>
               )}
@@ -714,7 +715,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
               boxShadow: '0 4px 16px rgba(139,92,246,0.45)',
             }}
           >
-            <RefreshCw size={13} /> Back to top
+            <RefreshCw size={13} /> {t.feed.backToTop}
           </motion.button>
         )}
       </AnimatePresence>
