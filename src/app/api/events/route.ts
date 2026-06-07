@@ -522,7 +522,17 @@ export async function GET(request: NextRequest) {
     // Attempt Ticketmaster (fast timeout — Claude is already warming up in parallel)
     if (tmKey) {
       try {
-        const { events: tmEvents, totalPages } = await fetchTicketmaster(lat, lng, category, page, radius, tmKey);
+        // Smart radius: if the requested radius returns sparse results, automatically
+        // expand server-side so the client always gets a full page of content
+        let { events: tmEvents, totalPages } = await fetchTicketmaster(lat, lng, category, page, radius, tmKey);
+        if (tmEvents.length < 4 && radius <= 25) {
+          const expanded = await fetchTicketmaster(lat, lng, category, page, 75, tmKey).catch(() => ({ events: [], totalPages: 0 }));
+          if (expanded.events.length > tmEvents.length) { tmEvents = expanded.events; totalPages = expanded.totalPages; }
+        }
+        if (tmEvents.length < 4 && radius <= 75) {
+          const expanded = await fetchTicketmaster(lat, lng, category, page, 150, tmKey).catch(() => ({ events: [], totalPages: 0 }));
+          if (expanded.events.length > tmEvents.length) { tmEvents = expanded.events; totalPages = expanded.totalPages; }
+        }
 
         if (tmEvents.length > 0) {
           // TM has events — enrich with Claude and return real data

@@ -218,10 +218,10 @@ export default function Post({ post, showHint = false }: Props) {
             src={post.image}
             alt={post.caption}
             className="w-full h-full object-cover"
-            loading="lazy"
             onLoad={() => setImgLoaded(true)}
+            onError={() => setImgLoaded(true)}
             onDoubleClick={handleDoubleTap}
-            style={{ display: imgLoaded ? 'block' : 'none' }}
+            style={{ opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.3s' }}
           />
 
           <AnimatePresence>

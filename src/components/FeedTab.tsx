@@ -89,9 +89,10 @@ function sortByEventDate(posts: Post[]): Post[] {
 
 interface Props {
   onOpenLocationPrompt: () => void;
+  onOpenCityExplorer: () => void;
 }
 
-export default function FeedTab({ onOpenLocationPrompt }: Props) {
+export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Props) {
   const { state, isStorySeen } = useApp();
   const { preferences, aiProfile, createdPosts } = state;
   const location = state.location;
@@ -354,18 +355,17 @@ export default function FeedTab({ onOpenLocationPrompt }: Props) {
 
           <div className="flex items-center gap-2">
             {location?.enabled ? (
-              <div className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium" style={{ background: 'rgba(139,92,246,0.1)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.2)' }}>
+              <motion.button whileTap={{ scale: 0.92 }} onClick={onOpenCityExplorer}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
+                style={{ background: 'rgba(139,92,246,0.1)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.2)' }}>
                 <MapPin size={10} />
                 {location.city}
-              </div>
+              </motion.button>
             ) : (
-              <motion.button
-                whileTap={{ scale: 0.92 }}
-                onClick={onOpenLocationPrompt}
+              <motion.button whileTap={{ scale: 0.92 }} onClick={onOpenCityExplorer}
                 className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
-                style={{ background: 'rgba(236,72,153,0.1)', color: '#f9a8d4', border: '1px solid rgba(236,72,153,0.2)' }}
-              >
-                <MapPin size={10} /> Enable location
+                style={{ background: 'rgba(236,72,153,0.1)', color: '#f9a8d4', border: '1px solid rgba(236,72,153,0.2)' }}>
+                <MapPin size={10} /> Choose city
               </motion.button>
             )}
 

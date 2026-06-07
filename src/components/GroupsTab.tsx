@@ -1,0 +1,347 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Users, Plus, Hash, X, Copy, Calendar, MapPin, ExternalLink, Loader2, LogIn } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import {
+  SupabaseGroup, SupabaseGroupEvent,
+  createGroup, joinGroup, getUserGroups, getGroupEvents, removeEventFromGroup,
+} from '@/lib/supabase';
+import { Post } from '@/types';
+import { timeAgo } from '@/data/mockData';
+
+interface Props {
+  onOpenAuth: () => void;
+}
+
+type Screen = 'list' | 'create' | 'join' | 'detail';
+
+export default function GroupsTab({ onOpenAuth }: Props) {
+  const { user, profile, isSupabaseEnabled } = useAuth();
+
+  const [screen, setScreen]       = useState<Screen>('list');
+  const [groups, setGroups]       = useState<SupabaseGroup[]>([]);
+  const [activeGroup, setActiveGroup] = useState<SupabaseGroup | null>(null);
+  const [groupEvents, setGroupEvents] = useState<SupabaseGroupEvent[]>([]);
+  const [loading, setLoading]     = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupDesc, setNewGroupDesc] = useState('');
+  const [joinCode, setJoinCode]   = useState('');
+  const [error, setError]         = useState('');
+  const [copied, setCopied]       = useState(false);
+
+  const loadGroups = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    const data = await getUserGroups(user.id);
+    setGroups(data);
+    setLoading(false);
+  }, [user]);
+
+  useEffect(() => {
+    if (user) loadGroups();
+  }, [user, loadGroups]);
+
+  async function loadGroupEvents(group: SupabaseGroup) {
+    setActiveGroup(group);
+    setScreen('detail');
+    const events = await getGroupEvents(group.id);
+    setGroupEvents(events);
+  }
+
+  async function handleCreateGroup() {
+    if (!user || !newGroupName.trim()) return;
+    setLoading(true); setError('');
+    const group = await createGroup(newGroupName.trim(), newGroupDesc.trim(), user.id);
+    if (group) {
+      setGroups(prev => [...prev, group]);
+      setNewGroupName(''); setNewGroupDesc('');
+      await loadGroupEvents(group);
+    } else {
+      setError('Failed to create group. Please try again.');
+    }
+    setLoading(false);
+  }
+
+  async function handleJoinGroup() {
+    if (!user || !joinCode.trim()) return;
+    setLoading(true); setError('');
+    const group = await joinGroup(joinCode.trim(), user.id);
+    if (group) {
+      setGroups(prev => prev.some(g => g.id === group.id) ? prev : [...prev, group]);
+      setJoinCode('');
+      await loadGroupEvents(group);
+    } else {
+      setError('Group not found. Check the invite code and try again.');
+    }
+    setLoading(false);
+  }
+
+  async function handleRemoveEvent(groupId: string, postId: string) {
+    await removeEventFromGroup(groupId, postId);
+    setGroupEvents(prev => prev.filter(e => e.post_id !== postId));
+  }
+
+  function copyCode(code: string) {
+    navigator.clipboard.writeText(code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  }
+
+  // Not logged in state
+  if (!user) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="glass flex items-center gap-2 px-4 flex-shrink-0" style={{ height: 52, borderBottom: '1px solid #1e1e2a' }}>
+          <Users size={20} style={{ color: '#8b5cf6' }} />
+          <h2 className="text-base font-bold text-white">Groups</h2>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center px-8 gap-5">
+          <div className="w-20 h-20 rounded-3xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
+            <Users size={36} color="white" />
+          </div>
+          <div className="text-center">
+            <p className="text-lg font-bold text-white mb-2">Plan events with friends</p>
+            <p className="text-sm leading-relaxed" style={{ color: '#888899' }}>
+              Create a group, invite friends with a code, and build a shared wishlist of events you want to attend together.
+            </p>
+          </div>
+          {isSupabaseEnabled ? (
+            <motion.button whileTap={{ scale: 0.95 }} onClick={onOpenAuth}
+              className="flex items-center gap-2 px-6 py-3.5 rounded-2xl text-sm font-bold text-white"
+              style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
+              <LogIn size={16} /> Sign in to get started
+            </motion.button>
+          ) : (
+            <p className="text-xs text-center px-4" style={{ color: '#555566' }}>
+              Enable accounts by adding Supabase env vars to Vercel.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="glass flex items-center justify-between px-4 flex-shrink-0" style={{ height: 52, borderBottom: '1px solid #1e1e2a' }}>
+        {screen === 'detail' && activeGroup ? (
+          <>
+            <button onClick={() => setScreen('list')}><X size={20} style={{ color: '#888899' }} /></button>
+            <p className="text-sm font-bold text-white truncate mx-3">{activeGroup.name}</p>
+            <button onClick={() => copyCode(activeGroup.code)} className="flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold"
+              style={{ background: 'rgba(139,92,246,0.15)', color: '#a78bfa' }}>
+              <Hash size={11} /> {activeGroup.code}
+              <Copy size={10} />
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <Users size={18} style={{ color: '#8b5cf6' }} />
+              <h2 className="text-base font-bold text-white">Groups</h2>
+            </div>
+            <div className="flex gap-2">
+              <motion.button whileTap={{ scale: 0.9 }} onClick={() => { setScreen('join'); setError(''); }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold"
+                style={{ background: '#1a1a24', border: '1px solid #2a2a38', color: '#888899' }}>
+                <Hash size={12} /> Join
+              </motion.button>
+              <motion.button whileTap={{ scale: 0.9 }} onClick={() => { setScreen('create'); setError(''); }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold"
+                style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', color: 'white' }}>
+                <Plus size={12} /> New
+              </motion.button>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+
+        {/* Group list */}
+        {screen === 'list' && (
+          <div className="p-4">
+            {loading && groups.length === 0 ? (
+              <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin" style={{ color: '#8b5cf6' }} /></div>
+            ) : groups.length === 0 ? (
+              <div className="flex flex-col items-center py-16 gap-4">
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(139,92,246,0.1)' }}>
+                  <Users size={28} style={{ color: '#8b5cf6' }} />
+                </div>
+                <p className="text-sm font-semibold text-white">No groups yet</p>
+                <p className="text-xs text-center" style={{ color: '#555566' }}>Create a group or join one with an invite code</p>
+                <div className="flex gap-2">
+                  <motion.button whileTap={{ scale: 0.95 }} onClick={() => setScreen('join')}
+                    className="px-4 py-2.5 rounded-xl text-sm font-semibold" style={{ background: '#1a1a24', border: '1px solid #2a2a38', color: '#888899' }}>
+                    Join a group
+                  </motion.button>
+                  <motion.button whileTap={{ scale: 0.95 }} onClick={() => setScreen('create')}
+                    className="px-4 py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
+                    Create group
+                  </motion.button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {groups.map(group => (
+                  <motion.button key={group.id} whileTap={{ scale: 0.97 }} onClick={() => loadGroupEvents(group)}
+                    className="w-full text-left p-4 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-sm font-bold text-white">{group.name}</p>
+                      <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
+                        style={{ background: 'rgba(139,92,246,0.1)', color: '#a78bfa' }}>
+                        <Hash size={10} /> {group.code}
+                      </div>
+                    </div>
+                    {group.description && <p className="text-xs" style={{ color: '#666677' }}>{group.description}</p>}
+                    <p className="text-xs mt-2" style={{ color: '#444455' }}>Tap to view events</p>
+                  </motion.button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Create group */}
+        {screen === 'create' && (
+          <div className="p-4">
+            <button onClick={() => setScreen('list')} className="flex items-center gap-1 mb-4 text-sm" style={{ color: '#888899' }}>
+              ← Back
+            </button>
+            <h3 className="text-base font-bold text-white mb-4">New Group</h3>
+            <div className="flex flex-col gap-3">
+              <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
+                placeholder="Group name (e.g. Vienna Weekend Squad)"
+                className="w-full px-4 py-3.5 rounded-2xl text-sm text-white outline-none"
+                style={{ background: '#13131a', border: '1px solid #2a2a38' }} />
+              <textarea value={newGroupDesc} onChange={e => setNewGroupDesc(e.target.value)}
+                placeholder="Description (optional)"
+                rows={3}
+                className="w-full px-4 py-3.5 rounded-2xl text-sm text-white outline-none resize-none"
+                style={{ background: '#13131a', border: '1px solid #2a2a38' }} />
+              {error && <p className="text-xs" style={{ color: '#f87171' }}>{error}</p>}
+              <motion.button whileTap={{ scale: 0.97 }} onClick={handleCreateGroup} disabled={loading || !newGroupName.trim()}
+                className="w-full py-3.5 rounded-2xl text-sm font-bold text-white"
+                style={{ background: loading ? '#2a2a38' : 'linear-gradient(135deg, #8b5cf6, #ec4899)', opacity: (!newGroupName.trim() || loading) ? 0.6 : 1 }}>
+                {loading ? 'Creating…' : 'Create Group'}
+              </motion.button>
+            </div>
+          </div>
+        )}
+
+        {/* Join group */}
+        {screen === 'join' && (
+          <div className="p-4">
+            <button onClick={() => setScreen('list')} className="flex items-center gap-1 mb-4 text-sm" style={{ color: '#888899' }}>
+              ← Back
+            </button>
+            <h3 className="text-base font-bold text-white mb-2">Join a Group</h3>
+            <p className="text-xs mb-4" style={{ color: '#666677' }}>Enter the 6-character invite code from your friend</p>
+            <div className="flex flex-col gap-3">
+              <input value={joinCode} onChange={e => setJoinCode(e.target.value.toUpperCase())}
+                placeholder="Invite code (e.g. AB12CD)"
+                maxLength={6}
+                className="w-full px-4 py-3.5 rounded-2xl text-sm text-white outline-none tracking-widest text-center uppercase font-bold"
+                style={{ background: '#13131a', border: '1px solid #2a2a38', fontSize: 20 }} />
+              {error && <p className="text-xs" style={{ color: '#f87171' }}>{error}</p>}
+              <motion.button whileTap={{ scale: 0.97 }} onClick={handleJoinGroup} disabled={loading || joinCode.length < 6}
+                className="w-full py-3.5 rounded-2xl text-sm font-bold text-white"
+                style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', opacity: (joinCode.length < 6 || loading) ? 0.6 : 1 }}>
+                {loading ? 'Joining…' : 'Join Group'}
+              </motion.button>
+            </div>
+          </div>
+        )}
+
+        {/* Group detail */}
+        {screen === 'detail' && activeGroup && (
+          <div>
+            {/* Invite banner */}
+            <div className="mx-4 mt-4 p-4 rounded-2xl" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}>
+              <p className="text-xs font-semibold mb-1" style={{ color: '#a78bfa' }}>Invite friends to this group</p>
+              <p className="text-xs mb-3" style={{ color: '#666677' }}>Share the code below — they can join from the Groups tab</p>
+              <button onClick={() => copyCode(activeGroup.code)}
+                className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-bold"
+                style={{ background: '#1a1a24', border: '1px solid rgba(139,92,246,0.3)', color: copied ? '#22c55e' : '#a78bfa' }}>
+                <Hash size={14} />
+                {activeGroup.code}
+                {copied ? ' — Copied!' : ' — Tap to copy'}
+              </button>
+            </div>
+
+            {/* Events */}
+            <div className="px-4 pt-4 pb-2">
+              <p className="text-xs font-bold mb-3" style={{ color: '#666677' }}>
+                {groupEvents.length === 0 ? 'No events added yet' : `${groupEvents.length} event${groupEvents.length === 1 ? '' : 's'}`}
+              </p>
+            </div>
+
+            {groupEvents.length === 0 ? (
+              <div className="flex flex-col items-center py-12 px-8 gap-3">
+                <Calendar size={32} style={{ color: '#2a2a38' }} />
+                <p className="text-sm font-semibold text-white">No events yet</p>
+                <p className="text-xs text-center" style={{ color: '#555566' }}>
+                  Browse the Events tab and tap the share button to add events to this group
+                </p>
+              </div>
+            ) : (
+              <div className="px-4 flex flex-col gap-3 pb-8">
+                {groupEvents.map(ge => {
+                  const post = ge.post_data as Partial<Post>;
+                  return (
+                    <div key={ge.id} className="rounded-2xl overflow-hidden" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
+                      {post.image && (
+                        <div className="w-full" style={{ height: 160 }}>
+                          <img src={post.image as string} alt="" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                      <div className="p-3">
+                        <p className="text-sm font-bold text-white mb-1">
+                          {((post.caption as string) ?? '').split('\n')[0].slice(0, 60)}
+                        </p>
+                        {post.eventDate && (
+                          <div className="flex items-center gap-1 mb-1">
+                            <Calendar size={11} style={{ color: '#8b5cf6' }} />
+                            <span className="text-xs" style={{ color: '#a78bfa' }}>{post.eventDate as string}</span>
+                          </div>
+                        )}
+                        {post.eventVenue && (
+                          <div className="flex items-center gap-1 mb-2">
+                            <MapPin size={11} style={{ color: '#888899' }} />
+                            <span className="text-xs" style={{ color: '#888899' }}>{post.eventVenue as string}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs" style={{ color: '#444455' }}>{timeAgo(new Date(ge.created_at).getTime())}</span>
+                          <div className="flex gap-2">
+                            {post.eventUrl && (
+                              <a href={post.eventUrl as string} target="_blank" rel="noopener noreferrer"
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                                style={{ background: 'rgba(139,92,246,0.15)', color: '#a78bfa' }}>
+                                <ExternalLink size={10} /> Tickets
+                              </a>
+                            )}
+                            {user && ge.added_by === user.id && (
+                              <button onClick={() => handleRemoveEvent(activeGroup.id, ge.post_id)}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
+                                style={{ background: 'rgba(244,63,94,0.1)', color: '#f87171' }}>
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ height: 100 }} />
+      </div>
+    </div>
+  );
+}
