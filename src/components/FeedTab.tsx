@@ -374,7 +374,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
               <motion.button whileTap={{ scale: 0.92 }} onClick={onOpenCityExplorer}
                 className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
                 style={{ background: 'rgba(236,72,153,0.1)', color: '#f9a8d4', border: '1px solid rgba(236,72,153,0.2)' }}>
-                <MapPin size={10} /> Choose city
+                <MapPin size={10} /> {t.feed.chooseCity}
               </motion.button>
             )}
 

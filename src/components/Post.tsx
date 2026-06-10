@@ -9,6 +9,7 @@ import {
 import { Post as PostType } from '@/types';
 import { formatCount, timeAgo } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
+import { useLanguage } from '@/context/LanguageContext';
 import CommentsSheet from './CommentsSheet';
 import UserProfileCard from './UserProfileCard';
 import Avatar from './Avatar';
@@ -28,12 +29,6 @@ function daysUntil(eventDateRaw?: string | null): number | null {
   return diff >= 0 ? diff : null;
 }
 
-function countdownLabel(days: number): string {
-  if (days === 0) return 'Today!';
-  if (days === 1) return 'Tomorrow!';
-  return `${days} days away`;
-}
-
 // ── Price parser ──────────────────────────────────────────────────────────────
 function parseMinPrice(priceStr: string): number {
   const lower = priceStr.toLowerCase();
@@ -48,6 +43,7 @@ export { parseMinPrice };
 
 export default function Post({ post, showHint = false }: Props) {
   const { isLiked, isSaved, isGoing, hasReminder, likePost, savePost, goPost, addReminder, removeReminder, addToast } = useApp();
+  const { t } = useLanguage();
   const liked  = isLiked(post.id);
   const saved  = isSaved(post.id);
   const going  = isGoing(post.id);
@@ -69,6 +65,12 @@ export default function Post({ post, showHint = false }: Props) {
   // ── Countdown for saved events ────────────────────────────────────────────
   const countdown = saved && post.isEvent ? daysUntil(post.eventDateRaw) : null;
 
+  const countdownLabel = (days: number): string => {
+    if (days === 0) return t.common.today;
+    if (days === 1) return t.common.tomorrow;
+    return `${days} ${t.common.daysAway}`;
+  };
+
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleLike = useCallback(() => {
     likePost(post.id, post.category);
@@ -82,9 +84,9 @@ export default function Post({ post, showHint = false }: Props) {
 
   const handleGoing = useCallback(() => {
     goPost(post.id);
-    if (!going) addToast("You're going! 🎉", 'success');
+    if (!going) addToast(t.common.goingLabel, 'success');
     else addToast('Removed from going', 'info');
-  }, [going, goPost, post.id, addToast]);
+  }, [going, goPost, post.id, addToast, t.common.goingLabel]);
 
   // Feature 5 — Deep link share: uses real event URL when available
   const handleShare = useCallback(async () => {
@@ -164,9 +166,9 @@ export default function Post({ post, showHint = false }: Props) {
           <div className="flex items-center gap-2 px-4 pt-3 pb-1">
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold"
               style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.35)' }}>
-              ✨ PARTNER
+              ✨ {t.common.partner}
             </div>
-            <span className="text-xs font-medium" style={{ color: '#555566' }}>Sponsored</span>
+            <span className="text-xs font-medium" style={{ color: '#555566' }}>{t.common.sponsored}</span>
           </div>
         )}
 
@@ -176,7 +178,7 @@ export default function Post({ post, showHint = false }: Props) {
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold"
               style={{ background: 'linear-gradient(135deg, rgba(244,63,94,0.2), rgba(139,92,246,0.2))', color: '#f87171', border: '1px solid rgba(244,63,94,0.35)' }}>
               <Calendar size={11} />
-              EVENT — {post.eventDate}
+              {t.common.event} — {post.eventDate}
             </div>
             {post.eventVenue && (
               <span className="text-xs font-medium truncate" style={{ color: '#555566' }}>📍 {post.eventVenue}</span>
@@ -240,7 +242,7 @@ export default function Post({ post, showHint = false }: Props) {
                 transition={{ delay: 1.5, duration: 0.4 }}
                 className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full text-xs font-semibold pointer-events-none"
                 style={{ background: 'rgba(0,0,0,0.7)', color: 'white', backdropFilter: 'blur(8px)', whiteSpace: 'nowrap' }}>
-                ✨ Double tap to star
+                {t.common.hintDoubleTap}
               </motion.div>
             )}
           </AnimatePresence>
@@ -301,7 +303,7 @@ export default function Post({ post, showHint = false }: Props) {
                   fill={saved ? '#8b5cf6' : 'none'}
                   style={{ color: saved ? '#8b5cf6' : '#f0f0ff', transition: 'color 0.2s' }} />
                 <span className="text-sm font-medium" style={{ color: saved ? '#8b5cf6' : '#888899' }}>
-                  {saved ? 'Saved' : 'Save'}
+                  {saved ? t.common.saved : t.common.save}
                 </span>
               </motion.button>
             </div>
@@ -313,7 +315,7 @@ export default function Post({ post, showHint = false }: Props) {
             {isLong && !expanded ? (
               <>
                 {caption.slice(0, 110)}
-                <button onClick={() => setExpanded(true)} className="ml-1 font-semibold" style={{ color: '#a78bfa' }}>more</button>
+                <button onClick={() => setExpanded(true)} className="ml-1 font-semibold" style={{ color: '#a78bfa' }}>{t.common.more}</button>
               </>
             ) : caption}
           </p>
@@ -331,7 +333,7 @@ export default function Post({ post, showHint = false }: Props) {
               <div className="flex items-center gap-1 px-2 py-0.5 rounded-full"
                 style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)' }}>
                 <Sparkles size={10} style={{ color: '#a78bfa' }} />
-                <span className="text-xs font-semibold" style={{ color: '#a78bfa' }}>AI Discovered</span>
+                <span className="text-xs font-semibold" style={{ color: '#a78bfa' }}>{t.common.aiDiscovered}</span>
               </div>
               {post.price && (
                 <span className="text-xs font-medium" style={{ color: '#555566' }}>{post.price}</span>
@@ -355,7 +357,7 @@ export default function Post({ post, showHint = false }: Props) {
               style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}
               onClick={e => e.stopPropagation()}>
               <ExternalLink size={14} />
-              Get Tickets &amp; Info
+              {t.common.getTickets}
             </a>
           )}
           {post.isEvent && !post.isSponsored && !post.eventUrl && <div style={{ height: 12 }} />}
@@ -404,7 +406,7 @@ export default function Post({ post, showHint = false }: Props) {
 
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <p className="text-base font-bold text-white">Set Event Reminder</p>
+                  <p className="text-base font-bold text-white">{t.common.setReminder}</p>
                   <p className="text-xs mt-0.5" style={{ color: '#666677' }}>
                     {post.caption.split('\n')[0].slice(0, 50)}
                   </p>
@@ -420,8 +422,8 @@ export default function Post({ post, showHint = false }: Props) {
                   style={{ background: reminded ? 'rgba(139,92,246,0.15)' : '#13131a', border: '1px solid #2a2a38' }}>
                   <Bell size={20} style={{ color: '#8b5cf6' }} />
                   <div>
-                    <p className="text-sm font-semibold text-white">1 day before</p>
-                    <p className="text-xs" style={{ color: '#666677' }}>Get notified the day before the event</p>
+                    <p className="text-sm font-semibold text-white">{t.common.reminderDay}</p>
+                    <p className="text-xs" style={{ color: '#666677' }}>{t.common.reminderDayDesc}</p>
                   </div>
                 </motion.button>
 
@@ -430,8 +432,8 @@ export default function Post({ post, showHint = false }: Props) {
                   style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
                   <Bell size={20} style={{ color: '#ec4899' }} />
                   <div>
-                    <p className="text-sm font-semibold text-white">1 hour before</p>
-                    <p className="text-xs" style={{ color: '#666677' }}>Get notified 1 hour before start time</p>
+                    <p className="text-sm font-semibold text-white">{t.common.reminderHour}</p>
+                    <p className="text-xs" style={{ color: '#666677' }}>{t.common.reminderHourDesc}</p>
                   </div>
                 </motion.button>
 
@@ -441,8 +443,8 @@ export default function Post({ post, showHint = false }: Props) {
                     style={{ background: '#13131a', border: '1px solid rgba(244,63,94,0.3)' }}>
                     <BellOff size={20} style={{ color: '#f87171' }} />
                     <div>
-                      <p className="text-sm font-semibold" style={{ color: '#f87171' }}>Remove reminder</p>
-                      <p className="text-xs" style={{ color: '#666677' }}>Turn off notifications for this event</p>
+                      <p className="text-sm font-semibold" style={{ color: '#f87171' }}>{t.common.removeReminder}</p>
+                      <p className="text-xs" style={{ color: '#666677' }}>{t.common.removeReminderDesc}</p>
                     </div>
                   </motion.button>
                 )}

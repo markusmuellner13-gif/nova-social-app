@@ -119,20 +119,30 @@ async function fetchUnsplashImage(query: string, key: string): Promise<string | 
       { headers: { Authorization: `Client-ID ${key}` }, signal: AbortSignal.timeout(3500) }
     );
     if (!res.ok) return null;
-    const d = await res.json() as { urls?: { regular?: string } };
-    return d.urls?.regular ?? null;
+    const d = await res.json() as { urls?: { raw?: string; regular?: string } };
+    // Use raw URL with explicit crop dimensions for perfect 4:5 portrait framing
+    const base = d.urls?.raw ?? d.urls?.regular;
+    if (!base) return null;
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}auto=format&fit=crop&w=600&h=750&q=80&crop=faces,entropy`;
   } catch { return null; }
 }
 
 async function fetchPexelsImage(query: string, key: string): Promise<string | null> {
   try {
     const res = await fetch(
-      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=1&orientation=portrait`,
+      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=3&orientation=portrait`,
       { headers: { Authorization: key }, signal: AbortSignal.timeout(3500) }
     );
     if (!res.ok) return null;
-    const d = await res.json() as { photos?: { src?: { large?: string } }[] };
-    return d.photos?.[0]?.src?.large ?? null;
+    const d = await res.json() as { photos?: { src?: { large2x?: string; large?: string } }[] };
+    // Use large2x if available, then append crop params for perfect 4:5 framing
+    const src = d.photos?.[0]?.src;
+    const base = src?.large2x ?? src?.large;
+    if (!base) return null;
+    // Pexels supports ?w=&h=&fit=crop via their CDN
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}w=600&h=750&fit=crop`;
   } catch { return null; }
 }
 
@@ -146,10 +156,18 @@ function bestTmImage(images: TmImage[]): string {
   if (!images?.length) return picsumUrl('event_placeholder');
   const real = images.filter(i => !i.fallback && i.url);
   const pool = real.length ? real : images;
-  const PORTRAIT_RATIOS = new Set(['3_2', '2_3', '1_1', '4_3']);
+  // Prefer true portrait ratios for 4:5 post frames; fallback to any image
+  const PORTRAIT_RATIOS = new Set(['2_3', '3_4', '1_1', '4_3', '3_2']);
   const portrait = pool.filter(i => i.ratio && PORTRAIT_RATIOS.has(i.ratio));
   const source = portrait.length ? portrait : pool;
-  return source.sort((a, b) => (b.width || 0) - (a.width || 0))[0].url;
+  const best = source.sort((a, b) => (b.width || 0) - (a.width || 0))[0];
+  // Ticketmaster CDN supports ?width=&height= resizing — request the exact post dimensions
+  const url = best.url;
+  if (url.includes('ticketmaster.com') || url.includes('livenation.com') || url.includes('ticketm.net')) {
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}width=600&height=750`;
+  }
+  return url;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

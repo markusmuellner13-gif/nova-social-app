@@ -7,24 +7,25 @@ import dynamic from 'next/dynamic';
 import { MOCK_POSTS, formatCount } from '@/data/mockData';
 import { Post, Category } from '@/types';
 import CommentsSheet from './CommentsSheet';
+import { useLanguage } from '@/context/LanguageContext';
 
 const WorldMap = dynamic(() => import('./WorldMap'), {
   ssr: false,
   loading: () => <div className="w-full rounded-2xl shimmer" style={{ height: 340 }} />,
 });
 
-const CATEGORIES: { id: Category; emoji: string; label: string }[] = [
-  { id: 'travel',    emoji: '✈️', label: 'Travel'   },
-  { id: 'food',      emoji: '🍕', label: 'Food'     },
-  { id: 'fashion',   emoji: '👗', label: 'Fashion'  },
-  { id: 'sports',    emoji: '⚽', label: 'Sports'   },
-  { id: 'art',       emoji: '🎨', label: 'Art'      },
-  { id: 'tech',      emoji: '💻', label: 'Tech'     },
-  { id: 'fitness',   emoji: '💪', label: 'Fitness'  },
-  { id: 'music',     emoji: '🎵', label: 'Music'    },
-  { id: 'pets',      emoji: '🐾', label: 'Pets'     },
-  { id: 'lifestyle', emoji: '🌟', label: 'Life'     },
-  { id: 'events',    emoji: '🎉', label: 'Events'   },
+const CATEGORY_EMOJIS: { id: Category; emoji: string }[] = [
+  { id: 'travel',    emoji: '✈️' },
+  { id: 'food',      emoji: '🍕' },
+  { id: 'fashion',   emoji: '👗' },
+  { id: 'sports',    emoji: '⚽' },
+  { id: 'art',       emoji: '🎨' },
+  { id: 'tech',      emoji: '💻' },
+  { id: 'fitness',   emoji: '💪' },
+  { id: 'music',     emoji: '🎵' },
+  { id: 'pets',      emoji: '🐾' },
+  { id: 'lifestyle', emoji: '🌟' },
+  { id: 'events',    emoji: '🎉' },
 ];
 
 const TRENDING = [
@@ -34,6 +35,9 @@ const TRENDING = [
 ];
 
 export default function SearchTab() {
+  const { t } = useLanguage();
+  const categories = CATEGORY_EMOJIS.map(({ id, emoji }) => ({ id, emoji, label: t.categories[id] }));
+
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
   const [focused, setFocused] = useState(false);
@@ -106,7 +110,7 @@ export default function SearchTab() {
 
           {/* Category chips */}
           <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
-            {CATEGORIES.map(cat => {
+            {categories.map(cat => {
               const isActive = activeCategory === cat.id;
               return (
                 <motion.button
@@ -182,7 +186,7 @@ export default function SearchTab() {
               <motion.div key="results" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="px-4 pt-4">
                 <p className="text-xs mb-4 font-medium" style={{ color: '#888899' }}>
                   {filteredPosts.length} result{filteredPosts.length !== 1 ? 's' : ''}
-                  {activeCategory && ` in ${CATEGORIES.find(c => c.id === activeCategory)?.label}`}
+                  {activeCategory && ` in ${categories.find(c => c.id === activeCategory)?.label}`}
                   {query && ` for "${query}"`}
                 </p>
                 <PostGrid posts={filteredPosts} onPostOpen={setSelectedPost} />

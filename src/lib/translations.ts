@@ -54,6 +54,10 @@ export interface AppTranslations {
     getTickets: string; aiDiscovered: string; partner: string; sponsored: string;
     event: string; goingLabel: string; today: string; tomorrow: string; daysAway: string;
     searchUsers: string; noUsersFound: string; yourStory: string;
+    hintDoubleTap: string;
+    setReminder: string; reminderDay: string; reminderDayDesc: string;
+    reminderHour: string; reminderHourDesc: string;
+    removeReminder: string; removeReminderDesc: string;
   };
   categories: {
     travel: string; food: string; fashion: string; sports: string; art: string;
@@ -120,6 +124,10 @@ const en: AppTranslations = {
     partner: 'PARTNER', sponsored: 'Sponsored', event: 'EVENT',
     goingLabel: "You're going! 🎉", today: 'Today!', tomorrow: 'Tomorrow!', daysAway: 'days away',
     searchUsers: 'Search by username…', noUsersFound: 'No users found', yourStory: 'Your story',
+    hintDoubleTap: '✨ Double tap to star',
+    setReminder: 'Set Event Reminder', reminderDay: '1 day before', reminderDayDesc: 'Get notified the day before the event',
+    reminderHour: '1 hour before', reminderHourDesc: 'Get notified 1 hour before start time',
+    removeReminder: 'Remove reminder', removeReminderDesc: 'Turn off notifications for this event',
   },
   categories: {
     travel: 'Travel', food: 'Food', fashion: 'Fashion', sports: 'Sports', art: 'Art',
@@ -186,6 +194,10 @@ const de: AppTranslations = {
     partner: 'PARTNER', sponsored: 'Gesponsert', event: 'EVENT',
     goingLabel: 'Du gehst hin! 🎉', today: 'Heute!', tomorrow: 'Morgen!', daysAway: 'Tage',
     searchUsers: 'Nach Nutzernamen suchen…', noUsersFound: 'Keine Nutzer gefunden', yourStory: 'Deine Story',
+    hintDoubleTap: '✨ Doppeltippen zum Liken',
+    setReminder: 'Erinnerung setzen', reminderDay: '1 Tag vorher', reminderDayDesc: 'Einen Tag vor dem Event erinnert werden',
+    reminderHour: '1 Stunde vorher', reminderHourDesc: '1 Stunde vor Beginn erinnert werden',
+    removeReminder: 'Erinnerung entfernen', removeReminderDesc: 'Benachrichtigungen für dieses Event deaktivieren',
   },
   categories: {
     travel: 'Reisen', food: 'Essen', fashion: 'Mode', sports: 'Sport', art: 'Kunst',
@@ -252,6 +264,10 @@ const es: AppTranslations = {
     partner: 'SOCIO', sponsored: 'Patrocinado', event: 'EVENTO',
     goingLabel: '¡Vas a ir! 🎉', today: '¡Hoy!', tomorrow: '¡Mañana!', daysAway: 'd',
     searchUsers: 'Buscar por nombre de usuario…', noUsersFound: 'Sin usuarios', yourStory: 'Tu historia',
+    hintDoubleTap: '✨ Toca dos veces para dar like',
+    setReminder: 'Crear recordatorio', reminderDay: '1 día antes', reminderDayDesc: 'Recibir notificación el día anterior',
+    reminderHour: '1 hora antes', reminderHourDesc: 'Recibir notificación 1 hora antes del inicio',
+    removeReminder: 'Eliminar recordatorio', removeReminderDesc: 'Desactivar notificaciones para este evento',
   },
   categories: {
     travel: 'Viajes', food: 'Comida', fashion: 'Moda', sports: 'Deportes', art: 'Arte',
@@ -318,6 +334,10 @@ const fr: AppTranslations = {
     partner: 'PARTENAIRE', sponsored: 'Sponsorisé', event: 'ÉVÉNEMENT',
     goingLabel: 'Tu y vas ! 🎉', today: "Aujourd'hui !", tomorrow: 'Demain !', daysAway: 'j',
     searchUsers: 'Chercher un utilisateur…', noUsersFound: 'Aucun utilisateur', yourStory: 'Ta story',
+    hintDoubleTap: '✨ Double tap pour liker',
+    setReminder: 'Créer un rappel', reminderDay: '1 jour avant', reminderDayDesc: 'Recevoir une notification la veille',
+    reminderHour: '1 heure avant', reminderHourDesc: 'Recevoir une notification 1 heure avant le début',
+    removeReminder: 'Supprimer le rappel', removeReminderDesc: 'Désactiver les notifications pour cet événement',
   },
   categories: {
     travel: 'Voyages', food: 'Cuisine', fashion: 'Mode', sports: 'Sports', art: 'Art',
@@ -384,6 +404,10 @@ const it: AppTranslations = {
     partner: 'PARTNER', sponsored: 'Sponsorizzato', event: 'EVENTO',
     goingLabel: 'Ci vai! 🎉', today: 'Oggi!', tomorrow: 'Domani!', daysAway: 'g',
     searchUsers: 'Cerca per username…', noUsersFound: 'Nessun utente', yourStory: 'La tua storia',
+    hintDoubleTap: '✨ Tocca due volte per mettere like',
+    setReminder: 'Imposta promemoria', reminderDay: '1 giorno prima', reminderDayDesc: 'Ricevi una notifica il giorno prima',
+    reminderHour: '1 ora prima', reminderHourDesc: 'Ricevi una notifica 1 ora prima dell\'inizio',
+    removeReminder: 'Rimuovi promemoria', removeReminderDesc: 'Disattiva notifiche per questo evento',
   },
   categories: {
     travel: 'Viaggi', food: 'Cibo', fashion: 'Moda', sports: 'Sport', art: 'Arte',
@@ -450,6 +474,10 @@ const pt: AppTranslations = {
     partner: 'PARCEIRO', sponsored: 'Patrocinado', event: 'EVENTO',
     goingLabel: 'Você vai! 🎉', today: 'Hoje!', tomorrow: 'Amanhã!', daysAway: 'd',
     searchUsers: 'Buscar por usuário…', noUsersFound: 'Nenhum usuário', yourStory: 'Sua história',
+    hintDoubleTap: '✨ Toque duas vezes para curtir',
+    setReminder: 'Criar lembrete', reminderDay: '1 dia antes', reminderDayDesc: 'Receber notificação um dia antes',
+    reminderHour: '1 hora antes', reminderHourDesc: 'Receber notificação 1 hora antes do início',
+    removeReminder: 'Remover lembrete', removeReminderDesc: 'Desativar notificações para este evento',
   },
   categories: {
     travel: 'Viagens', food: 'Comida', fashion: 'Moda', sports: 'Esportes', art: 'Arte',
@@ -516,6 +544,10 @@ const nl: AppTranslations = {
     partner: 'PARTNER', sponsored: 'Gesponsord', event: 'EVENEMENT',
     goingLabel: 'Je gaat! 🎉', today: 'Vandaag!', tomorrow: 'Morgen!', daysAway: 'd',
     searchUsers: 'Zoeken op gebruikersnaam…', noUsersFound: 'Geen gebruikers', yourStory: 'Jouw verhaal',
+    hintDoubleTap: '✨ Dubbel tikken om te liken',
+    setReminder: 'Herinnering instellen', reminderDay: '1 dag eerder', reminderDayDesc: 'Ontvang een melding de dag voor het evenement',
+    reminderHour: '1 uur eerder', reminderHourDesc: 'Ontvang een melding 1 uur voor aanvang',
+    removeReminder: 'Herinnering verwijderen', removeReminderDesc: 'Meldingen voor dit evenement uitschakelen',
   },
   categories: {
     travel: 'Reizen', food: 'Eten', fashion: 'Mode', sports: 'Sport', art: 'Kunst',
@@ -582,6 +614,10 @@ const ja: AppTranslations = {
     partner: 'パートナー', sponsored: '広告', event: 'イベント',
     goingLabel: '参加します！ 🎉', today: '今日！', tomorrow: '明日！', daysAway: '日後',
     searchUsers: 'ユーザー名で検索…', noUsersFound: 'ユーザーが見つかりません', yourStory: 'あなたのストーリー',
+    hintDoubleTap: '✨ ダブルタップでいいね',
+    setReminder: 'リマインダーを設定', reminderDay: '1日前', reminderDayDesc: 'イベントの前日に通知を受け取る',
+    reminderHour: '1時間前', reminderHourDesc: '開始1時間前に通知を受け取る',
+    removeReminder: 'リマインダーを削除', removeReminderDesc: 'このイベントの通知をオフにする',
   },
   categories: {
     travel: '旅行', food: 'グルメ', fashion: 'ファッション', sports: 'スポーツ', art: 'アート',

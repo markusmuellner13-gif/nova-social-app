@@ -1,5 +1,10 @@
 import { Post, Story, User, NovaNotification, Comment, Category } from '@/types';
 
+// Build a properly-cropped Unsplash photo URL (no API key required for CDN delivery)
+function U(id: string, w = 600, h = 750): string {
+  return `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=${w}&h=${h}&q=80`;
+}
+
 // Nova AI system user — used for all AI-generated notifications
 export const NOVA_AI_USER: User = {
   id: 'nova_ai',
@@ -34,7 +39,7 @@ export const MOCK_POSTS: Post[] = [
   // ── Travel ──────────────────────────────────────────────────────────────
   {
     id: 'p1', user: MOCK_USERS[0],
-    image: 'https://picsum.photos/seed/santorini22/600/750',
+    image: U('1570077188670-e3a8d69ac5ff'),
     caption: 'Santorini sunsets — 5 breathtaking viewpoints you have to see in person 🌅 Oia, Fira, Imerovigli, Akrotiri lighthouse, and the caldera edge at Amoudi Bay.',
     likes: 142800, comments: 1234, category: 'travel',
     hashtags: ['#santorini', '#greece', '#travel', '#sunset', '#wanderlust'],
@@ -43,7 +48,7 @@ export const MOCK_POSTS: Post[] = [
   },
   {
     id: 'p11', user: MOCK_USERS[0],
-    image: 'https://picsum.photos/seed/kyoto88/600/750',
+    image: U('1528360983277-13d401cdc186'),
     caption: 'Kyoto cherry blossom season 2026 — forecast just released. Peak bloom: March 25–April 5. These are the 8 spots you need to visit 🌸',
     likes: 229400, comments: 4980, category: 'travel',
     hashtags: ['#kyoto', '#japan', '#cherryblossom', '#sakura', '#travel'],
@@ -52,7 +57,7 @@ export const MOCK_POSTS: Post[] = [
   },
   {
     id: 'p33', user: MOCK_USERS[11],
-    image: 'https://picsum.photos/seed/capetown55/600/750',
+    image: U('1580060839134-75a5edca2e99'),
     caption: 'Cape Town just ranked #1 city in Africa for experiences in 2026. Table Mountain, the V&A Waterfront, and Camps Bay — here\'s the complete guide 🏔️🌊',
     likes: 189000, comments: 3870, category: 'travel',
     hashtags: ['#capetown', '#southafrica', '#tablemountain', '#africa', '#travel'],
@@ -62,7 +67,7 @@ export const MOCK_POSTS: Post[] = [
   // ── Food ────────────────────────────────────────────────────────────────
   {
     id: 'p2', user: MOCK_USERS[1],
-    image: 'https://picsum.photos/seed/ramen88/600/750',
+    image: U('1569050467447-ce54b3bbc37d'),
     caption: 'The 12 best ramen shops in New York City right now — ranked by our food critics. From $8 bowls to $45 omakase tonkotsu. Full guide in bio 🍜',
     likes: 89200, comments: 1780, category: 'food',
     hashtags: ['#ramen', '#foodie', '#nyc', '#japanesefood', '#bestinnyc'],
@@ -71,7 +76,7 @@ export const MOCK_POSTS: Post[] = [
   },
   {
     id: 'p35', user: MOCK_USERS[1],
-    image: 'https://picsum.photos/seed/pasta44/600/750',
+    image: U('1555396273-367ea4eb4db5'),
     caption: 'Rome\'s best trattorias in 2026 — we ate at 40 restaurants so you don\'t have to. These 9 are worth flying for 🍝🇮🇹',
     likes: 97000, comments: 2230, category: 'food',
     hashtags: ['#rome', '#italian', '#trattoria', '#foodguide', '#foodphotography'],
@@ -81,7 +86,7 @@ export const MOCK_POSTS: Post[] = [
   // ── Fashion ─────────────────────────────────────────────────────────────
   {
     id: 'p3', user: MOCK_USERS[7],
-    image: 'https://picsum.photos/seed/fashion77/600/750',
+    image: U('1558618666-fcd25c85cd64'),
     caption: 'Spring/Summer 2026 — The trends that will define the season. Soft tailoring, fluid silhouettes, and a return to elevated minimalism 🌸 Full SS26 report on vogue.com.',
     likes: 312000, comments: 8920, category: 'fashion',
     hashtags: ['#fashion', '#spring2026', '#ootd', '#style', '#ss26'],
@@ -90,7 +95,7 @@ export const MOCK_POSTS: Post[] = [
   },
   {
     id: 'p13', user: MOCK_USERS[7],
-    image: 'https://picsum.photos/seed/runway55/600/750',
+    image: U('1469334031218-e382a71b716b'),
     caption: 'Milan Fashion Week SS27 — the 7 moments that had the entire industry talking. Full runway reviews at vogue.com 👗✨',
     likes: 456000, comments: 12300, category: 'fashion',
     hashtags: ['#milanfashionweek', '#fashion', '#runway', '#mfw', '#style'],
@@ -100,7 +105,7 @@ export const MOCK_POSTS: Post[] = [
   // ── Sports ──────────────────────────────────────────────────────────────
   {
     id: 'p4', user: MOCK_USERS[2],
-    image: 'https://picsum.photos/seed/soccer44/600/750',
+    image: U('1574629810360-7efbbe195018'),
     caption: 'UEFA Champions League Final 2026 — Wembley, 90,000 fans, the biggest night in European football. Tickets still available via UEFA.com ⚽🏆',
     likes: 984000, comments: 41200, category: 'sports',
     hashtags: ['#championsleague', '#uefafinal', '#football', '#wembley', '#ucl'],
@@ -111,7 +116,7 @@ export const MOCK_POSTS: Post[] = [
   // ── Art ─────────────────────────────────────────────────────────────────
   {
     id: 'p5', user: MOCK_USERS[3],
-    image: 'https://picsum.photos/seed/digitalart55/600/750',
+    image: U('1547826039-bfc35e0f1ea8'),
     caption: 'Introducing 14 breakthrough artists at Art Basel Miami Beach 2026. These are the names you\'ll be hearing for the next decade 🎨',
     likes: 67800, comments: 3120, category: 'art',
     hashtags: ['#artbasel', '#contemporaryart', '#art', '#artist', '#miami'],
@@ -121,7 +126,7 @@ export const MOCK_POSTS: Post[] = [
   // ── Tech ────────────────────────────────────────────────────────────────
   {
     id: 'p6', user: MOCK_USERS[4],
-    image: 'https://picsum.photos/seed/coding33/600/750',
+    image: U('1559136555-9303baea8ebd'),
     caption: 'TechCrunch Disrupt 2026 — 12,000 founders, 500 investors, 3 days. Early bird tickets now open. The startup event of the year is back 🚀',
     likes: 42300, comments: 1890, category: 'tech',
     hashtags: ['#techcrunch', '#disrupt', '#startups', '#tech', '#sanfrancisco'],
@@ -132,7 +137,7 @@ export const MOCK_POSTS: Post[] = [
   // ── Fitness ─────────────────────────────────────────────────────────────
   {
     id: 'p7', user: MOCK_USERS[5],
-    image: 'https://picsum.photos/seed/fitness99/600/750',
+    image: U('1571019613454-1cb2f99b2d8b'),
     caption: 'Nike\'s free community run returns to Sydney this Sunday — 5K and 10K routes, all paces welcome. Register free at nike.com/run 🌄💪',
     likes: 145600, comments: 4210, category: 'fitness',
     hashtags: ['#nike', '#run', '#sydney', '#fitness', '#community'],
@@ -143,7 +148,7 @@ export const MOCK_POSTS: Post[] = [
   // ── Music ───────────────────────────────────────────────────────────────
   {
     id: 'p8', user: MOCK_USERS[6],
-    image: 'https://picsum.photos/seed/studio77/600/750',
+    image: U('1571266028753-f35b5fb2beff'),
     caption: 'The 50 best clubs in the world for 2026 — RA\'s definitive annual ranking is here. #1 might surprise you 🎵',
     likes: 421000, comments: 18900, category: 'music',
     hashtags: ['#music', '#techno', '#clubculture', '#ra', '#electronicmusic'],
@@ -152,7 +157,7 @@ export const MOCK_POSTS: Post[] = [
   },
   {
     id: 'p18', user: MOCK_USERS[6],
-    image: 'https://picsum.photos/seed/concert11/600/750',
+    image: U('1514525253161-7a46d19cd819'),
     caption: 'Glastonbury 2026 lineup CONFIRMED. Headliners: three names that have never played the Pyramid Stage before. Tickets via glastonbury.com 🎸🌍',
     likes: 1890000, comments: 89200, category: 'music',
     hashtags: ['#glastonbury', '#glastonbury2026', '#music', '#festival', '#uk'],
@@ -163,7 +168,7 @@ export const MOCK_POSTS: Post[] = [
   // ── Pets ────────────────────────────────────────────────────────────────
   {
     id: 'p9', user: MOCK_USERS[8],
-    image: 'https://picsum.photos/seed/dogs22/600/750',
+    image: U('1587300003388-59208cc962cb'),
     caption: 'World Dog Show Helsinki 2026 — 30,000 dogs from 100+ countries. Register your dog or buy spectator tickets now. The largest dog show on the planet 🐾',
     likes: 289000, comments: 7430, category: 'pets',
     hashtags: ['#worlddogshow', '#dogs', '#helsinki', '#pets', '#dogshow'],
@@ -174,7 +179,7 @@ export const MOCK_POSTS: Post[] = [
   // ── Lifestyle ───────────────────────────────────────────────────────────
   {
     id: 'p10', user: MOCK_USERS[9],
-    image: 'https://picsum.photos/seed/lifestyle11/600/750',
+    image: U('1512470876302-972faa2aa9a4'),
     caption: 'The 20 most unique Airbnb Experiences in Amsterdam — from canal boat breakfast to a private Rembrandt studio tour. Book via airbnb.com/experiences ☕',
     likes: 187500, comments: 5620, category: 'lifestyle',
     hashtags: ['#airbnb', '#amsterdam', '#experiences', '#travel', '#lifestyle'],
@@ -184,7 +189,7 @@ export const MOCK_POSTS: Post[] = [
   // ── Events ──────────────────────────────────────────────────────────────
   {
     id: 'ev1', user: MOCK_USERS[10],
-    image: 'https://picsum.photos/seed/coachella2026/600/750',
+    image: U('1540039155733-5bb30b53aa14'),
     caption: 'COACHELLA 2026 — Lineup just announced and it\'s the most anticipated in festival history. Weekend 1 & 2 at Empire Polo Club, Indio CA. Tickets on sale Friday via coachella.com 🎪',
     likes: 2840000, comments: 184000, category: 'events',
     hashtags: ['#coachella', '#coachella2026', '#music', '#festival', '#california'],
@@ -194,7 +199,7 @@ export const MOCK_POSTS: Post[] = [
   },
   {
     id: 'ev3', user: MOCK_USERS[4],
-    image: 'https://picsum.photos/seed/wwdc2026/600/750',
+    image: U('1611532736597-de2d4265fba3'),
     caption: 'WWDC 2026 — Apple just sent invites. This year\'s keynote will reveal the next generation of AI across all Apple platforms. Free developer streaming at apple.com/wwdc 🍎',
     likes: 1560000, comments: 98000, category: 'events',
     hashtags: ['#wwdc', '#apple', '#tech', '#ios', '#developer'],
@@ -204,7 +209,7 @@ export const MOCK_POSTS: Post[] = [
   },
   {
     id: 'ev4', user: MOCK_USERS[7],
-    image: 'https://picsum.photos/seed/pfw2026/600/750',
+    image: U('1483985988355-763728e1935b'),
     caption: 'Paris Fashion Week SS27 is officially open. Vogue editors are front row. 10 days, 100 shows, one city. Live coverage at vogue.com 👗✨',
     likes: 1980000, comments: 76000, category: 'events',
     hashtags: ['#pfw', '#parisfashionweek', '#fashion', '#paris', '#ss27'],
@@ -214,7 +219,7 @@ export const MOCK_POSTS: Post[] = [
   },
   {
     id: 'ev5', user: MOCK_USERS[1],
-    image: 'https://picsum.photos/seed/ramenfest2026/600/750',
+    image: U('1557872943-16a5ac26437e'),
     caption: 'Tokyo Ramen Festival 2026 — 60 stalls, 200 varieties, 200,000 visitors over one weekend. Hibiya Park, free entry. Full guide at timeout.com/tokyo 🍜',
     likes: 448000, comments: 32000, category: 'events',
     hashtags: ['#tokyoramen', '#ramenfestival', '#tokyo', '#food', '#japan'],
@@ -225,7 +230,7 @@ export const MOCK_POSTS: Post[] = [
   // ── More content ─────────────────────────────────────────────────────────
   {
     id: 'p41', user: MOCK_USERS[11],
-    image: 'https://picsum.photos/seed/auroraborealis/600/750',
+    image: U('1531366936337-7c912a4589a7'),
     caption: 'Northern Lights forecast for Iceland — the next 72 hours look exceptional. KP index reaching 5-6. Here\'s exactly where to go and when to watch 🌌',
     likes: 892000, comments: 34000, category: 'travel',
     hashtags: ['#northernlights', '#auroraborealis', '#iceland', '#natgeo', '#bucketlist'],
@@ -234,7 +239,7 @@ export const MOCK_POSTS: Post[] = [
   },
   {
     id: 'p43', user: MOCK_USERS[5],
-    image: 'https://picsum.photos/seed/marathon11/600/750',
+    image: U('1571008887538-b36bb32f4571'),
     caption: 'Boston Marathon 2026 — registration opens Monday. 30,000 runners, one historic course. Everything you need to qualify and register at nike.com/boston 🏅',
     likes: 321000, comments: 12400, category: 'fitness',
     hashtags: ['#bostonmarathon', '#running', '#marathon', '#nike', '#runnersworld'],
@@ -244,7 +249,7 @@ export const MOCK_POSTS: Post[] = [
   },
   {
     id: 'p49', user: MOCK_USERS[9],
-    image: 'https://picsum.photos/seed/hygge55/600/750',
+    image: U('1513622470522-26c3c8a854bc'),
     caption: 'Copenhagen ranked the world\'s most liveable city for 2026. These 12 Airbnb Experiences show you exactly why locals love it here 🇩🇰🌟',
     likes: 523000, comments: 19200, category: 'lifestyle',
     hashtags: ['#copenhagen', '#denmark', '#hygge', '#airbnb', '#travel'],
@@ -253,7 +258,7 @@ export const MOCK_POSTS: Post[] = [
   },
   {
     id: 'p50', user: MOCK_USERS[2],
-    image: 'https://picsum.photos/seed/surfsession/600/750',
+    image: U('1501854140801-50d01698950b'),
     caption: 'World Surf League Championship Tour Gold Coast 2026 — the world\'s best surfers, Snapper Rocks, free entry on the beach. Livestream at worldsurfleague.com 🏄',
     likes: 671000, comments: 24400, category: 'sports',
     hashtags: ['#wsl', '#surf', '#goldcoast', '#championship', '#waves'],
@@ -264,16 +269,16 @@ export const MOCK_POSTS: Post[] = [
 ];
 
 export const MOCK_STORIES: Story[] = [
-  { id: 's1', user: MOCK_USERS[0], seen: false, image: 'https://picsum.photos/seed/story_lp/800/1400' },
-  { id: 's2', user: MOCK_USERS[1], seen: false, image: 'https://picsum.photos/seed/story_to/800/1400' },
-  { id: 's3', user: MOCK_USERS[7], seen: true,  image: 'https://picsum.photos/seed/story_vg/800/1400' },
-  { id: 's4', user: MOCK_USERS[2], seen: false, image: 'https://picsum.photos/seed/story_ue/800/1400' },
-  { id: 's5', user: MOCK_USERS[5], seen: true,  image: 'https://picsum.photos/seed/story_nk/800/1400' },
-  { id: 's6', user: MOCK_USERS[6], seen: false, image: 'https://picsum.photos/seed/story_ra/800/1400' },
-  { id: 's7', user: MOCK_USERS[3], seen: false, image: 'https://picsum.photos/seed/story_sa/800/1400' },
-  { id: 's8', user: MOCK_USERS[8], seen: true,  image: 'https://picsum.photos/seed/story_bt/800/1400' },
-  { id: 's9', user: MOCK_USERS[9], seen: false, image: 'https://picsum.photos/seed/story_ab/800/1400' },
-  { id: 's10', user: MOCK_USERS[11], seen: false, image: 'https://picsum.photos/seed/story_ng/800/1400' },
+  { id: 's1', user: MOCK_USERS[0],  seen: false, image: U('1506905925346-21bda4d32df4', 800, 1400) }, // Lonely Planet — mountain travel
+  { id: 's2', user: MOCK_USERS[1],  seen: false, image: U('1480714378408-67cf0d13bc1b', 800, 1400) }, // Time Out — city nightlife
+  { id: 's3', user: MOCK_USERS[7],  seen: true,  image: U('1558618666-fcd25c85cd64', 800, 1400) },   // Vogue — fashion
+  { id: 's4', user: MOCK_USERS[2],  seen: false, image: U('1574629810360-7efbbe195018', 800, 1400) }, // UEFA — stadium
+  { id: 's5', user: MOCK_USERS[5],  seen: true,  image: U('1571019613454-1cb2f99b2d8b', 800, 1400) }, // Nike — running
+  { id: 's6', user: MOCK_USERS[6],  seen: false, image: U('1514525253161-7a46d19cd819', 800, 1400) }, // RA — festival crowd
+  { id: 's7', user: MOCK_USERS[3],  seen: false, image: U('1547826039-bfc35e0f1ea8', 800, 1400) },   // Saatchi Art — gallery
+  { id: 's8', user: MOCK_USERS[8],  seen: true,  image: U('1587300003388-59208cc962cb', 800, 1400) }, // Battersea — dogs
+  { id: 's9', user: MOCK_USERS[9],  seen: false, image: U('1512470876302-972faa2aa9a4', 800, 1400) }, // Airbnb — Amsterdam
+  { id: 's10', user: MOCK_USERS[11], seen: false, image: U('1531366936337-7c912a4589a7', 800, 1400) }, // NatGeo — aurora
 ];
 
 export const CURRENT_USER = {
@@ -289,14 +294,14 @@ export const CURRENT_USER = {
 
 // AI/event-only notifications — no likes, follows, or mentions
 export const MOCK_NOTIFICATIONS: NovaNotification[] = [
-  { id: 'n1', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: 'https://picsum.photos/seed/notif_ev1/80/80', text: 'New concerts dropping in your area tonight 🎵', timestamp: h(0.3), read: false },
-  { id: 'n2', user: NOVA_AI_USER, type: 'event', postImage: 'https://picsum.photos/seed/notif_ev2/80/80', text: 'Glastonbury 2026 lineup just confirmed — check it out 🎸', timestamp: h(0.8), read: false },
-  { id: 'n3', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: 'https://picsum.photos/seed/notif_ev3/80/80', text: 'New art exhibitions near you this weekend 🎨', timestamp: h(1.5), read: false },
-  { id: 'n4', user: NOVA_AI_USER, type: 'event', postImage: 'https://picsum.photos/seed/notif_ev4/80/80', text: 'Food festival starts in 2 days — save your spot 🍕', timestamp: h(3), read: true },
-  { id: 'n5', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: 'https://picsum.photos/seed/notif_ev5/80/80', text: 'Tech meetup tonight — 47 people attending 💻', timestamp: h(6), read: true },
-  { id: 'n6', user: NOVA_AI_USER, type: 'event', postImage: 'https://picsum.photos/seed/notif_ev6/80/80', text: 'Coachella 2026 tickets on sale Friday 🎪', timestamp: h(12), read: true },
-  { id: 'n7', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: 'https://picsum.photos/seed/notif_ev7/80/80', text: 'Fitness events trending in your city this week 💪', timestamp: h(24), read: true },
-  { id: 'n8', user: NOVA_AI_USER, type: 'event', postImage: 'https://picsum.photos/seed/notif_ev8/80/80', text: 'Vintage market this Sunday — free entry 👗', timestamp: h(36), read: true },
+  { id: 'n1', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: U('1514525253161-7a46d19cd819', 80, 80), text: 'New concerts dropping in your area tonight 🎵', timestamp: h(0.3), read: false },
+  { id: 'n2', user: NOVA_AI_USER, type: 'event', postImage: U('1514525253161-7a46d19cd819', 80, 80), text: 'Glastonbury 2026 lineup just confirmed — check it out 🎸', timestamp: h(0.8), read: false },
+  { id: 'n3', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: U('1547826039-bfc35e0f1ea8', 80, 80), text: 'New art exhibitions near you this weekend 🎨', timestamp: h(1.5), read: false },
+  { id: 'n4', user: NOVA_AI_USER, type: 'event', postImage: U('1569050467447-ce54b3bbc37d', 80, 80), text: 'Food festival starts in 2 days — save your spot 🍕', timestamp: h(3), read: true },
+  { id: 'n5', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: U('1559136555-9303baea8ebd', 80, 80), text: 'Tech meetup tonight — 47 people attending 💻', timestamp: h(6), read: true },
+  { id: 'n6', user: NOVA_AI_USER, type: 'event', postImage: U('1540039155733-5bb30b53aa14', 80, 80), text: 'Coachella 2026 tickets on sale Friday 🎪', timestamp: h(12), read: true },
+  { id: 'n7', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: U('1571019613454-1cb2f99b2d8b', 80, 80), text: 'Fitness events trending in your city this week 💪', timestamp: h(24), read: true },
+  { id: 'n8', user: NOVA_AI_USER, type: 'event', postImage: U('1558618666-fcd25c85cd64', 80, 80), text: 'Vintage market this Sunday — free entry 👗', timestamp: h(36), read: true },
 ];
 
 export const DEFAULT_PREFERENCES = {
@@ -324,7 +329,7 @@ export const SPONSORED_POSTS: Post[] = [
   {
     id: 'sp1',
     user: sponsorUser('La Maison Restaurant', 'lamaisonrestaurant.com', '🍽️ Award-winning European cuisine · Private dining available'),
-    image: 'https://picsum.photos/seed/restaurant_fine1/600/750',
+    image: U('1414235077428-338989a2e8c0'),
     caption: 'An unforgettable dining experience in the heart of the city. Chef Marco\'s tasting menu takes you on a 7-course journey through seasonal European flavours — paired with our sommelier-curated wine selection. Private events, birthday dinners, and corporate bookings welcome.\n\n📍 City Centre · Reservations recommended\n🕐 Tue–Sun, 12:00–23:00\n💳 From €45 per person',
     likes: 4800, comments: 112, category: 'food',
     hashtags: ['#finedining', '#restaurant', '#nova', '#sponsored', '#foodie'],
@@ -339,7 +344,7 @@ export const SPONSORED_POSTS: Post[] = [
   {
     id: 'sp2',
     user: sponsorUser('SkyBar Rooftop', 'skybarrooftop.com', '🍸 City\'s best rooftop cocktail bar · Sunset views guaranteed'),
-    image: 'https://picsum.photos/seed/rooftopbar1/600/750',
+    image: U('1551024601-bec78aea704b'),
     caption: 'Craft cocktails with a view from 30 floors up. SkyBar is the city\'s most Instagrammed rooftop — sunset hour from 18:00–20:00 with 2-for-1 cocktails every Thursday and Friday. Walk-ins welcome, table reservations via our website.\n\n📍 30th Floor, Central Tower · Open daily\n🕐 16:00–01:00 · Happy Hour: 18:00–20:00\n🍸 Cocktails from €12',
     likes: 7200, comments: 234, category: 'venues',
     hashtags: ['#rooftopbar', '#cocktails', '#skybar', '#nova', '#sponsored'],
@@ -354,7 +359,7 @@ export const SPONSORED_POSTS: Post[] = [
   {
     id: 'sp3',
     user: sponsorUser('DriveNow Rental', 'drivenow-rental.com', '🚗 Premium car rental · No hidden fees · Free cancellation'),
-    image: 'https://picsum.photos/seed/carrental_premium/600/750',
+    image: U('1449965408869-eaa3f722e40d'),
     caption: 'Explore the region on your own terms. DriveNow offers a fleet of 200+ vehicles — from compact city cars to luxury SUVs and convertibles. Unlimited mileage, full insurance, and 24/7 roadside assistance included. Pick up at the airport or any city location.\n\n📍 Airport + 3 city locations · Open 06:00–23:00\n🚗 From €29/day · No deposit required\n✅ Free cancellation up to 24h before',
     likes: 2900, comments: 87, category: 'travel',
     hashtags: ['#carrental', '#roadtrip', '#travel', '#nova', '#sponsored'],
@@ -369,7 +374,7 @@ export const SPONSORED_POSTS: Post[] = [
   {
     id: 'sp4',
     user: sponsorUser('Urban Suites Hotel', 'urbansuites.com', '🏨 Boutique hotel in the city centre · Rooftop pool · Free WiFi'),
-    image: 'https://picsum.photos/seed/boutiquehotel1/600/750',
+    image: U('1566073771259-6a8506099945'),
     caption: 'Wake up in the middle of everything. Urban Suites puts you steps from the city\'s best restaurants, galleries, and transport links. Rooftop pool, in-room spa treatments, complimentary breakfast, and a concierge team that knows every hidden gem in the city.\n\n📍 City Centre · 2-min walk from metro\n🏊 Rooftop pool May–Oct · Free cancellation\n🛏️ Rooms from €89/night · Breakfast included',
     likes: 5600, comments: 148, category: 'travel',
     hashtags: ['#hotel', '#boutique', '#citybreak', '#nova', '#sponsored'],
@@ -384,7 +389,7 @@ export const SPONSORED_POSTS: Post[] = [
   {
     id: 'sp5',
     user: sponsorUser('Nova Tours', 'novatours.co', '🗺️ Local guided tours · Small groups · Expert guides'),
-    image: 'https://picsum.photos/seed/guidedtour1/600/750',
+    image: U('1468413253333-46f4eba27f69'),
     caption: 'See the city like a local. Nova Tours runs small-group walking tours (max 12 people) led by passionate local guides who know every story behind every street corner. Morning old-town walks, evening food tours, and private custom experiences available daily.\n\n📍 Meets at Central Square · Daily departures\n🕐 09:00 & 18:00 · Duration 2.5h\n🎟️ From €18/person · Kids under 12 free',
     likes: 3400, comments: 95, category: 'sightseeing',
     hashtags: ['#tour', '#sightseeing', '#localguide', '#nova', '#sponsored'],
@@ -399,7 +404,7 @@ export const SPONSORED_POSTS: Post[] = [
   {
     id: 'sp6',
     user: sponsorUser('Zen Wellness Spa', 'zenwellness-spa.com', '💆 Urban wellness retreat · Massage · Sauna · Float therapy'),
-    image: 'https://picsum.photos/seed/spa_wellness1/600/750',
+    image: U('1544161515-4ab6ce6db874'),
     caption: 'The city\'s most complete urban wellness escape. Zen Wellness offers traditional Thai massage, hot stone therapy, infrared sauna, and Europe\'s largest urban float tank. Day passes available — no booking required. Gift vouchers perfect for any occasion.\n\n📍 Near City Park · Free parking\n🕐 Mon–Sun 09:00–21:00\n💆 Massages from €55 · Day pass €35',
     likes: 4100, comments: 118, category: 'lifestyle',
     hashtags: ['#spa', '#wellness', '#selfcare', '#nova', '#sponsored'],
@@ -414,7 +419,7 @@ export const SPONSORED_POSTS: Post[] = [
   {
     id: 'sp7',
     user: sponsorUser('AquaJet Rentals', 'aquajet-rentals.com', '🛥️ Jetski · Speedboat · Paddleboard Rentals'),
-    image: 'https://picsum.photos/seed/jetski_watersport/600/750',
+    image: U('1530870110042-98b2cb110834'),
     caption: 'Hit the water this weekend. AquaJet rents jetskis, speedboats, and paddleboards — no experience needed, our instructors handle safety briefings. Perfect for solo riders, couples, or groups of up to 8. Hourly and half-day packages available.\n\n📍 Marina Bay · Open daily 08:00–20:00\n🌊 Jetskis from €45/hour · Speedboats from €120/hour\n✅ Safety gear included · No licence required',
     likes: 3800, comments: 104, category: 'sports',
     hashtags: ['#jetski', '#watersports', '#boatrental', '#nova', '#sponsored'],
@@ -429,7 +434,7 @@ export const SPONSORED_POSTS: Post[] = [
   {
     id: 'sp8',
     user: sponsorUser('Happy Paws Pet Hotel', 'happypawshotel.com', '🐾 Dog & cat boarding · Grooming · Daycare'),
-    image: 'https://picsum.photos/seed/pethotel_dogs/600/750',
+    image: U('1548199973-03cce0bbc87b'),
     caption: 'Your pets deserve a holiday too. Happy Paws is a 5-star pet hotel with individual suites, daily playtime, professional grooming, and live-stream cam access so you can check in from anywhere. Vet on call 24/7 — because peace of mind matters.\n\n📍 Quiet location · 10 min from airport\n🐶 Dog daycare from €20/day · Overnight from €35\n🐱 Cat suites from €18/night · Grooming from €30',
     likes: 5200, comments: 186, category: 'pets',
     hashtags: ['#pethotel', '#dogboarding', '#petcare', '#nova', '#sponsored'],
@@ -444,7 +449,7 @@ export const SPONSORED_POSTS: Post[] = [
   {
     id: 'sp9',
     user: sponsorUser('The Harbour Kitchen', 'harbourkitchen.com', '🍽️ Fresh seafood & wood-fired meats · Waterfront dining'),
-    image: 'https://picsum.photos/seed/harbour_restaurant/600/750',
+    image: U('1414235077428-338989a2e8c0', 600, 750),
     caption: 'The best seat in the city comes with a harbour view. The Harbour Kitchen serves wood-fired fish, fresh oysters, and locally sourced steaks. Sunday brunch is legendary — book early. Private dining room available for events up to 30 guests.\n\n📍 Harbour Front · Waterfront terrace open May–Sep\n🕐 Daily 12:00–23:00 · Brunch Sat & Sun 10:00–15:00\n🍽️ Mains from €18 · Sunday brunch €32 per person',
     likes: 6100, comments: 221, category: 'food',
     hashtags: ['#seafood', '#harbourdining', '#foodie', '#nova', '#sponsored'],
@@ -459,7 +464,7 @@ export const SPONSORED_POSTS: Post[] = [
   {
     id: 'sp10',
     user: sponsorUser('The Old Quarter Pub', 'oldquarterpub.com', '🍺 Craft beer · Live music · Pub quiz every Thursday'),
-    image: 'https://picsum.photos/seed/local_pub_cozy/600/750',
+    image: U('1436076863939-06870fe779c2'),
     caption: 'Your neighbourhood pub, done properly. The Old Quarter pours 20 rotating craft beers on tap, hosts live music every Friday and Saturday, and runs the city\'s most competitive pub quiz every Thursday at 20:00. Kitchen open until midnight — proper comfort food, nothing fancy.\n\n📍 Old Quarter · 2 min from tram stop\n🍺 Pints from €5 · Kitchen open till midnight\n🎵 Live music Fri & Sat from 21:00 · Quiz Thu 20:00',
     likes: 4400, comments: 167, category: 'venues',
     hashtags: ['#publife', '#craftbeer', '#livemusic', '#pubquiz', '#nova', '#sponsored'],
@@ -518,6 +523,20 @@ export function timeAgo(timestamp: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-export const GALLERY_IMAGES = Array.from({ length: 12 }, (_, i) => ({
-  id: `g${i}`, url: `https://picsum.photos/seed/gallery${i + 10}/600/750`,
+const GALLERY_IDS = [
+  '1570077188670-e3a8d69ac5ff', // Santorini
+  '1528360983277-13d401cdc186', // Kyoto
+  '1580060839134-75a5edca2e99', // Cape Town
+  '1569050467447-ce54b3bbc37d', // Ramen
+  '1555396273-367ea4eb4db5',    // Italian food
+  '1514525253161-7a46d19cd819', // Music festival
+  '1540039155733-5bb30b53aa14', // Coachella
+  '1531366936337-7c912a4589a7', // Northern lights
+  '1512470876302-972faa2aa9a4', // Amsterdam
+  '1571019613454-1cb2f99b2d8b', // Running
+  '1547826039-bfc35e0f1ea8',    // Art gallery
+  '1574629810360-7efbbe195018', // Stadium
+];
+export const GALLERY_IMAGES = GALLERY_IDS.map((id, i) => ({
+  id: `g${i}`, url: U(id),
 }));
