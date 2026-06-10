@@ -46,12 +46,22 @@ create table if not exists group_events (
   unique (group_id, post_id)
 );
 
+create table if not exists post_interactions (
+  id               uuid default gen_random_uuid() primary key,
+  user_id          uuid references auth.users(id) on delete cascade,
+  post_id          text not null,
+  interaction_type text not null check (interaction_type in ('like', 'save', 'going')),
+  created_at       timestamptz default now(),
+  unique (user_id, post_id, interaction_type)
+);
+
 -- ── Step 2: Enable RLS on all tables ────────────────────────────────────────
 
-alter table profiles     enable row level security;
-alter table follows      enable row level security;
-alter table groups       enable row level security;
-alter table group_members enable row level security;
+alter table profiles          enable row level security;
+alter table follows           enable row level security;
+alter table groups            enable row level security;
+alter table group_members     enable row level security;
+alter table post_interactions enable row level security;
 alter table group_events  enable row level security;
 
 -- ── Step 3: Add all policies (all tables now exist) ──────────────────────────
@@ -90,3 +100,8 @@ create policy "Members can add events"        on group_events for insert with ch
   exists (select 1 from group_members where group_id = group_events.group_id and user_id = auth.uid())
 );
 create policy "Adder can remove events"       on group_events for delete using (auth.uid() = added_by);
+
+-- post_interactions
+create policy "Users can view own interactions"   on post_interactions for select using (auth.uid() = user_id);
+create policy "Users can insert own interactions" on post_interactions for insert with check (auth.uid() = user_id);
+create policy "Users can delete own interactions" on post_interactions for delete using (auth.uid() = user_id);
