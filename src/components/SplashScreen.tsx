@@ -48,19 +48,12 @@ export default function SplashScreen({ onComplete }: Props) {
             className="flex flex-col items-center"
           >
             {/* Icon */}
-            <div
-              className="w-24 h-24 rounded-3xl flex items-center justify-center mb-5 shadow-2xl"
-              style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}
-            >
-              <svg width="52" height="52" viewBox="0 0 52 52" fill="none">
-                <path
-                  d="M26 6 L42 20 L42 42 L10 42 L10 20 Z"
-                  fill="none" stroke="white" strokeWidth="3" strokeLinejoin="round"
-                />
-                <circle cx="26" cy="28" r="6" fill="white" opacity="0.9" />
-                <path d="M18 20 Q26 12 34 20" stroke="white" strokeWidth="2.5" fill="none" strokeLinecap="round" />
-              </svg>
-            </div>
+            <img
+              src="/icon-512.png"
+              alt="Nova"
+              className="w-24 h-24 rounded-3xl mb-5 shadow-2xl"
+              style={{ objectFit: 'cover' }}
+            />
 
             {/* App name */}
             <motion.h1
@@ -99,7 +92,7 @@ export default function SplashScreen({ onComplete }: Props) {
             className="absolute bottom-12 text-xs font-medium"
             style={{ color: 'rgba(200,190,220,0.5)' }}
           >
-            from Nova Labs
+            by Leone Nero
           </motion.p>
 
           {/* Loading bar */}

@@ -7,6 +7,7 @@ import {
   BadgeCheck, Camera, Sliders, LogOut, Shield, Bell, Trash2,
   MapPin, MapPinOff, Calendar, Users, Star, Trophy, Search,
   UserPlus, UserCheck, X, LogIn, Globe, Heart, Check,
+  MessageSquare, FileText, Info, ExternalLink, Phone,
 } from 'lucide-react';
 import { CURRENT_USER, MOCK_POSTS, formatCount } from '@/data/mockData';
 import { Category, Post } from '@/types';
@@ -64,6 +65,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showFollowSearch, setShowFollowSearch] = useState(false);
   const [showLanguagePicker, setShowLanguagePicker] = useState(false);
+  const [showContactSheet, setShowContactSheet] = useState(false);
   const [followQuery, setFollowQuery]     = useState('');
   const [followResults, setFollowResults] = useState<SupabaseProfile[]>([]);
   const [followingIds, setFollowingIds]   = useState<string[]>([]);
@@ -170,6 +172,26 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                 {label}
               </button>
             ))}
+
+            {/* Section separator */}
+            <div className="px-4 py-2" style={{ borderBottom: '1px solid #1a1a24' }}>
+              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: '#444455' }}>Contact & Legal</p>
+            </div>
+
+            {[
+              { icon: MessageSquare, label: 'Contact Leone Nero', action: () => setShowContactSheet(true) },
+              { icon: Shield,        label: 'Privacy Policy',     action: () => window.open('/privacy', '_blank') },
+              { icon: FileText,      label: 'Terms of Service',   action: () => window.open('/terms', '_blank') },
+              { icon: Info,          label: 'Cookie Policy',      action: () => window.open('/cookie', '_blank') },
+            ].map(({ icon: Icon, label, action }) => (
+              <button key={label} onClick={action}
+                className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-medium"
+                style={{ color: '#d0d0e0', borderBottom: '1px solid #1a1a24' }}>
+                <Icon size={18} style={{ color: '#888899' }} />
+                {label}
+                <ExternalLink size={12} style={{ color: '#444455', marginLeft: 'auto' }} />
+              </button>
+            ))}
           </motion.div>
         )}
       </AnimatePresence>
@@ -230,6 +252,77 @@ export default function ProfileTab({ onOpenAuth }: Props) {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Contact sheet */}
+      <AnimatePresence>
+        {showContactSheet && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40" style={{ background: 'rgba(0,0,0,0.6)' }}
+              onClick={() => setShowContactSheet(false)} />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl px-5 pb-10 pt-5"
+              style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}
+            >
+              <div className="w-10 h-1 rounded-full mx-auto mb-5" style={{ background: '#3a3a4a' }} />
+
+              {/* Brand header */}
+              <div className="flex items-center gap-3 mb-6">
+                <img src="/icon-192.png" alt="Leone Nero" className="w-12 h-12 rounded-2xl" />
+                <div>
+                  <p className="text-base font-bold text-white">Leone Nero</p>
+                  <p className="text-xs" style={{ color: '#666677' }}>The company behind this app</p>
+                </div>
+                <button onClick={() => setShowContactSheet(false)} className="ml-auto">
+                  <X size={20} style={{ color: '#666677' }} />
+                </button>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                {/* Address */}
+                <div className="flex items-center gap-3 p-4 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
+                  <MapPin size={18} style={{ color: '#8b5cf6' }} />
+                  <div>
+                    {/* TODO: update with real address */}
+                    <p className="text-sm font-semibold text-white">Milano, Italy</p>
+                    <p className="text-xs" style={{ color: '#666677' }}>Headquarters</p>
+                  </div>
+                </div>
+
+                {/* Phone */}
+                <button
+                  className="flex items-center gap-3 p-4 rounded-2xl w-full text-left"
+                  style={{ background: '#13131a', border: '1px solid #2a2a38' }}
+                  onClick={() => window.open('tel:+390200000000')}
+                >
+                  <Phone size={18} style={{ color: '#ec4899' }} />
+                  <div>
+                    {/* TODO: update with real phone number */}
+                    <p className="text-sm font-semibold text-white">+39 02 0000 0000</p>
+                    <p className="text-xs" style={{ color: '#666677' }}>Tap to call</p>
+                  </div>
+                </button>
+
+                {/* Website */}
+                <button
+                  className="flex items-center gap-3 p-4 rounded-2xl w-full text-left"
+                  style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(236,72,153,0.1))', border: '1px solid rgba(139,92,246,0.3)' }}
+                  onClick={() => window.open('https://markusmuellner13-gif.github.io/leone-nero-website/index.html', '_blank', 'noopener')}
+                >
+                  <Globe size={18} style={{ color: '#a78bfa' }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: '#a78bfa' }}>leone-nero.com</p>
+                    <p className="text-xs" style={{ color: '#666677' }}>Visit our website</p>
+                  </div>
+                  <ExternalLink size={14} style={{ color: '#a78bfa' }} />
+                </button>
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
 
