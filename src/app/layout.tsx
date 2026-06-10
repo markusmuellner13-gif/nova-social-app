@@ -5,6 +5,7 @@ import { AppProvider } from '@/context/AppContext';
 import { Analytics } from '@vercel/analytics/react';
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://nova-phi-liart.vercel.app'),
   title: 'Nova — Your World, Curated by AI',
   description: 'Nova is an AI-powered social discovery app. Find events, concerts, exhibitions and things to do wherever you are.',
   manifest: '/manifest.json',
@@ -13,6 +14,21 @@ export const metadata: Metadata = {
     statusBarStyle: 'black-translucent',
     title: 'Nova',
   },
+  openGraph: {
+    type: 'website',
+    url: '/',
+    siteName: 'Nova',
+    title: 'Nova — Your World, Curated by AI',
+    description: 'Discover real events, concerts, sightseeing and things to do near you — curated by AI, personalised for you.',
+    images: [{ url: '/og-image.png', width: 1200, height: 630, alt: 'Nova — AI-powered social discovery' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Nova — Your World, Curated by AI',
+    description: 'Discover real events, concerts, sightseeing and things to do near you — curated by AI, personalised for you.',
+    images: ['/og-image.png'],
+  },
+  keywords: ['events', 'discover', 'AI', 'social', 'concerts', 'sightseeing', 'things to do'],
 };
 
 export const viewport: Viewport = {

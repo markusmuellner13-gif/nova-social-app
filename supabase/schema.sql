@@ -105,3 +105,14 @@ create policy "Adder can remove events"       on group_events for delete using (
 create policy "Users can view own interactions"   on post_interactions for select using (auth.uid() = user_id);
 create policy "Users can insert own interactions" on post_interactions for insert with check (auth.uid() = user_id);
 create policy "Users can delete own interactions" on post_interactions for delete using (auth.uid() = user_id);
+
+-- ── Step 4: Indexes for query performance at scale ───────────────────────────
+
+create index if not exists idx_post_interactions_user_id on post_interactions(user_id);
+create index if not exists idx_post_interactions_post_id on post_interactions(post_id);
+create index if not exists idx_follows_follower_id       on follows(follower_id);
+create index if not exists idx_follows_following_id      on follows(following_id);
+create index if not exists idx_group_members_group_id    on group_members(group_id);
+create index if not exists idx_group_members_user_id     on group_members(user_id);
+create index if not exists idx_group_events_group_id     on group_events(group_id);
+create index if not exists idx_profiles_username         on profiles(username);
