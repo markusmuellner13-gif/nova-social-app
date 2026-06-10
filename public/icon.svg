@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square (iOS standard ~22% corner radius) -->
+  <rect width="1024" height="1024" rx="230" ry="230" fill="url(#bg)"/>
+
+  <!-- Map pin: circular head tapering to a point -->
+  <path d="
+    M 512 195
+    C 388 195 285 298 285 422
+    C 285 530 355 618 448 685
+    L 512 800
+    L 576 685
+    C 669 618 739 530 739 422
+    C 739 298 636 195 512 195
+    Z
+  " fill="white"/>
+
+  <!-- 4-pointed sparkle star inside the pin, centered at pin head -->
+  <path d="
+    M 512 318
+    C 512 378 574 434 638 434
+    C 574 434 512 490 512 550
+    C 512 490 450 434 386 434
+    C 450 434 512 378 512 318
+    Z
+  " fill="#9333ea" opacity="0.88"/>
+</svg>
