@@ -3,12 +3,52 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+const PHRASES = [
+  'Your city. Rediscovered.',
+  'Tonight\'s plans, sorted.',
+  'Something\'s happening near you.',
+  'Hidden gems, found for you.',
+  'Let AI plan your evening.',
+  'Never miss what matters.',
+  'Find your next favourite place.',
+  'AI that knows your taste.',
+  'Your neighbourhood, unlocked.',
+  'What\'s on tonight?',
+  'Your evening starts here.',
+  'Smarter discovery, every time.',
+  'Live more. Discover more.',
+  'Every city has a secret.',
+  'The best night out, planned.',
+  'From concerts to hidden cafés.',
+  'Concerts, art, food — for you.',
+  'Explore. Save. Go.',
+  'Your personal city guide.',
+  'Set reminders. Be there.',
+  'Experiences worth sharing.',
+  'Discover the unexpected.',
+  'Something new is always near.',
+  'Local gems, right on your feed.',
+  'The city never sleeps.',
+  'Always something new to find.',
+  'Your feed knows you well.',
+  'Events tailored to your taste.',
+  'Never a boring evening again.',
+  'The world is your playground.',
+  'Great nights start with Nova.',
+  'Curated just for you, always.',
+  'Find friends. Find events.',
+  'Save it. Then go.',
+  'Your AI-powered night out.',
+];
+
 interface Props {
   onComplete: () => void;
 }
 
 export default function SplashScreen({ onComplete }: Props) {
   const [phase, setPhase] = useState<'logo' | 'tagline' | 'exit'>('logo');
+  // Pick once on mount — function initialiser runs only on first render
+  const [phrase] = useState(() => PHRASES[Math.floor(Math.random() * PHRASES.length)]);
 
   useEffect(() => {
     const t1 = setTimeout(() => setPhase('tagline'), 900);
@@ -68,23 +108,24 @@ export default function SplashScreen({ onComplete }: Props) {
               Nova
             </motion.h1>
 
-            {/* Tagline */}
+            {/* Random phrase — fades in after logo settles */}
             <AnimatePresence>
               {phase === 'tagline' && (
                 <motion.p
+                  key={phrase}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5 }}
-                  className="text-sm font-medium mt-2"
-                  style={{ color: 'rgba(200,190,220,0.7)' }}
+                  className="text-sm font-medium mt-2 text-center px-8"
+                  style={{ color: 'rgba(200,190,220,0.75)' }}
                 >
-                  Find your next adventure
+                  {phrase}
                 </motion.p>
               )}
             </AnimatePresence>
           </motion.div>
 
-          {/* Bottom from-meta label */}
+          {/* by Leone Nero */}
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.4 }}
