@@ -131,7 +131,6 @@ const CITY_PHRASES: Record<string, string[]> = {
   'oslo':         ['Oslo — fjords, forests, and the future.', 'Where nature and city life collide.', 'Norway\'s most exciting capital.'],
   'helsinki':     ['Helsinki — Nordic design and sauna culture.', 'The most liveable city in Europe.', 'Art, architecture, and Arctic light.'],
   'brussels':     ['Brussels — the capital of Europe.', 'Waffles, beer, and world-class art.', 'A small city with a global heartbeat.'],
-  'zurich':       ['Zurich — where quality meets discovery.', 'Alps, art, and amazing food.', 'The Swiss city that always delivers.'],
   'warsaw':       ['Warsaw — resilient, vibrant, alive.', 'A city reborn — and thriving.', 'Eastern Europe\'s best-kept secret.'],
   'krakow':       ['Kraków — medieval beauty, modern energy.', 'Old town charm with a youthful soul.', 'Poland\'s most magical city.'],
   'edinburgh':    ['Edinburgh — castles, culture, and character.', 'The world\'s greatest festival city.', 'Scotland\'s capital never disappoints.'],
