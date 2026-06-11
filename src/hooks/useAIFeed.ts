@@ -70,6 +70,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
   const prevCityRef   = useRef<string | null>(null);
   const categoryRef   = useRef<string>('events');
   const refreshTimer  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tourismFetchedRef = useRef<Set<string>>(new Set());
 
   // ── Expired-event cleanup interval (runs every 10 min) ────────────────────
   useEffect(() => {
@@ -144,6 +145,33 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     }
   }
 
+  // ── Tourism blend: events promoted on the city's official tourism websites ─
+  // Fires once per city alongside the first event fetch; results merge in as
+  // they arrive so festivals/markets from tourism boards appear in the feed.
+  const TOURISM_CATS = new Set(['events', 'music', 'sports', 'art', 'food', 'lifestyle', 'community', 'discover']);
+
+  function fetchTourismEvents(city: string, loc: LocationState | null, category: string) {
+    if (!TOURISM_CATS.has(category) || tourismFetchedRef.current.has(city)) return;
+    tourismFetchedRef.current.add(city);
+
+    const params = `${buildParams(loc, 'events', 0, RADIUS_TIERS[0])}&source=tourism&count=6`;
+    fetch(`/api/events?${params}`)
+      .then(res => (res.ok ? res.json() : null))
+      .then((data: { posts?: Post[] } | null) => {
+        const tourismPosts = filterExpired(data?.posts ?? []);
+        if (!tourismPosts.length) return;
+        setPosts(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          const fresh = tourismPosts.filter(p => !existingIds.has(p.id));
+          if (!fresh.length) return prev;
+          const merged = [...prev, ...fresh];
+          writeCache(city, categoryRef.current, merged, pageRef.current, radiusTierRef.current);
+          return merged;
+        });
+      })
+      .catch(() => { tourismFetchedRef.current.delete(city); });
+  }
+
   function buildParams(loc: LocationState | null, category: string, page: number, radius: number): string {
     return new URLSearchParams({
       city:     loc?.city    ?? 'Vienna',
@@ -168,6 +196,9 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
 
     const city   = location?.city    ?? 'Vienna';
     const radius = RADIUS_TIERS[radiusTierRef.current] ?? RADIUS_TIERS[RADIUS_TIERS.length - 1];
+
+    // First page for this city → also pull tourism-board events in parallel
+    if (pageRef.current === 0) fetchTourismEvents(city, location, cat);
 
     try {
       const params = buildParams(location, cat, pageRef.current, radius);
@@ -237,6 +268,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     setHasMore(true);
     inFlightRef.current   = false;
     prevCityRef.current   = null;
+    tourismFetchedRef.current.clear();
   }, []);
 
   return { posts, loading, hasMore, fetchMore, reset };

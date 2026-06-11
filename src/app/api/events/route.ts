@@ -11,7 +11,11 @@ const WIKI_CACHE  = { 'Cache-Control': 'public, max-age=3600, s-maxage=3600' };
 const VALID_CATEGORIES = new Set([
   'events','music','sports','art','fitness','food',
   'sightseeing','lifestyle','discover','shops','venues','community',
+  'restaurants','hotels','rentals','travel','tech','pets','fashion',
 ]);
+
+// Categories served by OpenStreetMap Overpass (real local places)
+const OSM_CATEGORIES = new Set(['shops','venues','restaurants','hotels','rentals']);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -177,7 +181,10 @@ function bestTmImage(images: TmImage[]): string {
 async function fetchWikipediaNearby(lat: number, lng: number, radiusM: number): Promise<WikiGeoResult[]> {
   const r = Math.min(Math.max(radiusM, 1000), 10000); // Wikipedia max: 10000m
   const url = `https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat}|${lng}&gsradius=${r}&gslimit=50&format=json&origin=*`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Nova-App/2.0 (contact@nova-app.com)', 'Api-User-Agent': 'Nova-App/2.0 (contact@nova-app.com)' },
+    signal: AbortSignal.timeout(4000),
+  });
   if (!res.ok) throw new Error(`Wikipedia GeoSearch ${res.status}`);
   const d = await res.json() as { query?: { geosearch?: WikiGeoResult[] } };
   return d.query?.geosearch ?? [];
@@ -188,7 +195,10 @@ async function fetchWikipediaSummary(title: string): Promise<WikiSummary | null>
     const encoded = encodeURIComponent(title.replace(/ /g, '_'));
     const res = await fetch(
       `https://en.wikipedia.org/api/rest_v1/page/summary/${encoded}`,
-      { signal: AbortSignal.timeout(3000) }
+      {
+        headers: { 'User-Agent': 'Nova-App/2.0 (contact@nova-app.com)', 'Api-User-Agent': 'Nova-App/2.0 (contact@nova-app.com)' },
+        signal: AbortSignal.timeout(3000),
+      }
     );
     if (!res.ok) return null;
     return await res.json() as WikiSummary;
@@ -212,7 +222,29 @@ const OVERPASS_QUERIES: Record<string, string> = {
     node["leisure"~"stadium|sports_hall|arena"](around:RADIUS,LAT,LNG);
     way["leisure"~"stadium|sports_hall|arena"](around:RADIUS,LAT,LNG);
   );out body center;`,
+  restaurants: `[out:json][timeout:12];(
+    node["amenity"~"restaurant|cafe|bar|biergarten|pub"]["name"](around:RADIUS,LAT,LNG);
+    way["amenity"~"restaurant|cafe|bar|biergarten|pub"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+  hotels: `[out:json][timeout:12];(
+    node["tourism"~"hotel|guest_house|hostel|motel|apartment|chalet"]["name"](around:RADIUS,LAT,LNG);
+    way["tourism"~"hotel|guest_house|hostel|motel|apartment|chalet"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+  rentals: `[out:json][timeout:12];(
+    node["amenity"~"car_rental|bicycle_rental|boat_rental|ski_rental"](around:RADIUS,LAT,LNG);
+    way["amenity"~"car_rental|bicycle_rental|boat_rental|ski_rental"](around:RADIUS,LAT,LNG);
+    node["shop"~"rental|motorcycle_rental"](around:RADIUS,LAT,LNG);
+    way["shop"~"rental|motorcycle_rental"](around:RADIUS,LAT,LNG);
+  );out body center;`,
 };
+
+// Overpass requires a User-Agent (rejects anonymous requests with 406).
+// Kumi mirror first — overpass-api.de rate-limits per IP, which Vercel's
+// shared egress IPs exhaust quickly.
+const OVERPASS_ENDPOINTS = [
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
+];
 
 async function fetchOverpassPlaces(lat: number, lng: number, category: string, radiusM: number): Promise<OverpassElement[]> {
   const query = (OVERPASS_QUERIES[category] ?? OVERPASS_QUERIES.venues)
@@ -220,22 +252,40 @@ async function fetchOverpassPlaces(lat: number, lng: number, category: string, r
     .replace(/LNG/g, String(lng))
     .replace(/RADIUS/g, String(Math.min(radiusM, 10000)));
 
-  const res = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(query)}`,
-    signal: AbortSignal.timeout(12000),
-  });
-  if (!res.ok) throw new Error(`Overpass ${res.status}`);
-  const d = await res.json() as { elements?: OverpassElement[] };
-  return (d.elements ?? []).filter(e => e.tags?.name);
+  let lastErr: Error = new Error('Overpass unavailable');
+  for (const endpoint of OVERPASS_ENDPOINTS) {
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Nova-App/2.0 (contact@nova-app.com)',
+        },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!res.ok) throw new Error(`Overpass ${res.status}`);
+      const d = await res.json() as { elements?: OverpassElement[] };
+      return (d.elements ?? []).filter(e => e.tags?.name);
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+  throw lastErr;
 }
 
 async function enrichPlaceDescriptions(
   places: { name: string; type: string; address: string }[],
   city: string, category: string, apiKey: string
 ): Promise<string[]> {
-  const catLabel = category === 'shops' ? 'second-hand/vintage shop' : 'venue or entertainment space';
+  const CAT_LABELS: Record<string, string> = {
+    shops:       'second-hand/vintage shop',
+    venues:      'venue or entertainment space',
+    restaurants: 'restaurant, café or bar',
+    hotels:      'hotel or place to stay',
+    rentals:     'rental service (bikes, cars, boats, equipment)',
+  };
+  const catLabel = CAT_LABELS[category] ?? 'venue or entertainment space';
   const prompt = `Write a punchy 2-sentence description for each of these ${places.length} real ${catLabel}s in ${city} for a social discovery app.
 Sentence 1: what makes this place special and worth visiting.
 Sentence 2: what the vibe and experience feels like.
@@ -270,9 +320,16 @@ async function overpassToPost(
   const hours   = tags.opening_hours ?? '';
   const domain  = website ? (() => { try { return new URL(website).hostname; } catch { return ''; } })() : '';
 
+  const cuisine = (tags.cuisine ?? '').split(';')[0].replace(/_/g, ' ');
+  const stars   = tags.stars ?? '';
+  const phone   = tags.phone ?? tags['contact:phone'] ?? '';
+
   const IMG_QUERIES: Record<string, string> = {
-    shops:  'vintage thrift store interior clothing racks',
-    venues: 'concert hall theatre interior stage lights',
+    shops:       'vintage thrift store interior clothing racks',
+    venues:      'concert hall theatre interior stage lights',
+    restaurants: cuisine ? `${cuisine} restaurant food dish` : 'cozy restaurant interior dinner table',
+    hotels:      'elegant hotel room interior design',
+    rentals:     'bicycle car rental shop city',
   };
   const imgQ = IMG_QUERIES[category] ?? `${category} place interior`;
 
@@ -281,14 +338,21 @@ async function overpassToPost(
     new Promise<string>(resolve => setTimeout(() => resolve(picsumUrl(`osm_${el.id}`)), 3000)),
   ]);
 
-  const typeLabel: Record<string, string> = { shops: '🛍️', venues: '🎭', community: '🤝' };
+  const typeLabel: Record<string, string> = { shops: '🛍️', venues: '🎭', community: '🤝', restaurants: '🍽️', hotels: '🏨', rentals: '🚲' };
   const osmUrl = `https://www.openstreetmap.org/${el.type}/${el.id}`;
+
+  const extras = [
+    cuisine && category === 'restaurants' ? `🍴 ${cuisine.charAt(0).toUpperCase()}${cuisine.slice(1)} cuisine` : '',
+    stars && category === 'hotels' ? `⭐ ${stars}-star` : '',
+    hours ? `⏰ ${hours}` : '',
+    phone ? `📞 ${phone}` : '',
+  ].filter(Boolean).map(l => `\n${l}`).join('');
 
   return {
     id: `osm_${el.id}`,
     user: makeUser(name, domain || undefined),
     image,
-    caption: `${description}\n\n${typeLabel[category] ?? '📍'} ${name}${addr ? `\n📍 ${addr}, ${city}` : `\n📍 ${city}`}${hours ? `\n⏰ ${hours}` : ''}${website ? `\n🔗 ${website}` : `\n🗺️ ${osmUrl}`}`,
+    caption: `${description}\n\n${typeLabel[category] ?? '📍'} ${name}${addr ? `\n📍 ${addr}, ${city}` : `\n📍 ${city}`}${extras}${website ? `\n🔗 ${website}` : `\n🗺️ ${osmUrl}`}`,
     likes: Math.floor(Math.random() * 8_000) + 200,
     comments: Math.floor(Math.random() * 200) + 10,
     category: category as import('@/types').Category,
@@ -456,17 +520,35 @@ const CATEGORY_GUIDANCE: Record<string, string> = {
   lifestyle:   'night markets, open-air cinema, pop-up boutiques, craft fairs, wellness events, community gatherings',
   discover:    'concerts, food festivals, art openings, sports matches, markets, fitness classes',
   community:   'free community meetups, neighbourhood gatherings, swap meets, volunteer events, local markets, cultural festivals, block parties, language exchanges, community clean-ups',
+  travel:      'guided day trips, scenic excursions, walking tours, boat trips, wine region tours, nearby getaway experiences',
+  tech:        'tech meetups, hackathons, startup events, coding workshops, developer conferences, maker fairs',
+  pets:        'pet adoption days, dog meetups, animal shelter open days, pet expos, dog-friendly events',
+  fashion:     'fashion pop-ups, designer markets, vintage sales, fashion shows, style workshops, sample sales',
+  restaurants: 'restaurant openings, restaurant weeks, tasting menus, brunch specials, chef events, pop-up dining',
+  hotels:      'hotel deals, spa weekends, rooftop bar events, special stay packages, boutique hotel openings',
+  rentals:     'bike rental tours, e-scooter offers, boat rental experiences, ski equipment rental deals, car sharing offers',
 };
 
 async function searchRealEventsWithClaude(
   city: string, country: string, today: string, count: number, page: number, category: string, apiKey: string,
-  unsplashKey?: string, pexelsKey?: string, userLat?: number, userLng?: number
+  unsplashKey?: string, pexelsKey?: string, userLat?: number, userLng?: number,
+  tourismFocus = false
 ): Promise<unknown[]> {
   const guidance = CATEGORY_GUIDANCE[category] ?? CATEGORY_GUIDANCE.events;
+
+  const tourismInstructions = tourismFocus
+    ? `Search SPECIFICALLY on the official tourism websites and event calendars for ${city}:
+- Search "${city} official tourism website events" and "${city} tourismus veranstaltungen" (use the local language of ${country} too)
+- Check the city's official website event calendar and the regional tourism board for ${city}
+- Focus on what locals and tourism boards promote: festivals, seasonal celebrations, wine/food festivals, open-air concerts, christmas/easter markets, city fairs, spa & culture events
+These tourism-board events are often missing from ticket platforms — they are exactly what we want.`
+    : `Good sources: the official ${city} tourism website and city event calendar (search in the local language of ${country} too, e.g. "veranstaltungen", "eventos", "événements"), Eventbrite, local newspapers, venue websites.`;
 
   const prompt = `Search the web for ${count} REAL upcoming events in ${city}, ${country} happening after ${today}.
 
 Search for: ${guidance}
+
+${tourismInstructions}
 
 ${page > 0 ? `Page ${page + 1}: find different events from earlier results — search for less obvious/mainstream options.` : ''}
 
@@ -541,7 +623,7 @@ Return only the raw JSON array, no markdown, no extra text.`;
     ]);
 
     return {
-      id: `ws_${city}_p${page}_${i}_${Date.now()}`,
+      id: `${tourismFocus ? 'tour' : 'ws'}_${city}_p${page}_${i}_${Date.now()}`,
       user: makeUser(org, website || undefined),
       image,
       caption: `${desc}\n\n📅 ${eventDateStr}${time ? ` · ${time}` : ''}\n📍 ${venue}${address ? `, ${address}` : ''}\n🎟️ ${price}\n🔗 Tickets & info: ${url}`,
@@ -628,6 +710,7 @@ export async function GET(request: NextRequest) {
   const count   = Math.max(1, Math.min(20, parseInt(searchParams.get('count')  || '8',  10)));
   const rawCat  = searchParams.get('category') ?? 'events';
   const category = VALID_CATEGORIES.has(rawCat) ? rawCat : 'events';
+  const source  = searchParams.get('source') ?? '';
 
   const tmKey       = process.env.TICKETMASTER_API_KEY;
   const claudeKey   = process.env.ANTHROPIC_API_KEY;
@@ -635,8 +718,25 @@ export async function GET(request: NextRequest) {
   const pexelsKey   = process.env.PEXELS_API_KEY;
   const today       = todayStr();
 
-  // ── SHOPS / VENUES: OpenStreetMap Overpass (free, no key, real places) ────
-  if (category === 'shops' || category === 'venues') {
+  // ── TOURISM: events promoted on the city's official tourism websites ──────
+  // (festivals, markets, seasonal celebrations missing from ticket platforms)
+  if (source === 'tourism') {
+    if (claudeKey) {
+      try {
+        const posts = await searchRealEventsWithClaude(
+          city, country, today, count, page, 'events', claudeKey,
+          unsplashKey, pexelsKey, lat, lng, /* tourismFocus */ true
+        );
+        return NextResponse.json({ posts, city, country, source: 'tourism', hasMore: page < 4 }, { headers: NO_CACHE });
+      } catch (err) {
+        console.error('[events/tourism]', err);
+      }
+    }
+    return NextResponse.json({ posts: [], city, country, source: 'tourism', hasMore: false }, { headers: NO_CACHE });
+  }
+
+  // ── OSM PLACES: shops / venues / restaurants / hotels / rentals ───────────
+  if (OSM_CATEGORIES.has(category)) {
     try {
       const radiusM = Math.min(radius * 1000, 10000);
       const elements = await fetchOverpassPlaces(lat, lng, category, radiusM);
@@ -764,8 +864,10 @@ export async function GET(request: NextRequest) {
       ? searchRealEventsWithClaude(city, country, today, count, page, category, claudeKey, unsplashKey, pexelsKey, lat, lng).catch(() => null)
       : Promise.resolve(null);
 
-    // Attempt Ticketmaster (fast timeout — Claude is already warming up in parallel)
-    if (tmKey) {
+    // Attempt Ticketmaster only for categories it actually covers — everything
+    // else (food, tech, pets, fashion, travel, …) goes to Claude web search,
+    // which finds these on local/tourism websites instead.
+    if (tmKey && TM_CATEGORY_MAP[category]) {
       try {
         // Smart radius: if the requested radius returns sparse results, automatically
         // expand server-side so the client always gets a full page of content

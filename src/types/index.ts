@@ -25,7 +25,10 @@ export type Category =
   | 'sightseeing'
   | 'shops'
   | 'venues'
-  | 'community';
+  | 'community'
+  | 'restaurants'
+  | 'hotels'
+  | 'rentals';
 
 export interface PostLocation {
   name: string;
@@ -89,6 +92,9 @@ export interface UserPreferences {
   shops: number;
   venues: number;
   community: number;
+  restaurants: number;
+  hotels: number;
+  rentals: number;
 }
 
 export interface NovaNotification {

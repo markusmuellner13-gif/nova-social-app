@@ -24,6 +24,9 @@ type MainTab = 'discover' | 'events' | 'sightseeing' | 'sport' | 'partners';
 // Labels are set dynamically via t.feed in the render
 
 const DISCOVER_CHIP_CATS: { emoji: string; catKey: string; cat: Category }[] = [
+  { emoji: '🍽️', catKey: 'restaurants', cat: 'restaurants' },
+  { emoji: '🏨',  catKey: 'hotels',      cat: 'hotels'    },
+  { emoji: '🚲',  catKey: 'rentals',     cat: 'rentals'   },
   { emoji: '✈️',  catKey: 'travel',      cat: 'travel'    },
   { emoji: '🍕',  catKey: 'food',        cat: 'food'      },
   { emoji: '🎨',  catKey: 'art',         cat: 'art'       },
@@ -189,21 +192,28 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
     [isStorySeen, state.seenStories]
   );
 
-  // Curated/mock pool for discover mode
+  // Whether we know where the user is — if so, the feed shows ONLY real
+  // location-based content (no generic mock posts from other cities)
+  const hasCity = Boolean(location?.city);
+
+  // Curated pool for discover mode — user-created posts always; generic mock
+  // posts only as a fallback when no location is known yet
   const curatedPool = useMemo(() => {
-    let pool = [...createdPosts, ...MOCK_POSTS];
+    let pool = hasCity ? [...createdPosts] : [...createdPosts, ...MOCK_POSTS];
     if (activeChipCategory) pool = pool.filter(p => p.category === activeChipCategory);
     if (sortMode === 'recent') return [...pool].sort((a, b) => b.timestamp - a.timestamp);
     return sortFeed(pool, preferences, aiProfile);
-  }, [createdPosts, preferences, aiProfile, activeChipCategory, sortMode]);
+  }, [createdPosts, preferences, aiProfile, activeChipCategory, sortMode, hasCity]);
 
-  // Mock posts for specific main tabs (events / sport)
+  // Mock posts for specific main tabs (events / sport) — fallback only when
+  // the user's city is unknown; with a city we show real local data only
   const mockTabPool = useMemo((): Post[] => {
+    if (hasCity) return [];
     if (activeMainTab === 'events')  return sortByEventDate(MOCK_POSTS.filter(p => p.category === 'events'));
     if (activeMainTab === 'sport')   return sortByEventDate(MOCK_POSTS.filter(p => p.category === 'sports'));
     if (activeMainTab === 'sightseeing') return MOCK_POSTS.filter(p => p.category === 'travel');
     return [];
-  }, [activeMainTab]);
+  }, [activeMainTab, hasCity]);
 
   // Build merged feed depending on active tab
   const mergedFeed = useMemo(() => {
@@ -466,6 +476,31 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
+          {/* Enable-location banner — shown until we know the user's city */}
+          {!hasCity && (
+            <div className="px-4 py-3" style={{ borderBottom: '1px solid #1a1a24' }}>
+              <div className="rounded-2xl p-4" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(236,72,153,0.12))', border: '1px solid rgba(139,92,246,0.25)' }}>
+                <div className="flex items-center gap-2 mb-1">
+                  <MapPin size={15} style={{ color: '#c4b5fd' }} />
+                  <span className="text-sm font-bold text-white">{t.feed.enableLocationTitle}</span>
+                </div>
+                <p className="text-xs mb-3" style={{ color: '#a3a3b5' }}>{t.feed.enableLocationDesc}</p>
+                <div className="flex gap-2">
+                  <motion.button whileTap={{ scale: 0.95 }} onClick={onOpenLocationPrompt}
+                    className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white"
+                    style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
+                    📍 {t.settings.locationOff}
+                  </motion.button>
+                  <motion.button whileTap={{ scale: 0.95 }} onClick={onOpenCityExplorer}
+                    className="flex-1 py-2.5 rounded-xl text-xs font-bold"
+                    style={{ background: '#1a1a24', color: '#c4b5fd', border: '1px solid #2a2a38' }}>
+                    🏙️ {t.feed.chooseCity}
+                  </motion.button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Stories strip — discover mode only */}
           {activeMainTab === 'discover' && (
             <div className="flex gap-3 px-4 py-3 overflow-x-auto flex-shrink-0" style={{ borderBottom: '1px solid #1a1a24' }}>

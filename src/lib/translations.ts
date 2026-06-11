@@ -23,6 +23,7 @@ export interface AppTranslations {
     findingEvents: string; findingMore: string; loading: string;
     basedOnInterests: string; moreLove: string; curatedForYou: string;
     wantFeatured: string; contactUs: string; backToTop: string;
+    enableLocationTitle: string; enableLocationDesc: string;
   };
   profile: {
     events: string; going: string; following: string; liked: string; saved: string;
@@ -64,6 +65,7 @@ export interface AppTranslations {
     tech: string; fitness: string; music: string; pets: string; lifestyle: string;
     events: string; sightseeing: string;
     shops: string; venues: string; community: string;
+    restaurants: string; hotels: string; rentals: string;
   };
 }
 
@@ -83,6 +85,8 @@ const en: AppTranslations = {
     basedOnInterests: 'Based on your top interests', moreLove: "More you'll love",
     curatedForYou: 'Curated just for you', wantFeatured: 'Want to be featured here?',
     contactUs: 'Contact us at partners@nova-app.com · From €300/month', backToTop: 'Back to top',
+    enableLocationTitle: 'See what\'s happening near you',
+    enableLocationDesc: 'Enable location to get real events, concerts, restaurants, hotels & more from your city — or pick a city manually.',
   },
   profile: {
     events: 'Events', going: 'Going', following: 'Following', liked: 'Liked',
@@ -134,6 +138,7 @@ const en: AppTranslations = {
     tech: 'Tech', fitness: 'Fitness', music: 'Music', pets: 'Pets', lifestyle: 'Lifestyle',
     events: 'Events', sightseeing: 'Sightseeing',
     shops: 'Shops', venues: 'Venues', community: 'Community',
+    restaurants: 'Restaurants', hotels: 'Hotels', rentals: 'Rentals',
   },
 };
 
@@ -153,6 +158,8 @@ const de: AppTranslations = {
     basedOnInterests: 'Basierend auf deinen Interessen', moreLove: 'Mehr, das dir gefällt',
     curatedForYou: 'Nur für dich kuratiert', wantFeatured: 'Möchtest du hier erscheinen?',
     contactUs: 'Kontaktiere uns: partners@nova-app.com · Ab €300/Monat', backToTop: 'Nach oben',
+    enableLocationTitle: 'Entdecke, was in deiner Nähe los ist',
+    enableLocationDesc: 'Aktiviere den Standort für echte Events, Konzerte, Restaurants, Hotels & mehr aus deiner Stadt — oder wähle eine Stadt manuell.',
   },
   profile: {
     events: 'Events', going: 'Ich gehe hin', following: 'Folge ich', liked: 'Gefällt mir',
@@ -204,6 +211,7 @@ const de: AppTranslations = {
     tech: 'Tech', fitness: 'Fitness', music: 'Musik', pets: 'Haustiere', lifestyle: 'Lifestyle',
     events: 'Events', sightseeing: 'Sehenswürdigkeiten',
     shops: 'Läden', venues: 'Veranstaltungsorte', community: 'Community',
+    restaurants: 'Restaurants', hotels: 'Hotels', rentals: 'Verleih',
   },
 };
 
@@ -223,6 +231,8 @@ const es: AppTranslations = {
     basedOnInterests: 'Basado en tus intereses', moreLove: 'Más que te encantará',
     curatedForYou: 'Seleccionado para ti', wantFeatured: '¿Quieres aparecer aquí?',
     contactUs: 'Contáctanos: partners@nova-app.com · Desde €300/mes', backToTop: 'Volver arriba',
+    enableLocationTitle: 'Descubre qué pasa cerca de ti',
+    enableLocationDesc: 'Activa la ubicación para ver eventos, conciertos, restaurantes, hoteles y más de tu ciudad — o elige una ciudad manualmente.',
   },
   profile: {
     events: 'Eventos', going: 'Voy', following: 'Siguiendo', liked: 'Me gusta',
@@ -274,6 +284,7 @@ const es: AppTranslations = {
     tech: 'Tecnología', fitness: 'Fitness', music: 'Música', pets: 'Mascotas', lifestyle: 'Estilo de vida',
     events: 'Eventos', sightseeing: 'Turismo',
     shops: 'Tiendas', venues: 'Locales', community: 'Comunidad',
+    restaurants: 'Restaurantes', hotels: 'Hoteles', rentals: 'Alquileres',
   },
 };
 
@@ -293,6 +304,8 @@ const fr: AppTranslations = {
     basedOnInterests: 'Basé sur tes intérêts', moreLove: "Tu vas adorer",
     curatedForYou: 'Sélectionné pour toi', wantFeatured: 'Envie d\'être mis en avant ?',
     contactUs: 'Contact : partners@nova-app.com · À partir de 300€/mois', backToTop: 'Retour en haut',
+    enableLocationTitle: 'Découvre ce qui se passe près de toi',
+    enableLocationDesc: 'Active la localisation pour voir les événements, concerts, restaurants, hôtels et plus de ta ville — ou choisis une ville manuellement.',
   },
   profile: {
     events: 'Événements', going: "J'y vais", following: 'Abonnements', liked: "J'aime",
@@ -344,6 +357,7 @@ const fr: AppTranslations = {
     tech: 'Tech', fitness: 'Fitness', music: 'Musique', pets: 'Animaux', lifestyle: 'Lifestyle',
     events: 'Événements', sightseeing: 'Tourisme',
     shops: 'Boutiques', venues: 'Salles', community: 'Communauté',
+    restaurants: 'Restaurants', hotels: 'Hôtels', rentals: 'Locations',
   },
 };
 
@@ -363,6 +377,8 @@ const it: AppTranslations = {
     basedOnInterests: 'Basato sui tuoi interessi', moreLove: 'Altro che ti piacerà',
     curatedForYou: 'Selezionato per te', wantFeatured: 'Vuoi essere in evidenza?',
     contactUs: 'Contattaci: partners@nova-app.com · Da €300/mese', backToTop: 'Torna su',
+    enableLocationTitle: 'Scopri cosa succede vicino a te',
+    enableLocationDesc: 'Attiva la posizione per vedere eventi, concerti, ristoranti, hotel e altro dalla tua città — o scegli una città manualmente.',
   },
   profile: {
     events: 'Eventi', going: 'Ci vado', following: 'Seguiti', liked: 'Mi piace',
@@ -414,6 +430,7 @@ const it: AppTranslations = {
     tech: 'Tecnologia', fitness: 'Fitness', music: 'Musica', pets: 'Animali', lifestyle: 'Lifestyle',
     events: 'Eventi', sightseeing: 'Turismo',
     shops: 'Negozi', venues: 'Location', community: 'Comunità',
+    restaurants: 'Ristoranti', hotels: 'Hotel', rentals: 'Noleggi',
   },
 };
 
@@ -433,6 +450,8 @@ const pt: AppTranslations = {
     basedOnInterests: 'Baseado nos seus interesses', moreLove: 'Mais que você vai adorar',
     curatedForYou: 'Selecionado para você', wantFeatured: 'Quer aparecer aqui?',
     contactUs: 'Contate: partners@nova-app.com · A partir de €300/mês', backToTop: 'Voltar ao topo',
+    enableLocationTitle: 'Veja o que está acontecendo perto de você',
+    enableLocationDesc: 'Ative a localização para ver eventos, shows, restaurantes, hotéis e mais da sua cidade — ou escolha uma cidade manualmente.',
   },
   profile: {
     events: 'Eventos', going: 'Vou', following: 'Seguindo', liked: 'Curtidos',
@@ -484,6 +503,7 @@ const pt: AppTranslations = {
     tech: 'Tecnologia', fitness: 'Fitness', music: 'Música', pets: 'Pets', lifestyle: 'Estilo de vida',
     events: 'Eventos', sightseeing: 'Turismo',
     shops: 'Lojas', venues: 'Locais', community: 'Comunidade',
+    restaurants: 'Restaurantes', hotels: 'Hotéis', rentals: 'Aluguéis',
   },
 };
 
@@ -503,6 +523,8 @@ const nl: AppTranslations = {
     basedOnInterests: 'Op basis van je interesses', moreLove: 'Meer wat je leuk vindt',
     curatedForYou: 'Geselecteerd voor jou', wantFeatured: 'Wil je hier verschijnen?',
     contactUs: 'Contact: partners@nova-app.com · Vanaf €300/maand', backToTop: 'Terug naar boven',
+    enableLocationTitle: 'Ontdek wat er bij jou in de buurt gebeurt',
+    enableLocationDesc: 'Schakel locatie in voor echte evenementen, concerten, restaurants, hotels en meer uit jouw stad — of kies handmatig een stad.',
   },
   profile: {
     events: 'Evenementen', going: 'Ga ik', following: 'Volgend', liked: 'Vind ik leuk',
@@ -554,6 +576,7 @@ const nl: AppTranslations = {
     tech: 'Tech', fitness: 'Fitness', music: 'Muziek', pets: 'Huisdieren', lifestyle: 'Lifestyle',
     events: 'Evenementen', sightseeing: 'Bezienswaardigheden',
     shops: 'Winkels', venues: 'Locaties', community: 'Gemeenschap',
+    restaurants: 'Restaurants', hotels: 'Hotels', rentals: 'Verhuur',
   },
 };
 
@@ -573,6 +596,8 @@ const ja: AppTranslations = {
     basedOnInterests: 'あなたの興味に基づく', moreLove: 'あなたが好きなもの',
     curatedForYou: 'あなたのために厳選', wantFeatured: 'ここに掲載したいですか？',
     contactUs: 'お問い合わせ: partners@nova-app.com', backToTop: 'トップへ',
+    enableLocationTitle: '近くで何が起きているか見てみよう',
+    enableLocationDesc: '位置情報をオンにすると、あなたの街のイベント、コンサート、レストラン、ホテルなどが表示されます。都市を手動で選ぶこともできます。',
   },
   profile: {
     events: 'イベント', going: '参加予定', following: 'フォロー中', liked: 'いいね',
@@ -624,6 +649,7 @@ const ja: AppTranslations = {
     tech: 'テック', fitness: 'フィットネス', music: '音楽', pets: 'ペット', lifestyle: 'ライフスタイル',
     events: 'イベント', sightseeing: '観光',
     shops: 'ショップ', venues: '会場', community: 'コミュニティ',
+    restaurants: 'レストラン', hotels: 'ホテル', rentals: 'レンタル',
   },
 };
 
