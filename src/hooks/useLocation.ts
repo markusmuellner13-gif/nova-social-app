@@ -12,7 +12,9 @@ interface UseLocationReturn {
   setLocationEnabled: (enabled: boolean) => void;
 }
 
-async function reverseGeocode(lat: number, lng: number): Promise<{ city: string; country: string; countryCode: string }> {
+interface GeoResult { city: string; country: string; countryCode: string }
+
+async function geocodeNominatim(lat: number, lng: number): Promise<GeoResult | null> {
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
@@ -21,9 +23,10 @@ async function reverseGeocode(lat: number, lng: number): Promise<{ city: string;
           'Accept-Language': 'en-US,en;q=0.9',
           'User-Agent': 'Nova-App/2.0',
         },
+        signal: AbortSignal.timeout(6000),
       }
     );
-    if (!res.ok) throw new Error('geocode failed');
+    if (!res.ok) return null;
     const data = await res.json();
     const addr = data.address ?? {};
     const city =
@@ -33,13 +36,50 @@ async function reverseGeocode(lat: number, lng: number): Promise<{ city: string;
       addr.municipality ||
       addr.county ||
       addr.state ||
-      'Unknown City';
-    const country = addr.country || 'Unknown';
-    const countryCode = (addr.country_code ?? '').toUpperCase();
-    return { city, country, countryCode };
-  } catch {
-    return { city: 'Unknown City', country: 'Unknown', countryCode: '' };
-  }
+      '';
+    if (!city) return null;
+    return {
+      city,
+      country: addr.country || 'Unknown',
+      countryCode: (addr.country_code ?? '').toUpperCase(),
+    };
+  } catch { return null; }
+}
+
+// Free, no key, CORS-enabled — reliable fallback when Nominatim rate-limits
+async function geocodeBigDataCloud(lat: number, lng: number): Promise<GeoResult | null> {
+  try {
+    const res = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
+      { signal: AbortSignal.timeout(6000) }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const city = data.city || data.locality || data.principalSubdivision || '';
+    if (!city) return null;
+    return {
+      city,
+      country: data.countryName || 'Unknown',
+      countryCode: (data.countryCode ?? '').toUpperCase(),
+    };
+  } catch { return null; }
+}
+
+async function reverseGeocode(lat: number, lng: number): Promise<GeoResult> {
+  const nom = await geocodeNominatim(lat, lng);
+  if (nom) return nom;
+  const bdc = await geocodeBigDataCloud(lat, lng);
+  if (bdc) return bdc;
+  return { city: 'Unknown City', country: 'Unknown', countryCode: '' };
+}
+
+// Never persist a failed geocode — a cached 'Unknown City' would label every
+// post wrong until the user clears storage. The server also resolves the city
+// from lat/lng as a safety net, but a good cache here avoids the round trip.
+function persistLocation(loc: LocationState) {
+  if (!loc.city || loc.city === 'Unknown City') return;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(loc));
+  localStorage.setItem('nova_last_city', loc.city);
 }
 
 const STORAGE_KEY = 'nova_location_v1';
@@ -56,13 +96,19 @@ export function useLocation(): UseLocationReturn {
     if (cached) {
       try {
         const parsed: LocationState = JSON.parse(cached);
-        setLocation(parsed);
-        setPermission('granted');
-        // Re-fetch in background to keep fresh
-        if (parsed.enabled) {
-          void requestLocationSilent();
+        if (!parsed.city || parsed.city === 'Unknown City') {
+          // Self-heal: drop bad caches written by older app versions and
+          // fall through to a fresh geocode below
+          localStorage.removeItem(STORAGE_KEY);
+        } else {
+          setLocation(parsed);
+          setPermission('granted');
+          // Re-fetch in background to keep fresh
+          if (parsed.enabled) {
+            void requestLocationSilent();
+          }
+          return;
         }
-        return;
       } catch { /* ignore */ }
     }
 
@@ -99,10 +145,7 @@ export function useLocation(): UseLocationReturn {
         const loc: LocationState = { lat, lng, ...geo, enabled: true };
         setLocation(loc);
         setPermission('granted');
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(loc));
-        if (geo.city && geo.city !== 'Unknown City') {
-          localStorage.setItem('nova_last_city', geo.city);
-        }
+        persistLocation(loc);
       },
       () => { /* silent fail */ },
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
@@ -123,10 +166,7 @@ export function useLocation(): UseLocationReturn {
           const loc: LocationState = { lat, lng, ...geo, enabled: true };
           setLocation(loc);
           setPermission('granted');
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(loc));
-          if (geo.city && geo.city !== 'Unknown City') {
-            localStorage.setItem('nova_last_city', geo.city);
-          }
+          persistLocation(loc);
           resolve();
         },
         () => {
@@ -142,7 +182,7 @@ export function useLocation(): UseLocationReturn {
     setLocation((prev) => {
       if (!prev) return prev;
       const updated = { ...prev, enabled };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      persistLocation(updated);
       return updated;
     });
     if (!enabled) setPermission('denied');

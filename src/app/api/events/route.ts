@@ -113,6 +113,63 @@ function proxyImage(url: string): string {
 function todayStr() { return new Date().toISOString().split('T')[0]; }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Server-side city guard — never build posts labelled "Unknown City".
+// If the client couldn't reverse-geocode (or sent nothing useful), resolve the
+// real city from lat/lng here. Cached per ~1km grid cell for the warm lambda.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const geoCache = new Map<string, { city: string; country: string }>();
+
+function isBadCity(c: string): boolean {
+  return !c || c === 'Unknown City' || c === 'Unknown';
+}
+
+async function resolveCityServer(lat: number, lng: number): Promise<{ city: string; country: string } | null> {
+  const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+  const cached = geoCache.get(key);
+  if (cached) return cached;
+
+  // BigDataCloud — free, no key, no rate-limit headaches on shared egress IPs
+  try {
+    const res = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
+      { signal: AbortSignal.timeout(3500) }
+    );
+    if (res.ok) {
+      const d = await res.json() as { city?: string; locality?: string; principalSubdivision?: string; countryName?: string };
+      const city = d.city || d.locality || d.principalSubdivision || '';
+      if (city) {
+        const out = { city, country: d.countryName || '' };
+        geoCache.set(key, out);
+        return out;
+      }
+    }
+  } catch { /* try Nominatim */ }
+
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+      {
+        headers: { 'User-Agent': 'Nova-App/2.0 (contact@nova-app.com)', 'Accept-Language': 'en' },
+        signal: AbortSignal.timeout(3500),
+      }
+    );
+    if (res.ok) {
+      const d = await res.json() as { address?: Record<string, string> };
+      const a = d.address ?? {};
+      const city = a.city || a.town || a.village || a.municipality || a.county || a.state || '';
+      if (city) {
+        const out = { city, country: a.country || '' };
+        geoCache.set(key, out);
+        return out;
+      }
+    }
+  } catch { /* give up */ }
+
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Image helpers — Unsplash → Pexels → picsum
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -412,6 +469,9 @@ function tmEventToPost(ev: TmEvent, description: string, city: string, country: 
   const venue     = ev._embedded?.venues?.[0];
   const venueName = venue?.name ?? city;
   const venueAddr = venue?.address?.line1 ?? '';
+  // Label posts with the venue's actual city (events within the search radius
+  // can be in a neighbouring town), falling back to the user's city
+  const venueCity = venue?.city?.name || city;
   const lat       = parseFloat(venue?.location?.latitude  ?? '0') || 0;
   const lng       = parseFloat(venue?.location?.longitude ?? '0') || 0;
   const localDate = ev.dates?.start?.localDate ?? '';
@@ -437,9 +497,9 @@ function tmEventToPost(ev: TmEvent, description: string, city: string, country: 
     likes: Math.floor(Math.random() * 20_000) + 1_000,
     comments: Math.floor(Math.random() * 800) + 30,
     category,
-    hashtags: [`#${city.replace(/\s/g, '')}`, ...(genre && genre !== 'undefined' ? [`#${genre.toLowerCase().replace(/\s+/g, '')}`] : []), '#nova', '#events', '#local'],
+    hashtags: [`#${venueCity.replace(/\s/g, '')}`, ...(genre && genre !== 'undefined' ? [`#${genre.toLowerCase().replace(/\s+/g, '')}`] : []), '#nova', '#events', '#local'],
     timestamp: Date.now() - Math.random() * 7_200_000,
-    location: { name: `${venueName}, ${city}`, lat, lng },
+    location: { name: `${venueName}, ${venueCity}`, lat, lng },
     saved: false, liked: false,
     isEvent: true, isAIGenerated: false,
     eventDate: `${eventDateStr}${localTime ? ` · ${localTime}` : ''}`,
@@ -706,6 +766,8 @@ async function fetchEventbriteEvents(
   const now = Date.now();
   return events.slice(0, count).map((ev, i) => {
     const venue   = ev.location?.name ?? city;
+    // Real city of the venue from the structured data — not the search city
+    const evCity  = ev.location?.address?.addressLocality || city;
     const addr    = [ev.location?.address?.streetAddress, ev.location?.address?.addressLocality].filter(Boolean).join(', ');
     const rawDate = (ev.startDate ?? '').slice(0, 10);
     const time    = (ev.startDate ?? '').length > 10 ? (ev.startDate ?? '').slice(11, 16) : '';
@@ -725,9 +787,9 @@ async function fetchEventbriteEvents(
       likes: Math.floor(Math.random() * 9_000) + 300,
       comments: Math.floor(Math.random() * 300) + 10,
       category: 'events',
-      hashtags: [`#${city.replace(/\s/g, '')}`, '#events', '#nova', '#local'],
+      hashtags: [`#${evCity.replace(/\s/g, '')}`, '#events', '#nova', '#local'],
       timestamp: now - Math.random() * 7_200_000,
-      location: { name: `${venue}, ${city}`, lat, lng },
+      location: { name: `${venue}, ${evCity}`, lat, lng },
       saved: false, liked: false,
       isEvent: true, isAIGenerated: false,
       eventDate: `${dateStr}${time ? ` · ${time}` : ''}`,
@@ -796,10 +858,22 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
   // Sanitize all inputs — prevents injection via URL params
-  const city    = (searchParams.get('city')    || 'Vienna').slice(0, 100).replace(/[<>'"\\]/g, '');
-  const country = (searchParams.get('country') || 'Austria').slice(0, 100).replace(/[<>'"\\]/g, '');
+  let city      = (searchParams.get('city')    || 'Vienna').slice(0, 100).replace(/[<>'"\\]/g, '');
+  let country   = (searchParams.get('country') || 'Austria').slice(0, 100).replace(/[<>'"\\]/g, '');
   const lat     = Math.max(-90,  Math.min(90,  parseFloat(searchParams.get('lat') || '48.2082')));
   const lng     = Math.max(-180, Math.min(180, parseFloat(searchParams.get('lng') || '16.3738')));
+
+  // City guard: the client failed to reverse-geocode → resolve the real city
+  // here so no post is ever labelled "Unknown City"
+  if (isBadCity(city) || isBadCity(country)) {
+    const resolved = await resolveCityServer(lat, lng);
+    if (resolved) {
+      if (isBadCity(city)) city = resolved.city;
+      if (isBadCity(country) && resolved.country) country = resolved.country;
+    }
+    if (isBadCity(city))    city = 'your area';
+    if (isBadCity(country)) country = '';
+  }
   const page    = Math.max(0, Math.min(20, parseInt(searchParams.get('page')   || '0',  10)));
   const radius  = Math.max(1, Math.min(200, parseInt(searchParams.get('radius') || '25', 10)));
   const count   = Math.max(1, Math.min(20, parseInt(searchParams.get('count')  || '8',  10)));
@@ -1027,6 +1101,40 @@ export async function GET(request: NextRequest) {
     const claudePosts = await claudePromise;
     if (claudePosts && claudePosts.length > 0) {
       return NextResponse.json({ posts: claudePosts, city, country, source: 'claude', hasMore: page < 10 }, { headers: NO_CACHE });
+    }
+
+    // FOOD free fallback — real local restaurants/cafés/bars from OpenStreetMap
+    // (no API key, no AI credits) instead of generic event filler
+    if (category === 'food') {
+      try {
+        const radiusM = Math.min(radius * 1000, 10000);
+        const elements = await fetchOverpassPlaces(lat, lng, 'restaurants', radiusM);
+        const pageEls = elements.slice(page * count, page * count + count);
+        if (pageEls.length > 0) {
+          const placeData = pageEls.map(el => ({
+            name: el.tags?.name ?? 'Unknown',
+            type: el.tags?.amenity ?? 'restaurant',
+            address: [el.tags?.['addr:street'], el.tags?.['addr:housenumber']].filter(Boolean).join(' '),
+          }));
+          const descriptions = claudeKey
+            ? await enrichPlaceDescriptions(placeData, city, 'restaurants', claudeKey)
+                .catch(() => placeData.map(p => `${p.name} is a popular ${p.type} in ${city}.`))
+            : placeData.map(p => `${p.name} is a popular ${p.type} in ${city}.`);
+
+          const posts = (await Promise.all(
+            pageEls.map((el, i) => overpassToPost(el, city, 'restaurants', descriptions[i] ?? '', unsplashKey, pexelsKey))
+          )).map(p => ({
+            ...p,
+            category: 'food' as import('@/types').Category,
+            hashtags: p.hashtags.map(h => (h === '#restaurants' ? '#food' : h)),
+          }));
+
+          const hasMore = (page + 1) * count < elements.length;
+          return NextResponse.json({ posts, city, country, source: 'osm', hasMore }, { headers: PLACE_CACHE });
+        }
+      } catch (err) {
+        console.error('[events/food/osm]', err);
+      }
     }
   }
 
