@@ -648,6 +648,98 @@ Return only the raw JSON array, no markdown, no extra text.`;
   }));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Eventbrite public city pages — FREE real events via schema.org JSON-LD
+// (no API key, no AI credits — reads the structured data embedded in the page)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface LdEvent {
+  '@type'?: string;
+  name?: string;
+  description?: string;
+  startDate?: string;
+  url?: string;
+  image?: string | string[];
+  location?: {
+    '@type'?: string;
+    name?: string;
+    address?: { streetAddress?: string; addressLocality?: string };
+  };
+}
+
+function slugify(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+async function fetchEventbriteEvents(
+  city: string, country: string, lat: number, lng: number, count: number
+) {
+  const url = `https://www.eventbrite.com/d/${slugify(country)}--${slugify(city)}/events/`;
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9,de;q=0.8',
+    },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`Eventbrite ${res.status}`);
+  const html = await res.text();
+
+  const today = todayStr();
+  const events: LdEvent[] = [];
+  for (const block of html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g) ?? []) {
+    try {
+      const json = JSON.parse(block.replace(/^<script[^>]*>/, '').replace(/<\/script>$/, ''));
+      const items = (json.itemListElement ?? (Array.isArray(json) ? json : [json])) as { item?: LdEvent }[];
+      for (const it of items) {
+        const ev = (it as { item?: LdEvent }).item ?? (it as LdEvent);
+        if (ev?.['@type'] !== 'Event') continue;
+        // Physical, upcoming events only — skip online webinar filler
+        if (ev.location?.['@type'] !== 'Place') continue;
+        if (!ev.startDate || ev.startDate.slice(0, 10) < today) continue;
+        events.push(ev);
+      }
+    } catch { /* skip malformed block */ }
+  }
+
+  const now = Date.now();
+  return events.slice(0, count).map((ev, i) => {
+    const venue   = ev.location?.name ?? city;
+    const addr    = [ev.location?.address?.streetAddress, ev.location?.address?.addressLocality].filter(Boolean).join(', ');
+    const rawDate = (ev.startDate ?? '').slice(0, 10);
+    const time    = (ev.startDate ?? '').length > 10 ? (ev.startDate ?? '').slice(11, 16) : '';
+    const image   = (Array.isArray(ev.image) ? ev.image[0] : ev.image) || picsumUrl(`eb_${city}_${i}`);
+    const evUrl   = ev.url ?? url;
+    const idMatch = evUrl.match(/(\d+)\/?$/);
+
+    let dateStr = 'Date TBC';
+    try { dateStr = new Date(`${rawDate}T${time || '00:00'}:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
+    catch { /* keep TBC */ }
+
+    return {
+      id: `eb_${idMatch?.[1] ?? `${slugify(city)}_${i}`}`,
+      user: makeUser(venue, 'eventbrite.com'),
+      image,
+      caption: `${(ev.description ?? `${ev.name} in ${city}.`).slice(0, 300)}\n\n📅 ${dateStr}${time ? ` · ${time}` : ''}\n📍 ${venue}${addr ? `, ${addr}` : ''}\n🎟️ See website\n🔗 Tickets & info: ${evUrl}`,
+      likes: Math.floor(Math.random() * 9_000) + 300,
+      comments: Math.floor(Math.random() * 300) + 10,
+      category: 'events',
+      hashtags: [`#${city.replace(/\s/g, '')}`, '#events', '#nova', '#local'],
+      timestamp: now - Math.random() * 7_200_000,
+      location: { name: `${venue}, ${city}`, lat, lng },
+      saved: false, liked: false,
+      isEvent: true, isAIGenerated: false,
+      eventDate: `${dateStr}${time ? ` · ${time}` : ''}`,
+      eventDateRaw: rawDate,
+      eventVenue: `${venue}${addr ? `, ${addr}` : ''}`,
+      eventUrl: evUrl,
+      organizer: venue,
+      price: 'See website',
+    };
+  });
+}
+
 // Last-resort fallback — only fires when every API fails. Uses real Unsplash/Pexels images.
 async function hardFallback(
   city: string, country: string, page: number, count: number,
@@ -730,10 +822,21 @@ export async function GET(request: NextRequest) {
           city, country, today, count, page, 'events', claudeKey,
           unsplashKey, pexelsKey, lat, lng, /* tourismFocus */ true
         );
-        return NextResponse.json({ posts, city, country, source: 'tourism', hasMore: page < 4 }, { headers: NO_CACHE });
+        if (posts.length > 0) {
+          return NextResponse.json({ posts, city, country, source: 'tourism', hasMore: page < 4 }, { headers: NO_CACHE });
+        }
       } catch (err) {
         console.error('[events/tourism]', err);
       }
+    }
+    // Free fallback — structured event data scraped from Eventbrite city pages
+    try {
+      const posts = await fetchEventbriteEvents(city, country, lat, lng, count);
+      if (posts.length > 0) {
+        return NextResponse.json({ posts, city, country, source: 'eventbrite', hasMore: false }, { headers: PLACE_CACHE });
+      }
+    } catch (err) {
+      console.error('[events/tourism/eventbrite]', err);
     }
     return NextResponse.json({ posts: [], city, country, source: 'tourism', hasMore: false }, { headers: NO_CACHE });
   }
@@ -785,6 +888,14 @@ export async function GET(request: NextRequest) {
       } catch (err) {
         console.error('[events/community]', err);
       }
+    }
+    try {
+      const ebPosts = await fetchEventbriteEvents(city, country, lat, lng, count);
+      if (ebPosts.length > 0) {
+        return NextResponse.json({ posts: ebPosts, city, country, source: 'eventbrite', hasMore: false }, { headers: PLACE_CACHE });
+      }
+    } catch (err) {
+      console.error('[events/community/eventbrite]', err);
     }
     const fallbackPosts = await hardFallback(city, country, page, count, unsplashKey, pexelsKey, lat, lng);
     return NextResponse.json({ posts: fallbackPosts, city, country, source: 'fallback', hasMore: false }, { headers: NO_CACHE });
@@ -928,6 +1039,19 @@ export async function GET(request: NextRequest) {
       }
     } catch (err) {
       console.error('[events/sightseeing/claude]', err);
+    }
+  }
+
+  // ── FREE FALLBACK: real events from Eventbrite city pages (no keys/credits)
+  // Only on page 0 — Eventbrite city pages serve ~15 events without pagination
+  if (page === 0) {
+    try {
+      const ebPosts = await fetchEventbriteEvents(city, country, lat, lng, count);
+      if (ebPosts.length > 0) {
+        return NextResponse.json({ posts: ebPosts, city, country, source: 'eventbrite', hasMore: false }, { headers: PLACE_CACHE });
+      }
+    } catch (err) {
+      console.error('[events/eventbrite]', err);
     }
   }
 
