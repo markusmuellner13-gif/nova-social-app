@@ -588,7 +588,10 @@ Return only the raw JSON array, no markdown, no extra text.`;
     }),
     signal: AbortSignal.timeout(25000),
   });
-  if (!res.ok) throw new Error(`Claude web search ${res.status}`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Claude web search ${res.status}: ${body.slice(0, 400)}`);
+  }
 
   const d = await res.json() as { content?: { type: string; text?: string }[] };
   // Concatenate all text blocks (the final response after tool use)
