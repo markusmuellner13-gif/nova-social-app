@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Star, Bookmark, MessageCircle, Share2, BadgeCheck, MapPin,
@@ -137,7 +137,9 @@ export default function Post({ post, showHint = false }: Props) {
 
   return (
     <>
-      <article className="w-full" style={{ borderBottom: '1px solid #1e1e2a' }}>
+      {/* content-visibility keeps off-screen posts unrendered — the feed stays
+          smooth no matter how long the endless scroll gets */}
+      <article className="w-full" style={{ borderBottom: '1px solid #1e1e2a', contentVisibility: 'auto', containIntrinsicSize: 'auto 900px' } as React.CSSProperties}>
 
         {/* Feature 6 — Countdown badge on saved events */}
         {countdown !== null && (
@@ -202,7 +204,12 @@ export default function Post({ post, showHint = false }: Props) {
             {post.location?.name && (
               <div className="flex items-center gap-0.5">
                 <MapPin size={10} style={{ color: '#8b5cf6' }} />
-                <span className="text-xs font-medium" style={{ color: '#a78bfa' }}>{post.location.name}</span>
+                <span className="text-xs font-medium truncate" style={{ color: '#a78bfa' }}>{post.location.name}</span>
+                {typeof post.distanceKm === 'number' && post.distanceKm > 0 && (
+                  <span className="text-xs font-semibold flex-shrink-0" style={{ color: '#6d6d80' }}>
+                    · {post.distanceKm < 10 ? post.distanceKm.toFixed(1) : Math.round(post.distanceKm)} km
+                  </span>
+                )}
               </div>
             )}
           </motion.button>

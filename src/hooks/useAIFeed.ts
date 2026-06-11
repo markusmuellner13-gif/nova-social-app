@@ -3,13 +3,15 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Post, LocationState } from '@/types';
 
-// Cache settings
+// Cache settings — localStorage so reopening the app shows content instantly
 const EVENTS_TTL_MS    = 5  * 60 * 1000; // 5 min for events (change often)
 const SIGHTSEEING_TTL  = 30 * 60 * 1000; // 30 min for sightseeing (stable)
-const CACHE_PREFIX     = 'nova_feed_v4_';
+const CACHE_PREFIX     = 'nova_feed_v5_';
 
-// Radius tiers (km) — expand when current radius is exhausted
+// Radius tiers (km) — expand when current radius is exhausted; after the last
+// tier, widen the date window instead (next 60 days → next 180 days)
 const RADIUS_TIERS = [25, 50, 100, 200];
+const DAYS_TIERS   = [60, 180];
 
 interface CacheEntry { posts: Post[]; timestamp: number; page: number; radiusTier: number }
 
@@ -24,7 +26,7 @@ function ttl(category: string): number {
 function readCache(city: string, category: string): CacheEntry | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = sessionStorage.getItem(cacheKey(city, category));
+    const raw = localStorage.getItem(cacheKey(city, category));
     if (!raw) return null;
     const entry: CacheEntry = JSON.parse(raw);
     if (Date.now() - entry.timestamp > ttl(category)) return null;
@@ -35,8 +37,9 @@ function readCache(city: string, category: string): CacheEntry | null {
 function writeCache(city: string, category: string, posts: Post[], page: number, radiusTier: number): void {
   if (typeof window === 'undefined') return;
   try {
-    const entry: CacheEntry = { posts, timestamp: Date.now(), page, radiusTier };
-    sessionStorage.setItem(cacheKey(city, category), JSON.stringify(entry));
+    // Cap stored posts so localStorage never fills up with an endless feed
+    const entry: CacheEntry = { posts: posts.slice(0, 60), timestamp: Date.now(), page, radiusTier };
+    localStorage.setItem(cacheKey(city, category), JSON.stringify(entry));
   } catch { /* storage full */ }
 }
 
@@ -50,6 +53,8 @@ function filterExpired(posts: Post[]): Post[] {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+interface FeedResponse { posts?: Post[]; hasMore?: boolean; city?: string }
 
 interface UseAIFeedReturn {
   posts: Post[];
@@ -66,11 +71,14 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
 
   const pageRef       = useRef(0);
   const radiusTierRef = useRef(0);
+  const daysTierRef   = useRef(0);
   const inFlightRef   = useRef(false);
   const prevCityRef   = useRef<string | null>(null);
   const categoryRef   = useRef<string>('events');
   const refreshTimer  = useRef<ReturnType<typeof setInterval> | null>(null);
   const tourismFetchedRef = useRef<Set<string>>(new Set());
+  // Next-page prefetch buffer: params-string → parsed response promise
+  const prefetchRef   = useRef<Map<string, Promise<FeedResponse | null>>>(new Map());
 
   // ── Expired-event cleanup interval (runs every 10 min) ────────────────────
   useEffect(() => {
@@ -104,6 +112,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       setPosts([]);
       pageRef.current       = 0;
       radiusTierRef.current = 0;
+      daysTierRef.current   = 0;
       setHasMore(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -126,10 +135,10 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     try {
-      const params = buildParams(loc, category, 0, RADIUS_TIERS[0]);
-      const res = await fetch(`/api/events?${params}`);
+      const params = buildParams(loc, category, 0, RADIUS_TIERS[0], DAYS_TIERS[0]);
+      const res = await fetch(`/api/feed?${params}`);
       if (!res.ok) return;
-      const data = await res.json() as { posts?: Post[] };
+      const data = await res.json() as FeedResponse;
       const fresh = filterExpired(data.posts ?? []);
       if (!fresh.length) return;
       setPosts(prev => {
@@ -154,7 +163,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     if (!TOURISM_CATS.has(category) || tourismFetchedRef.current.has(city)) return;
     tourismFetchedRef.current.add(city);
 
-    const params = `${buildParams(loc, 'events', 0, RADIUS_TIERS[0])}&source=tourism&count=6`;
+    const params = `${buildParams(loc, 'events', 0, RADIUS_TIERS[0], DAYS_TIERS[0])}&source=tourism&count=6`;
     fetch(`/api/events?${params}`)
       .then(res => (res.ok ? res.json() : null))
       .then((data: { posts?: Post[] } | null) => {
@@ -172,20 +181,52 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       .catch(() => { tourismFetchedRef.current.delete(city); });
   }
 
-  function buildParams(loc: LocationState | null, category: string, page: number, radius: number): string {
-    return new URLSearchParams({
-      city:     loc?.city    ?? 'Vienna',
-      country:  loc?.country ?? 'Austria',
-      lat:      (loc?.lat  ?? 48.2082).toString(),
-      lng:      (loc?.lng  ?? 16.3738).toString(),
+  // Coordinates rounded to ~100m so nearby users share the same edge-cache
+  // entry. With no location at all, params are omitted entirely — the server
+  // falls back to IP geolocation (free Vercel headers).
+  function buildParams(loc: LocationState | null, category: string, page: number, radius: number, days: number): string {
+    const p = new URLSearchParams({
       page:     page.toString(),
       radius:   radius.toString(),
+      days:     days.toString(),
       count:    '8',
       category,
-    }).toString();
+    });
+    if (loc) {
+      p.set('city',    loc.city);
+      p.set('country', loc.country);
+      p.set('lat',     loc.lat.toFixed(3));
+      p.set('lng',     loc.lng.toFixed(3));
+    }
+    return p.toString();
   }
 
-  // ── fetchMore: paginate events, expand radius when page exhausted ─────────
+  // Fetch a feed page, preferring the prefetch buffer; always warms the next page
+  function fetchFeedPage(loc: LocationState | null, category: string, page: number, radius: number, days: number): Promise<FeedResponse | null> {
+    const params = buildParams(loc, category, page, radius, days);
+    const buffered = prefetchRef.current.get(params);
+    if (buffered) {
+      prefetchRef.current.delete(params);
+      return buffered;
+    }
+    return fetch(`/api/feed?${params}`)
+      .then(res => (res.ok ? (res.json() as Promise<FeedResponse>) : null))
+      .catch(() => null);
+  }
+
+  function prefetchNextPage(loc: LocationState | null, category: string, page: number, radius: number, days: number) {
+    const params = buildParams(loc, category, page, radius, days);
+    if (prefetchRef.current.has(params)) return;
+    if (prefetchRef.current.size > 6) prefetchRef.current.clear();
+    prefetchRef.current.set(
+      params,
+      fetch(`/api/feed?${params}`)
+        .then(res => (res.ok ? (res.json() as Promise<FeedResponse>) : null))
+        .catch(() => null)
+    );
+  }
+
+  // ── fetchMore: paginate; expand radius, then date window, when exhausted ──
   const fetchMore = useCallback(async (category?: string) => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
@@ -194,63 +235,70 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     const cat = category ?? 'events';
     categoryRef.current = cat;
 
-    const city   = location?.city    ?? 'Vienna';
+    const city   = location?.city ?? 'nearby';
     const radius = RADIUS_TIERS[radiusTierRef.current] ?? RADIUS_TIERS[RADIUS_TIERS.length - 1];
+    const days   = DAYS_TIERS[daysTierRef.current] ?? DAYS_TIERS[DAYS_TIERS.length - 1];
 
     // First page for this city → also pull tourism-board events in parallel
-    if (pageRef.current === 0) fetchTourismEvents(city, location, cat);
+    if (pageRef.current === 0 && location?.city) fetchTourismEvents(location.city, location, cat);
+
+    const merge = (newPosts: Post[], nextPage: number) => {
+      setPosts(prev => {
+        const existingIds = new Set(prev.map(p => p.id));
+        const fresh = newPosts.filter(p => !existingIds.has(p.id));
+        const merged = [...prev, ...fresh];
+        writeCache(city, cat, merged, nextPage, radiusTierRef.current);
+        return merged;
+      });
+    };
 
     try {
-      const params = buildParams(location, cat, pageRef.current, radius);
-      const res = await fetch(`/api/events?${params}`);
-      if (!res.ok) throw new Error(`API ${res.status}`);
+      const data = await fetchFeedPage(location, cat, pageRef.current, radius, days);
+      const newPosts = filterExpired(data?.posts ?? []);
+      const apiHasMore = data?.hasMore !== false;
 
-      const data = await res.json() as { posts?: Post[]; hasMore?: boolean };
-      const newPosts = filterExpired(data.posts ?? []);
-      const apiHasMore = data.hasMore !== false;
-
-      if (newPosts.length === 0 || !apiHasMore) {
-        // Try expanding radius before giving up
-        const nextTier = radiusTierRef.current + 1;
-        if (nextTier < RADIUS_TIERS.length) {
-          radiusTierRef.current = nextTier;
-          pageRef.current = 0;
-          setHasMore(true);
-          // Immediately fetch with larger radius
-          const expandedParams = buildParams(location, cat, 0, RADIUS_TIERS[nextTier]);
-          const expandedRes = await fetch(`/api/events?${expandedParams}`);
-          if (expandedRes.ok) {
-            const expandedData = await expandedRes.json() as { posts?: Post[] };
-            const expandedPosts = filterExpired(expandedData.posts ?? []);
-            if (expandedPosts.length > 0) {
-              setPosts(prev => {
-                const existingIds = new Set(prev.map(p => p.id));
-                const fresh = expandedPosts.filter(p => !existingIds.has(p.id));
-                const merged = [...prev, ...fresh];
-                writeCache(city, cat, merged, pageRef.current, radiusTierRef.current);
-                return merged;
-              });
-              pageRef.current = 1;
-              setHasMore(true);
-            } else {
-              setHasMore(false);
-            }
-          } else {
-            setHasMore(false);
-          }
-        } else {
-          setHasMore(false);
-        }
-      } else {
-        setPosts(prev => {
-          const existingIds = new Set(prev.map(p => p.id));
-          const fresh = newPosts.filter(p => !existingIds.has(p.id));
-          const merged = [...prev, ...fresh];
-          writeCache(city, cat, merged, pageRef.current + 1, radiusTierRef.current);
-          return merged;
-        });
+      if (newPosts.length > 0) {
+        merge(newPosts, pageRef.current + 1);
         pageRef.current += 1;
         setHasMore(true);
+        // Warm the next page so the user never sees a spinner
+        prefetchNextPage(location, cat, pageRef.current, radius, days);
+        if (!apiHasMore) {
+          // This source chain is ending — line up the next expansion tier
+          if (radiusTierRef.current < RADIUS_TIERS.length - 1) {
+            radiusTierRef.current += 1;
+            pageRef.current = 0;
+          } else if (daysTierRef.current < DAYS_TIERS.length - 1) {
+            daysTierRef.current += 1;
+            pageRef.current = 0;
+          }
+        }
+        return;
+      }
+
+      // Page came back empty → expand radius, then the date window
+      if (radiusTierRef.current < RADIUS_TIERS.length - 1) {
+        radiusTierRef.current += 1;
+        pageRef.current = 0;
+      } else if (daysTierRef.current < DAYS_TIERS.length - 1) {
+        daysTierRef.current += 1;
+        pageRef.current = 0;
+      } else {
+        setHasMore(false);
+        return;
+      }
+
+      const expanded = await fetchFeedPage(
+        location, cat, 0,
+        RADIUS_TIERS[radiusTierRef.current], DAYS_TIERS[daysTierRef.current]
+      );
+      const expandedPosts = filterExpired(expanded?.posts ?? []);
+      if (expandedPosts.length > 0) {
+        merge(expandedPosts, 1);
+        pageRef.current = 1;
+        setHasMore(true);
+      } else {
+        setHasMore(false);
       }
     } catch (err) {
       console.error('[useAIFeed]', err);
@@ -265,9 +313,11 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     setPosts([]);
     pageRef.current       = 0;
     radiusTierRef.current = 0;
+    daysTierRef.current   = 0;
     setHasMore(true);
     inFlightRef.current   = false;
     prevCityRef.current   = null;
+    prefetchRef.current.clear();
     tourismFetchedRef.current.clear();
   }, []);
 

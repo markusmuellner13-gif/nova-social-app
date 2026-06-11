@@ -59,6 +59,7 @@ export interface Post {
   organizer?: string;
   price?: string;
   sponsoredCta?: string;
+  distanceKm?: number;
 }
 
 export interface Comment {
