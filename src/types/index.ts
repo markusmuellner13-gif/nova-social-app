@@ -144,6 +144,10 @@ export interface AppPersistedState {
   preferences: UserPreferences;
   likedPosts: string[];
   savedPosts: string[];
+  // Full snapshots of every post the user liked/saved/marked going — feed
+  // posts are ephemeral (live API data), so the profile tab needs its own
+  // copies to show them after the app is reopened
+  interactionPosts: Post[];
   followedUsers: string[];
   seenStories: string[];
   goingPosts: string[];

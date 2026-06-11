@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useReducer, useEffect, useRef, useCallback } from 'react';
-import { AppPersistedState, UserPreferences, Category, NovaNotification, Post, Toast, AIProfile, LocationState, Reminder } from '@/types';
+import { AppPersistedState, UserPreferences, NovaNotification, Post, Toast, LocationState, Reminder } from '@/types';
 import { DEFAULT_PREFERENCES, MOCK_NOTIFICATIONS, MOCK_POSTS } from '@/data/mockData';
 import { learnFromInteraction, generateAINotification, getTopCategories } from '@/lib/aiEngine';
 import { upsertInteraction, deleteInteraction } from '@/lib/supabase';
@@ -81,13 +81,20 @@ async function decryptLoad(): Promise<AppPersistedState | null> {
 }
 
 function migrateState(raw: Partial<AppPersistedState>): AppPersistedState {
+  const interactionPosts = raw.interactionPosts ?? [];
+  const createdPosts = raw.createdPosts ?? [];
+  // Self-heal: only keep liked/saved/going ids that resolve to a stored post
+  // snapshot or an own created post. Drops the demo likes/saves older app
+  // versions pre-seeded, and orphaned ids that nothing could display anyway.
+  const resolvable = new Set([...interactionPosts, ...createdPosts].map(p => p.id));
   return {
     preferences: { ...DEFAULT_PREFERENCES, ...(raw.preferences ?? {}) },
-    likedPosts: raw.likedPosts ?? DEFAULT_STATE.likedPosts,
-    savedPosts: raw.savedPosts ?? DEFAULT_STATE.savedPosts,
+    likedPosts: (raw.likedPosts ?? []).filter(id => resolvable.has(id)),
+    savedPosts: (raw.savedPosts ?? []).filter(id => resolvable.has(id)),
+    interactionPosts,
     followedUsers: raw.followedUsers ?? [],
-    seenStories: raw.seenStories ?? ['s3', 's5', 's8'],
-    goingPosts: raw.goingPosts ?? [],
+    seenStories: raw.seenStories ?? [],
+    goingPosts: (raw.goingPosts ?? []).filter(id => resolvable.has(id)),
     reminders: raw.reminders ?? [],
     hasOnboarded: raw.hasOnboarded ?? false,
     aiProfile: {
@@ -97,7 +104,7 @@ function migrateState(raw: Partial<AppPersistedState>): AppPersistedState {
       sessionCount: (raw.aiProfile?.sessionCount ?? 0) + 1,
     },
     notifications: raw.notifications ?? MOCK_NOTIFICATIONS,
-    createdPosts: raw.createdPosts ?? [],
+    createdPosts,
     location: raw.location ?? null,
     locationEnabled: raw.locationEnabled ?? false,
     hasSeenLocationPrompt: raw.hasSeenLocationPrompt ?? false,
@@ -105,13 +112,16 @@ function migrateState(raw: Partial<AppPersistedState>): AppPersistedState {
 }
 
 // ── Default state ─────────────────────────────────────────────────────────────
+// Nothing pre-liked or pre-saved: the profile only ever shows the user's own
+// real interactions.
 
 const DEFAULT_STATE: AppPersistedState = {
   preferences: DEFAULT_PREFERENCES as UserPreferences,
-  likedPosts: MOCK_POSTS.filter(p => p.liked).map(p => p.id),
-  savedPosts: MOCK_POSTS.filter(p => p.saved).map(p => p.id),
+  likedPosts: [],
+  savedPosts: [],
+  interactionPosts: [],
   followedUsers: [],
-  seenStories: ['s3', 's5', 's8'],
+  seenStories: [],
   goingPosts: [],
   reminders: [],
   hasOnboarded: false,
@@ -123,15 +133,25 @@ const DEFAULT_STATE: AppPersistedState = {
   hasSeenLocationPrompt: false,
 };
 
+// Keep/remove the full-post snapshot depending on whether any interaction
+// still references it; capped so localStorage can't fill up
+const MAX_SNAPSHOTS = 300;
+
+function syncSnapshot(snapshots: Post[], post: Post, keep: boolean): Post[] {
+  const without = snapshots.filter(p => p.id !== post.id);
+  if (!keep) return without;
+  return [...without, post].slice(-MAX_SNAPSHOTS);
+}
+
 // ── Reducer ───────────────────────────────────────────────────────────────────
 
 type Action =
   | { type: 'LOAD'; payload: AppPersistedState }
-  | { type: 'LIKE_POST'; id: string; category: Category }
-  | { type: 'SAVE_POST'; id: string; category: Category }
+  | { type: 'LIKE_POST'; post: Post }
+  | { type: 'SAVE_POST'; post: Post }
   | { type: 'FOLLOW_USER'; id: string }
   | { type: 'MARK_STORY_SEEN'; id: string }
-  | { type: 'MARK_GOING'; id: string }
+  | { type: 'MARK_GOING'; post: Post }
   | { type: 'ADD_REMINDER'; reminder: Reminder }
   | { type: 'REMOVE_REMINDER'; postId: string }
   | { type: 'SET_PREFERENCES'; prefs: UserPreferences }
@@ -152,20 +172,28 @@ function reducer(state: AppPersistedState, action: Action): AppPersistedState {
       return action.payload;
 
     case 'LIKE_POST': {
-      const has = state.likedPosts.includes(action.id);
+      const { post } = action;
+      const has = state.likedPosts.includes(post.id);
+      const likedPosts = has ? state.likedPosts.filter(id => id !== post.id) : [...state.likedPosts, post.id];
+      const stillUsed = likedPosts.includes(post.id) || state.savedPosts.includes(post.id) || state.goingPosts.includes(post.id);
       return {
         ...state,
-        likedPosts: has ? state.likedPosts.filter(id => id !== action.id) : [...state.likedPosts, action.id],
-        aiProfile: learnFromInteraction(state.aiProfile, action.category, has ? 'weak' : 'medium'),
+        likedPosts,
+        interactionPosts: syncSnapshot(state.interactionPosts, post, stillUsed),
+        aiProfile: learnFromInteraction(state.aiProfile, post.category, has ? 'weak' : 'medium'),
       };
     }
 
     case 'SAVE_POST': {
-      const has = state.savedPosts.includes(action.id);
+      const { post } = action;
+      const has = state.savedPosts.includes(post.id);
+      const savedPosts = has ? state.savedPosts.filter(id => id !== post.id) : [...state.savedPosts, post.id];
+      const stillUsed = savedPosts.includes(post.id) || state.likedPosts.includes(post.id) || state.goingPosts.includes(post.id);
       return {
         ...state,
-        savedPosts: has ? state.savedPosts.filter(id => id !== action.id) : [...state.savedPosts, action.id],
-        aiProfile: has ? state.aiProfile : learnFromInteraction(state.aiProfile, action.category, 'strong'),
+        savedPosts,
+        interactionPosts: syncSnapshot(state.interactionPosts, post, stillUsed),
+        aiProfile: has ? state.aiProfile : learnFromInteraction(state.aiProfile, post.category, 'strong'),
       };
     }
 
@@ -182,8 +210,15 @@ function reducer(state: AppPersistedState, action: Action): AppPersistedState {
       return { ...state, seenStories: [...state.seenStories, action.id] };
 
     case 'MARK_GOING': {
-      const has = state.goingPosts.includes(action.id);
-      return { ...state, goingPosts: has ? state.goingPosts.filter(id => id !== action.id) : [...state.goingPosts, action.id] };
+      const { post } = action;
+      const has = state.goingPosts.includes(post.id);
+      const goingPosts = has ? state.goingPosts.filter(id => id !== post.id) : [...state.goingPosts, post.id];
+      const stillUsed = goingPosts.includes(post.id) || state.likedPosts.includes(post.id) || state.savedPosts.includes(post.id);
+      return {
+        ...state,
+        goingPosts,
+        interactionPosts: syncSnapshot(state.interactionPosts, post, stillUsed),
+      };
     }
 
     case 'ADD_REMINDER': {
@@ -251,11 +286,11 @@ interface AppContextValue {
   isGoing: (id: string) => boolean;
   hasReminder: (id: string) => boolean;
   unreadCount: number;
-  likePost: (id: string, category: Category) => void;
-  savePost: (id: string, category: Category) => void;
+  likePost: (post: Post) => void;
+  savePost: (post: Post) => void;
   followUser: (id: string) => void;
   markStorySeen: (id: string) => void;
-  goPost: (id: string) => void;
+  goPost: (post: Post) => void;
   addReminder: (reminder: Reminder) => void;
   removeReminder: (postId: string) => void;
   setPreferences: (prefs: UserPreferences) => void;
@@ -412,32 +447,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     isGoing: (id) => state.goingPosts.includes(id),
     hasReminder: (id) => state.reminders.some(r => r.postId === id),
     unreadCount,
-    likePost: (id, category) => {
-      dispatch({ type: 'LIKE_POST', id, category });
+    likePost: (post) => {
+      dispatch({ type: 'LIKE_POST', post });
       if (_supabaseUserId) {
-        (state.likedPosts.includes(id)
-          ? deleteInteraction(_supabaseUserId, id, 'like')
-          : upsertInteraction(_supabaseUserId, id, 'like')
+        (state.likedPosts.includes(post.id)
+          ? deleteInteraction(_supabaseUserId, post.id, 'like')
+          : upsertInteraction(_supabaseUserId, post.id, 'like')
         ).catch(console.error);
       }
     },
-    savePost: (id, category) => {
-      dispatch({ type: 'SAVE_POST', id, category });
+    savePost: (post) => {
+      dispatch({ type: 'SAVE_POST', post });
       if (_supabaseUserId) {
-        (state.savedPosts.includes(id)
-          ? deleteInteraction(_supabaseUserId, id, 'save')
-          : upsertInteraction(_supabaseUserId, id, 'save')
+        (state.savedPosts.includes(post.id)
+          ? deleteInteraction(_supabaseUserId, post.id, 'save')
+          : upsertInteraction(_supabaseUserId, post.id, 'save')
         ).catch(console.error);
       }
     },
     followUser: (id) => dispatch({ type: 'FOLLOW_USER', id }),
     markStorySeen: (id) => dispatch({ type: 'MARK_STORY_SEEN', id }),
-    goPost: (id) => {
-      dispatch({ type: 'MARK_GOING', id });
+    goPost: (post) => {
+      dispatch({ type: 'MARK_GOING', post });
       if (_supabaseUserId) {
-        (state.goingPosts.includes(id)
-          ? deleteInteraction(_supabaseUserId, id, 'going')
-          : upsertInteraction(_supabaseUserId, id, 'going')
+        (state.goingPosts.includes(post.id)
+          ? deleteInteraction(_supabaseUserId, post.id, 'going')
+          : upsertInteraction(_supabaseUserId, post.id, 'going')
         ).catch(console.error);
       }
     },

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Star, Bookmark, MessageCircle, Share2, BadgeCheck, MapPin,
@@ -58,9 +58,9 @@ export default function Post({ post, showHint = false }: Props) {
   const [hintDismissed, setHintDismissed] = useState(false);
   const [showReminderSheet, setShowReminderSheet] = useState(false);
 
-  // ── Going count (deterministic base + 1 if user is going) ────────────────
-  const baseGoingCount = useMemo(() => Math.floor(post.likes * 0.08), [post.likes]);
-  const goingCount     = going ? baseGoingCount + 1 : baseGoingCount;
+  // Real counts only: the post's stored count plus this user's own action
+  const likeCount  = post.likes + (liked ? 1 : 0);
+  const goingCount = going ? 1 : 0;
 
   // ── Countdown for saved events ────────────────────────────────────────────
   const countdown = saved && post.isEvent ? daysUntil(post.eventDateRaw) : null;
@@ -73,20 +73,20 @@ export default function Post({ post, showHint = false }: Props) {
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleLike = useCallback(() => {
-    likePost(post.id, post.category);
+    likePost(post);
     if (!liked) addToast('Loved it ⭐', 'success');
-  }, [liked, likePost, post.id, post.category, addToast]);
+  }, [liked, likePost, post, addToast]);
 
   const handleSave = useCallback(() => {
-    savePost(post.id, post.category);
+    savePost(post);
     if (!saved) addToast('Saved to collection 🔖', 'success');
-  }, [saved, savePost, post.id, post.category, addToast]);
+  }, [saved, savePost, post, addToast]);
 
   const handleGoing = useCallback(() => {
-    goPost(post.id);
+    goPost(post);
     if (!going) addToast(t.common.goingLabel, 'success');
     else addToast('Removed from going', 'info');
-  }, [going, goPost, post.id, addToast, t.common.goingLabel]);
+  }, [going, goPost, post, addToast, t.common.goingLabel]);
 
   // Feature 5 — Deep link share: uses real event URL when available
   const handleShare = useCallback(async () => {
@@ -106,12 +106,12 @@ export default function Post({ post, showHint = false }: Props) {
   }, [post, addToast]);
 
   const handleDoubleTap = useCallback(() => {
-    if (!liked) likePost(post.id, post.category);
+    if (!liked) likePost(post);
     setStarKey(k => k + 1);
     setShowStar(true);
     setHintDismissed(true);
     setTimeout(() => setShowStar(false), 900);
-  }, [liked, likePost, post.id, post.category]);
+  }, [liked, likePost, post]);
 
   const handleSetReminder = useCallback((minutesBefore: number) => {
     if (!post.eventDateRaw) return;
@@ -264,15 +264,19 @@ export default function Post({ post, showHint = false }: Props) {
                 <Star size={25} className={liked ? 'heart-pop' : ''}
                   fill={liked ? '#f59e0b' : 'none'}
                   style={{ color: liked ? '#f59e0b' : '#f0f0ff', transition: 'color 0.2s' }} />
-                <span className="text-sm font-semibold" style={{ color: liked ? '#f59e0b' : '#888899' }}>
-                  {formatCount(post.likes + (liked && !post.liked ? 1 : 0))}
-                </span>
+                {likeCount > 0 && (
+                  <span className="text-sm font-semibold" style={{ color: liked ? '#f59e0b' : '#888899' }}>
+                    {formatCount(likeCount)}
+                  </span>
+                )}
               </motion.button>
 
               {/* Comments */}
               <motion.button whileTap={{ scale: 0.85 }} onClick={() => setShowComments(true)} className="flex items-center gap-1.5">
                 <MessageCircle size={23} style={{ color: '#888899' }} />
-                <span className="text-sm" style={{ color: '#888899' }}>{formatCount(post.comments)}</span>
+                {post.comments > 0 && (
+                  <span className="text-sm" style={{ color: '#888899' }}>{formatCount(post.comments)}</span>
+                )}
               </motion.button>
 
               {/* Feature 5 — Share with deep link */}
@@ -286,9 +290,11 @@ export default function Post({ post, showHint = false }: Props) {
                   <CheckCircle2 size={22}
                     fill={going ? '#22c55e' : 'none'}
                     style={{ color: going ? '#22c55e' : '#888899', transition: 'color 0.2s' }} />
-                  <span className="text-xs font-semibold" style={{ color: going ? '#22c55e' : '#888899' }}>
-                    {formatCount(goingCount)}
-                  </span>
+                  {goingCount > 0 && (
+                    <span className="text-xs font-semibold" style={{ color: '#22c55e' }}>
+                      {formatCount(goingCount)}
+                    </span>
+                  )}
                 </motion.button>
               )}
             </div>

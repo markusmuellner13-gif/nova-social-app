@@ -8,7 +8,7 @@ import { fetchWikipediaNearby, fetchWikipediaSummary, wikiToPost } from '@/lib/s
 import { fetchSeatGeekEvents } from '@/lib/sources/seatgeek';
 import {
   enrichEventDescriptions, enrichPlaceDescriptions, enrichSightseeingDescriptions,
-  searchRealEventsWithClaude, hardFallback,
+  searchRealEventsWithClaude,
 } from '@/lib/sources/claudeAI';
 
 export const maxDuration = 60;
@@ -280,12 +280,8 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ── Absolute last resort so the feed is never blank ───────────────────────
-  if (pool.length === 0 && page === 0) {
-    pool = await hardFallback(city, country, page, count, unsplashKey, pexelsKey, lat, lng);
-    sources.push('fallback');
-  }
-
+  // No invented events: if every real source is empty, return an honest empty
+  // page — the client shows a clear "no events found" state instead
   const final = rankAndMix(withDistance(pool, lat, lng), count * 2);
 
   return NextResponse.json(

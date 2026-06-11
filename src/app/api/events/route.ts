@@ -7,7 +7,7 @@ import { fetchOverpassPlaces, overpassToPost } from '@/lib/sources/osm';
 import { fetchWikipediaNearby, fetchWikipediaSummary, wikiToPost } from '@/lib/sources/wikipedia';
 import {
   enrichEventDescriptions, enrichPlaceDescriptions, enrichSightseeingDescriptions,
-  searchRealEventsWithClaude, hardFallback,
+  searchRealEventsWithClaude,
 } from '@/lib/sources/claudeAI';
 
 export const maxDuration = 60; // Vercel Pro: allow up to 60s for web-search API calls
@@ -137,8 +137,7 @@ export async function GET(request: NextRequest) {
     } catch (err) {
       console.error('[events/community/eventbrite]', err);
     }
-    const fallbackPosts = await hardFallback(city, country, page, count, unsplashKey, pexelsKey, lat, lng);
-    return NextResponse.json({ posts: fallbackPosts, city, country, source: 'fallback', hasMore: false }, { headers: NO_CACHE });
+    return NextResponse.json({ posts: [], city, country, source: 'none', hasMore: false }, { headers: NO_CACHE });
   }
 
   // ── SIGHTSEEING: Wikipedia GeoSearch + Summary API (free, real photos) ────
@@ -282,10 +281,9 @@ export async function GET(request: NextRequest) {
     console.error('[events/eventbrite]', err);
   }
 
-  // ── LAST RESORT: hardcoded templates with real images ────────────────────
-  const fallbackPosts = await hardFallback(city, country, page, count, unsplashKey, pexelsKey, lat, lng);
+  // No invented events: when every real source is empty, say so honestly
   return NextResponse.json({
-    posts: fallbackPosts,
-    city, country, source: 'fallback', hasMore: page < 5,
+    posts: [],
+    city, country, source: 'none', hasMore: false,
   }, { headers: NO_CACHE });
 }

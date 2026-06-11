@@ -9,7 +9,7 @@ import {
   UserPlus, UserCheck, X, LogIn, Globe, Heart, Check,
   MessageSquare, FileText, Info, ExternalLink, Phone,
 } from 'lucide-react';
-import { CURRENT_USER, MOCK_POSTS, formatCount } from '@/data/mockData';
+import { CURRENT_USER, formatCount } from '@/data/mockData';
 import { Category, Post } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
@@ -70,15 +70,25 @@ export default function ProfileTab({ onOpenAuth }: Props) {
   const [followResults, setFollowResults] = useState<SupabaseProfile[]>([]);
   const [followingIds, setFollowingIds]   = useState<string[]>([]);
 
-  const likedPosts  = MOCK_POSTS.filter(p => state.likedPosts.includes(p.id));
-  const savedPosts  = MOCK_POSTS.filter(p => savedIds.includes(p.id));
+  // Only this user's real interactions, resolved from stored post snapshots
+  // (+ own created posts) so they survive app restarts
+  const interactionPool = useMemo(
+    () => [...state.interactionPosts, ...state.createdPosts],
+    [state.interactionPosts, state.createdPosts]
+  );
+  const resolvePosts = (ids: string[]): Post[] =>
+    ids.map(id => interactionPool.find(p => p.id === id)).filter((p): p is Post => Boolean(p));
+
+  const likedPosts  = resolvePosts(state.likedPosts);
+  const savedPosts  = resolvePosts(savedIds);
 
   const upcomingEvents: Post[] = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
-    return [...savedPosts, ...state.goingPosts.map(id => MOCK_POSTS.find(p => p.id === id)).filter(Boolean) as Post[]]
+    return [...savedPosts, ...resolvePosts(state.goingPosts)]
       .filter((p, i, arr) => p.isEvent && p.eventDateRaw && p.eventDateRaw >= today && arr.findIndex(x => x.id === p.id) === i)
       .sort((a, b) => (a.eventDateRaw ?? '').localeCompare(b.eventDateRaw ?? ''));
-  }, [savedPosts, state.goingPosts]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedIds, state.likedPosts, state.goingPosts, interactionPool]);
 
   const badgeStats: BadgeStats = useMemo(() => ({
     saved: savedIds.length,

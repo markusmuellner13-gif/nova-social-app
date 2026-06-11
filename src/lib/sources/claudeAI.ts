@@ -193,8 +193,8 @@ Return only the raw JSON array, no markdown, no extra text.`;
       user: makeUser(org, website || undefined),
       image,
       caption: `${desc}\n\n📅 ${eventDateStr}${time ? ` · ${time}` : ''}\n📍 ${venue}${address ? `, ${address}` : ''}\n🎟️ ${price}\n🔗 Tickets & info: ${url}`,
-      likes: Math.floor(Math.random() * 12_000) + 500,
-      comments: Math.floor(Math.random() * 400) + 20,
+      likes: 0,
+      comments: 0,
       category: cat,
       hashtags: tags,
       timestamp: now - Math.random() * 10_800_000,
@@ -207,54 +207,6 @@ Return only the raw JSON array, no markdown, no extra text.`;
       eventUrl: url,
       organizer: org,
       price,
-    };
-  }));
-}
-
-// Last-resort fallback — only fires when every API fails. Uses real Unsplash/Pexels images.
-export async function hardFallback(
-  city: string, country: string, page: number, count: number,
-  unsplashKey?: string, pexelsKey?: string, userLat?: number, userLng?: number
-): Promise<ApiPost[]> {
-  const templates = [
-    { title: 'Live Music Night', cat: 'music', domain: 'ra.co', price: '€15', imgQ: 'live music concert crowd' },
-    { title: `${city} Food Festival`, cat: 'food', domain: 'eventbrite.com', price: 'Free', imgQ: 'street food festival market' },
-    { title: 'Art Exhibition Opening', cat: 'art', domain: 'artfair.com', price: '€12', imgQ: 'art gallery exhibition opening' },
-    { title: 'City Half Marathon', cat: 'sports', domain: 'active.com', price: '€25', imgQ: 'city marathon running race' },
-    { title: 'Tech Meetup', cat: 'events', domain: 'meetup.com', price: 'Free', imgQ: 'tech meetup networking event' },
-    { title: 'Night Market', cat: 'lifestyle', domain: 'timeout.com', price: 'Free', imgQ: 'night market lights crowd' },
-    { title: 'Open Air Cinema', cat: 'events', domain: 'timeout.com', price: '€12', imgQ: 'outdoor cinema evening' },
-    { title: 'Sightseeing Tour', cat: 'sightseeing', domain: 'viator.com', price: '€18', imgQ: 'city tour landmark architecture' },
-  ];
-  const now = Date.now();
-  return Promise.all(templates.slice(0, count).map(async (t, i) => {
-    const daysAhead = ((page * count + i) % 30) + 1;
-    const eventDate = new Date(now + daysAhead * 86_400_000);
-    const rawDate = eventDate.toISOString().split('T')[0];
-    const dateStr = eventDate.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
-    const image = await Promise.race([
-      getImage(t.imgQ, unsplashKey, pexelsKey, `fb_${city}_${t.cat}_${page}_${i}`),
-      new Promise<string>(resolve => setTimeout(() => resolve(picsumUrl(`fb_${city}_${t.cat}_${page}_${i}`)), 3000)),
-    ]);
-    return {
-      id: `fb_${city}_p${page}_${i}`,
-      user: makeUser(t.title, t.domain),
-      image,
-      caption: `Local ${t.title.toLowerCase()} happening in ${city}.\n\n📅 ${dateStr}, 19:00\n📍 ${city}, ${country}\n🎟️ ${t.price}\n🔗 https://${t.domain}`,
-      likes: Math.floor(Math.random() * 5_000) + 100,
-      comments: Math.floor(Math.random() * 100) + 5,
-      category: t.cat,
-      hashtags: [`#${city.replace(/\s/g, '')}`, `#${t.cat}`, '#nova', '#local'],
-      timestamp: now - Math.random() * 7_200_000,
-      location: { name: `${city}, ${country}`, lat: userLat ?? 0, lng: userLng ?? 0 },
-      saved: false, liked: false,
-      isEvent: true, isAIGenerated: true,
-      eventDate: `${dateStr} · 19:00`,
-      eventDateRaw: rawDate,
-      eventVenue: city,
-      eventUrl: `https://${t.domain}`,
-      organizer: t.title,
-      price: t.price,
     };
   }));
 }

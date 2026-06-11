@@ -4,7 +4,7 @@ import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { X, Heart, Send, Star } from 'lucide-react';
 import { Post, Comment } from '@/types';
-import { getPostComments, formatCount, timeAgo } from '@/data/mockData';
+import { formatCount, timeAgo } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
 
 interface Props {
@@ -14,7 +14,6 @@ interface Props {
 
 export default function CommentsSheet({ post, onClose }: Props) {
   const { isLiked, likePost, isSaved, savePost, addToast } = useApp();
-  const [comments] = useState<Comment[]>(() => getPostComments(post));
   const [likedComments, setLikedComments] = useState<Set<string>>(new Set());
   const [commentText, setCommentText] = useState('');
   const [localComments, setLocalComments] = useState<Comment[]>([]);
@@ -45,7 +44,8 @@ export default function CommentsSheet({ post, onClose }: Props) {
     addToast('Comment posted', 'success', '💬');
   }
 
-  const allComments = [...localComments, ...comments];
+  // Only real comments written by this user — no generated filler
+  const allComments = localComments;
 
   return (
     <motion.div
@@ -79,7 +79,7 @@ export default function CommentsSheet({ post, onClose }: Props) {
         {/* Quick actions */}
         <div className="flex gap-3 flex-shrink-0">
           <button
-            onClick={() => { likePost(post.id, post.category); }}
+            onClick={() => { likePost(post); }}
             className="flex flex-col items-center gap-0.5"
           >
             <Star
@@ -88,11 +88,13 @@ export default function CommentsSheet({ post, onClose }: Props) {
               style={{ color: liked ? '#f59e0b' : '#888899' }}
               className={liked ? 'heart-pop' : ''}
             />
-            <span className="text-xs" style={{ color: liked ? '#f59e0b' : '#555566' }}>{formatCount(post.likes + (liked ? 1 : 0))}</span>
+            <span className="text-xs" style={{ color: liked ? '#f59e0b' : '#555566' }}>
+              {post.likes + (liked ? 1 : 0) > 0 ? formatCount(post.likes + (liked ? 1 : 0)) : 'Like'}
+            </span>
           </button>
           <button
             onClick={() => {
-              savePost(post.id, post.category);
+              savePost(post);
               if (!saved) addToast('Saved to collection', 'success', '🔖');
             }}
             className="flex flex-col items-center gap-0.5"

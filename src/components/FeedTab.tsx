@@ -3,15 +3,13 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Compass, Sparkles, RefreshCw, ChevronDown, MapPin, Loader2, SlidersHorizontal } from 'lucide-react';
-import { MOCK_POSTS, MOCK_STORIES, CURRENT_USER, SPONSORED_POSTS } from '@/data/mockData';
+import { MOCK_POSTS, SPONSORED_POSTS } from '@/data/mockData';
 import { Category, Post } from '@/types';
 import { sortFeed, getTopCategories } from '@/lib/aiEngine';
 import { parseMinPrice } from './Post';
 import { useApp } from '@/context/AppContext';
 import { useAIFeed } from '@/hooks/useAIFeed';
 import PostComponent from './Post';
-import { StoryItem } from './Story';
-import StoryViewer from './StoryViewer';
 import { useLanguage } from '@/context/LanguageContext';
 import AdSlot from './AdSlot';
 
@@ -99,7 +97,7 @@ interface Props {
 }
 
 export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Props) {
-  const { state, isStorySeen } = useApp();
+  const { state } = useApp();
   const { t } = useLanguage();
   const { preferences, aiProfile, createdPosts } = state;
   const location = state.location;
@@ -112,8 +110,6 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
   const [dateFilter,  setDateFilter]  = useState<DateFilter>('all');
   const [priceFilter, setPriceFilter] = useState<PriceFilter>('all');
   const [showFilters, setShowFilters] = useState(false);
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [viewerIndex, setViewerIndex] = useState(0);
   const [visibleCurated, setVisibleCurated] = useState(PAGE_SIZE);
   const [showNewBanner, setShowNewBanner] = useState(false);
   const [injectedPosts, setInjectedPosts] = useState<Post[]>([]);
@@ -187,11 +183,6 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiPosts.length]);
 
-  const stories = useMemo(
-    () => MOCK_STORIES.map(s => ({ ...s, seen: isStorySeen(s.id) })),
-    [isStorySeen, state.seenStories]
-  );
-
   // Whether we know where the user is — if so, the feed shows ONLY real
   // location-based content (no generic mock posts from other cities)
   const hasCity = Boolean(location?.city);
@@ -205,15 +196,8 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
     return sortFeed(pool, preferences, aiProfile);
   }, [createdPosts, preferences, aiProfile, activeChipCategory, sortMode, hasCity]);
 
-  // Mock posts for specific main tabs (events / sport) — fallback only when
-  // the user's city is unknown; with a city we show real local data only
-  const mockTabPool = useMemo((): Post[] => {
-    if (hasCity) return [];
-    if (activeMainTab === 'events')  return sortByEventDate(MOCK_POSTS.filter(p => p.category === 'events'));
-    if (activeMainTab === 'sport')   return sortByEventDate(MOCK_POSTS.filter(p => p.category === 'sports'));
-    if (activeMainTab === 'sightseeing') return MOCK_POSTS.filter(p => p.category === 'travel');
-    return [];
-  }, [activeMainTab, hasCity]);
+  // Events / Sport / Sightseeing tabs show ONLY real location-based data —
+  // never demo posts pretending to be local events
 
   // Build merged feed depending on active tab
   const mergedFeed = useMemo(() => {
@@ -254,18 +238,15 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
       return items;
     }
 
-    // Events / Sightseeing / Sport: merge AI posts + matching mock posts, sort chronologically
-    const combinedRaw = [...mockTabPool];
+    // Events / Sightseeing / Sport: real location-based posts only
     const aiSorted = activeMainTab === 'sightseeing'
       ? [...aiPosts].sort((a, b) => b.timestamp - a.timestamp)
       : sortByEventDate(aiPosts);
 
-    // Interleave: show AI posts first (they're location-aware), then mock
-    const combinedAll = [...aiSorted, ...combinedRaw];
     // Feature 3 — apply date+price filters on event tabs
     const combined = (activeMainTab === 'events' || activeMainTab === 'sport')
-      ? applyEventFilters(combinedAll, dateFilter, priceFilter)
-      : combinedAll;
+      ? applyEventFilters(aiSorted, dateFilter, priceFilter)
+      : aiSorted;
 
     combined.forEach((post, i) => {
       if (adIndex(i)) items.push({ type: 'ad', index: adIdx++ });
@@ -273,7 +254,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
     });
 
     return items;
-  }, [activeMainTab, aiPosts, injectedPosts, curatedPool, visibleCurated, mockTabPool, dateFilter, priceFilter, partnerCatFilter]);
+  }, [activeMainTab, aiPosts, injectedPosts, curatedPool, visibleCurated, dateFilter, priceFilter, partnerCatFilter]);
 
   // Infinite scroll + scroll-position tracking
   const handleScroll = useCallback(() => {
@@ -501,15 +482,6 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
             </div>
           )}
 
-          {/* Stories strip — discover mode only */}
-          {activeMainTab === 'discover' && (
-            <div className="flex gap-3 px-4 py-3 overflow-x-auto flex-shrink-0" style={{ borderBottom: '1px solid #1a1a24' }}>
-              {stories.map((story, i) => (
-                <StoryItem key={story.id} story={story} onPress={() => { setViewerIndex(i); setViewerOpen(true); }} />
-              ))}
-            </div>
-          )}
-
           {/* Category chips — discover mode only */}
           {activeMainTab === 'discover' && (
             <div className="flex gap-2 px-4 py-3 overflow-x-auto flex-shrink-0" style={{ borderBottom: '1px solid #1a1a24' }}>
@@ -710,6 +682,17 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
             </div>
           )}
 
+          {/* Honest empty state — no invented events when sources are empty */}
+          {!isTabLoading && !aiLoading && activeMainTab !== 'partners' && mergedFeed.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 px-8 gap-3">
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)' }}>
+                <MapPin size={26} style={{ color: '#a78bfa' }} />
+              </div>
+              <p className="text-sm font-bold text-white text-center">{t.profile.noUpcomingEvents}</p>
+              <p className="text-xs text-center" style={{ color: '#888899' }}>{t.feed.pullRefresh}</p>
+            </div>
+          )}
+
           {/* Feed items */}
           {!isTabLoading && (
             <div>
@@ -771,13 +754,6 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
           <div style={{ height: 100 }} />
         </div>
       </div>
-
-      {/* Story viewer */}
-      <AnimatePresence>
-        {viewerOpen && (
-          <StoryViewer stories={stories} initialIndex={viewerIndex} onClose={() => setViewerOpen(false)} />
-        )}
-      </AnimatePresence>
 
       {/* Scroll-to-top button */}
       <AnimatePresence>

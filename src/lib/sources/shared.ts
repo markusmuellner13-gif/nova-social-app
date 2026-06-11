@@ -51,9 +51,9 @@ export function makeUser(name: string, domain?: string) {
     username: slug,
     avatar: domain ? logoUrl(domain) : fallbackAvatar(name),
     bio: `Official Nova partner — ${name}`,
-    followers: Math.floor(Math.random() * 5_000_000) + 10_000,
+    followers: 0,
     following: 0,
-    posts: Math.floor(Math.random() * 50_000) + 100,
+    posts: 0,
     verified: true,
   };
 }

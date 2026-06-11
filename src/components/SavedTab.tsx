@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bookmark, MapPin, Star, ChevronDown, ChevronUp, X } from 'lucide-react';
-import { MOCK_POSTS, formatCount } from '@/data/mockData';
+import { formatCount } from '@/data/mockData';
 import { Category, Post } from '@/types';
 import { useApp } from '@/context/AppContext';
 import CommentsSheet from './CommentsSheet';
@@ -25,7 +25,12 @@ const CATEGORY_LABELS: Partial<Record<Category, { emoji: string; label: string }
 export default function SavedTab() {
   const { state, savePost, addToast } = useApp();
   const savedIds = state.savedPosts;
-  const savedPosts = MOCK_POSTS.filter(p => savedIds.includes(p.id));
+  // Resolve from stored snapshots (+ own created posts) — survives restarts
+  // and works for live feed posts that no longer exist in any feed cache
+  const pool = [...state.interactionPosts, ...state.createdPosts];
+  const savedPosts = savedIds
+    .map(id => pool.find(p => p.id === id))
+    .filter((p): p is Post => Boolean(p));
 
   // Group by category
   const collections = Object.entries(
@@ -48,7 +53,7 @@ export default function SavedTab() {
   }
 
   function handleUnsave(post: Post) {
-    savePost(post.id, post.category);
+    savePost(post);
     addToast('Removed from saved', 'info', '🗑️');
   }
 
@@ -140,10 +145,12 @@ export default function SavedTab() {
                                   </div>
                                   <p className="text-sm font-semibold text-white truncate">{post.user.name}</p>
                                   <p className="text-xs mt-0.5 line-clamp-1 leading-snug" style={{ color: '#888899' }}>{post.caption}</p>
-                                  <div className="flex items-center gap-1 mt-1.5">
-                                    <Star size={11} fill="#f59e0b" style={{ color: '#f59e0b' }} />
-                                    <span className="text-xs" style={{ color: '#f59e0b' }}>{formatCount(post.likes)}</span>
-                                  </div>
+                                  {post.likes > 0 && (
+                                    <div className="flex items-center gap-1 mt-1.5">
+                                      <Star size={11} fill="#f59e0b" style={{ color: '#f59e0b' }} />
+                                      <span className="text-xs" style={{ color: '#f59e0b' }}>{formatCount(post.likes)}</span>
+                                    </div>
+                                  )}
                                 </div>
                                 {/* Unsave button */}
                                 <motion.button

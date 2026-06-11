@@ -1,4 +1,4 @@
-import { Post, Story, User, NovaNotification, Comment, Category } from '@/types';
+import { Post, Story, User, NovaNotification } from '@/types';
 
 // Build a properly-cropped Unsplash photo URL (no API key required for CDN delivery)
 function U(id: string, w = 600, h = 750): string {
@@ -35,7 +35,7 @@ export const MOCK_USERS: User[] = [
 const now = Date.now();
 const h = (hours: number) => now - hours * 60 * 60 * 1000;
 
-export const MOCK_POSTS: Post[] = [
+export const RAW_MOCK_POSTS: Post[] = [
   // ── Travel ──────────────────────────────────────────────────────────────
   {
     id: 'p1', user: MOCK_USERS[0],
@@ -268,6 +268,12 @@ export const MOCK_POSTS: Post[] = [
   },
 ];
 
+// No fabricated engagement: demo posts start with zero likes/comments and no
+// pre-seeded liked/saved flags — counts only ever reflect this user's actions
+export const MOCK_POSTS: Post[] = RAW_MOCK_POSTS.map(p => ({
+  ...p, likes: 0, comments: 0, liked: false, saved: false,
+}));
+
 export const MOCK_STORIES: Story[] = [
   { id: 's1', user: MOCK_USERS[0],  seen: false, image: U('1506905925346-21bda4d32df4', 800, 1400) }, // Lonely Planet — mountain travel
   { id: 's2', user: MOCK_USERS[1],  seen: false, image: U('1480714378408-67cf0d13bc1b', 800, 1400) }, // Time Out — city nightlife
@@ -326,7 +332,7 @@ function sponsorUser(name: string, domain: string, bio: string): User {
   };
 }
 
-export const SPONSORED_POSTS: Post[] = [
+const RAW_SPONSORED_POSTS: Post[] = [
   {
     id: 'sp1',
     user: sponsorUser('La Maison Restaurant', 'lamaisonrestaurant.com', '🍽️ Award-winning European cuisine · Private dining available'),
@@ -479,34 +485,9 @@ export const SPONSORED_POSTS: Post[] = [
   },
 ];
 
-const COMMENT_TEMPLATES: Record<string, string[]> = {
-  travel: ['This is on my bucket list!! 😍', 'I went here last year — absolutely breathtaking ❤️', 'The photos don\'t even do it justice', 'Saving this for my next trip 🙏', 'Stunning. The world is wild.', 'How do I get tickets?', 'You\'re living my dream 😭', '🌅🌅🌅 unreal'],
-  food: ['I need this in my life RIGHT NOW 😭', 'Booking a table tonight', 'This looks absolutely incredible 🤤', 'The presentation is perfection', 'Already on my way 🏃‍♀️', 'My stomach just growled', 'Free entry AND amazing food?!', 'Adding to my must-visit list'],
-  fashion: ['STUNNING 🔥', 'This collection is everything', 'When does it drop?!', 'The styling is chef\'s kiss 💋', 'Fashion forward as always', 'The fit is PERFECT', 'This is the trend of the season', 'Iconic. That\'s it.'],
-  sports: ['ABSOLUTE LEGENDS 🐐', 'This gave me chills', 'Can\'t wait for match day', 'LETS GOOO', 'Already got my tickets', 'The greatest sport in the world', 'What an atmosphere that\'ll be', 'Pure passion. Love to see it.'],
-  art: ['This is breathtaking 🎨', 'The technique is incredible', 'I need to see this in person', 'You are so talented omg', 'Art Basel is on my bucket list', 'Art is alive because of shows like this', 'The colours are everything', 'This belongs in every museum'],
-  tech: ['This is actually wild 🤯', 'Already registered!', 'The future is here', 'Best conference of the year', 'Following for updates', 'This changes everything', 'See you there 🙌', 'DM me — going with a group'],
-  fitness: ['You are an absolute beast 💪', 'Already signed up!', 'Goals. Pure goals.', 'What training programme?', 'The dedication is unreal', 'This made me get off my couch', 'No days off 🔥', 'Registering right now'],
-  music: ['This is FIRE 🔥🎵', 'Best lineup in years', 'I\'ve had this on repeat all day', 'ALREADY GOT TICKETS', 'The talent is unreal', 'I will be front row', 'My music got me through so much', '10/10 cannot wait'],
-  pets: ['I am DECEASED 😭😭 so cute', 'This made my entire day', 'Animals are pure serotonin', 'I\'m buying tickets right now', 'Rescue pets are the best pets ❤️', 'The audacity of this absolute unit', 'Crying actual tears of joy', 'BEST EVENT EVER'],
-  lifestyle: ['This is the life I\'m building 🙏', 'So peaceful and beautiful', 'Protect your peace always', 'The vibe is immaculate', 'Slow living is the only living', 'This is what it\'s all about', 'Goals for my whole life honestly', 'You\'re doing it perfectly'],
-  events: ['ALREADY GOT MY TICKETS 🎟️', 'This is going to be legendary', 'SEE YOU THERE!!!', 'The lineup is unreal', 'I\'ve been waiting for this', 'This is THE one.', 'Nothing beats being there live', 'Screaming internally 😭'],
-  sightseeing: ['On my bucket list! 🗺️', 'I visited last year — absolutely stunning', 'How long did you spend here?', 'The history here is unreal', 'Worth every minute of the journey', 'This should be a UNESCO site if it isn\'t already', 'Photography goals 📸', 'Adding to my itinerary right now'],
-  sponsored: ['Just booked! Can\'t wait 🙌', 'Been here twice already — highly recommend', 'The service is outstanding', 'Great value for what you get', 'Already sent this to my travel group', 'This is exactly what I was looking for', 'Booking right now!', 'Is it as good in person? Looks incredible'],
-};
-
-export function getPostComments(post: Post): Comment[] {
-  const seed = post.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  const templates = COMMENT_TEMPLATES[post.category] ?? COMMENT_TEMPLATES.lifestyle;
-  const commentUsers = MOCK_USERS.filter(u => u.id !== post.user.id);
-  return Array.from({ length: 6 }, (_, i) => ({
-    id: `${post.id}_c${i}`,
-    user: commentUsers[(seed + i * 3) % commentUsers.length],
-    text: templates[(seed + i * 2) % templates.length],
-    timestamp: post.timestamp + (i + 1) * 18 * 60 * 1000,
-    likes: Math.floor(Math.abs(Math.sin((seed + i) * 0.7)) * 250 + 5),
-  }));
-}
+export const SPONSORED_POSTS: Post[] = RAW_SPONSORED_POSTS.map(p => ({
+  ...p, likes: 0, comments: 0, liked: false, saved: false,
+}));
 
 export function formatCount(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
