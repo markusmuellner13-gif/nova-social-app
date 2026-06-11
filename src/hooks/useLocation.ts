@@ -100,6 +100,9 @@ export function useLocation(): UseLocationReturn {
         setLocation(loc);
         setPermission('granted');
         localStorage.setItem(STORAGE_KEY, JSON.stringify(loc));
+        if (geo.city && geo.city !== 'Unknown City') {
+          localStorage.setItem('nova_last_city', geo.city);
+        }
       },
       () => { /* silent fail */ },
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
@@ -121,6 +124,9 @@ export function useLocation(): UseLocationReturn {
           setLocation(loc);
           setPermission('granted');
           localStorage.setItem(STORAGE_KEY, JSON.stringify(loc));
+          if (geo.city && geo.city !== 'Unknown City') {
+            localStorage.setItem('nova_last_city', geo.city);
+          }
           resolve();
         },
         () => {
