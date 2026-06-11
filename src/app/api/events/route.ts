@@ -578,7 +578,7 @@ Return only the raw JSON array, no markdown, no extra text.`;
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'web-search-2025-03-05',
+      // Web search is GA — no beta header (sending one returns 400)
     },
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
