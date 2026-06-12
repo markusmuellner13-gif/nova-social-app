@@ -82,7 +82,22 @@ function persistLocation(loc: LocationState) {
   localStorage.setItem('nova_last_city', loc.city);
 }
 
+// A city the user picked by hand (City Explorer) is sticky: it survives
+// reloads and GPS must not silently override it. Re-enabling device location
+// via requestLocation() clears the flag.
+export function persistManualLocation(loc: LocationState) {
+  if (typeof window === 'undefined' || !loc.city) return;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(loc));
+  localStorage.setItem(MANUAL_KEY, '1');
+  localStorage.setItem('nova_last_city', loc.city);
+}
+
+function isManualLocation(): boolean {
+  try { return localStorage.getItem(MANUAL_KEY) === '1'; } catch { return false; }
+}
+
 const STORAGE_KEY = 'nova_location_v1';
+const MANUAL_KEY  = 'nova_location_manual';
 
 export function useLocation(): UseLocationReturn {
   const [location, setLocation] = useState<LocationState | null>(null);
@@ -103,8 +118,9 @@ export function useLocation(): UseLocationReturn {
         } else {
           setLocation(parsed);
           setPermission('granted');
-          // Re-fetch in background to keep fresh
-          if (parsed.enabled) {
+          // Re-fetch in background to keep fresh — but never override a city
+          // the user picked by hand
+          if (parsed.enabled && !isManualLocation()) {
             void requestLocationSilent();
           }
           return;
@@ -157,6 +173,8 @@ export function useLocation(): UseLocationReturn {
       setPermission('denied');
       return;
     }
+    // Explicit GPS request — switch back from a hand-picked city
+    try { localStorage.removeItem(MANUAL_KEY); } catch { /* ignore */ }
     setPermission('loading');
     return new Promise<void>((resolve) => {
       navigator.geolocation.getCurrentPosition(

@@ -25,9 +25,9 @@ const CATEGORY_LABELS: Partial<Record<Category, { emoji: string; label: string }
 export default function SavedTab() {
   const { state, savePost, addToast } = useApp();
   const savedIds = state.savedPosts;
-  // Resolve from stored snapshots (+ own created posts) — survives restarts
-  // and works for live feed posts that no longer exist in any feed cache
-  const pool = [...state.interactionPosts, ...state.createdPosts];
+  // Resolve from stored snapshots — survives restarts and works for live
+  // feed posts that no longer exist in any feed cache
+  const pool = state.interactionPosts;
   const savedPosts = savedIds
     .map(id => pool.find(p => p.id === id))
     .filter((p): p is Post => Boolean(p));
@@ -137,7 +137,7 @@ export default function SavedTab() {
                                 style={{ background: '#13131a', border: '1px solid #2a2a38' }}
                                 onClick={() => setOpenPost(post)}
                               >
-                                <img src={post.image} alt="" className="w-16 h-16 rounded-xl object-cover flex-shrink-0" loading="lazy" />
+                                <img src={post.image} alt="" className="w-16 h-16 rounded-xl object-cover flex-shrink-0" loading="lazy" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-1 mb-0.5">
                                     <MapPin size={11} style={{ color: '#8b5cf6' }} />

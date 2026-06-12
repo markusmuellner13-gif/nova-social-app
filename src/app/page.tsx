@@ -19,8 +19,8 @@ import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { LanguageProvider } from '@/context/LanguageContext';
 import { getUserInteractions } from '@/lib/supabase';
 import ErrorBoundary from '@/components/ErrorBoundary';
-import { useLocation } from '@/hooks/useLocation';
-import { LocationState } from '@/types';
+import { useLocation, persistManualLocation } from '@/hooks/useLocation';
+import { LocationState, Post } from '@/types';
 
 function AppShell() {
   const { state, setLocation, markSeenLocationPrompt, syncInteractions } = useApp();
@@ -39,7 +39,7 @@ function AppShell() {
     setSupabaseUser(user?.id ?? null);
     if (user) {
       getUserInteractions(user.id).then(data => {
-        if (data) syncInteractions(data);
+        if (data) syncInteractions({ ...data, posts: data.posts as unknown as Post[] });
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -71,6 +71,9 @@ function AppShell() {
 
   function handleManualCity(loc: LocationState) {
     setLocation(loc);
+    // Sticky: the chosen city survives reloads and isn't overridden by GPS
+    // until the user explicitly re-enables device location
+    persistManualLocation(loc);
   }
 
   const handleTabChange = useCallback((tab: Tab) => {

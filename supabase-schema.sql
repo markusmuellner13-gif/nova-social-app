@@ -130,6 +130,7 @@ create table if not exists public.post_interactions (
   user_id          uuid not null references auth.users on delete cascade,
   post_id          text not null,
   interaction_type text not null check (interaction_type in ('like', 'save', 'going')),
+  post_data        jsonb,
   created_at       timestamptz default now(),
   primary key (user_id, post_id, interaction_type)
 );

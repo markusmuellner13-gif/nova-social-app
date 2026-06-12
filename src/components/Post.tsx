@@ -134,6 +134,7 @@ export default function Post({ post, showHint = false }: Props) {
 
   const caption = post.caption;
   const isLong  = caption.length > 90;
+  const fallbackImage = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`;
 
   return (
     <>
@@ -228,7 +229,14 @@ export default function Post({ post, showHint = false }: Props) {
             alt={post.caption}
             className="w-full h-full object-cover"
             onLoad={() => setImgLoaded(true)}
-            onError={() => setImgLoaded(true)}
+            onError={(e) => {
+              // Some sources (venue og:images, third-party CDNs) refuse
+              // hotlinking or 404 — swap in a deterministic fallback photo
+              // instead of leaving a blank frame
+              const el = e.currentTarget;
+              if (el.src !== fallbackImage) { el.src = fallbackImage; }
+              else { setImgLoaded(true); }
+            }}
             onDoubleClick={handleDoubleTap}
             style={{ opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.3s' }}
           />

@@ -82,11 +82,10 @@ async function decryptLoad(): Promise<AppPersistedState | null> {
 
 function migrateState(raw: Partial<AppPersistedState>): AppPersistedState {
   const interactionPosts = raw.interactionPosts ?? [];
-  const createdPosts = raw.createdPosts ?? [];
   // Self-heal: only keep liked/saved/going ids that resolve to a stored post
-  // snapshot or an own created post. Drops the demo likes/saves older app
-  // versions pre-seeded, and orphaned ids that nothing could display anyway.
-  const resolvable = new Set([...interactionPosts, ...createdPosts].map(p => p.id));
+  // snapshot. Drops the demo likes/saves older app versions pre-seeded, and
+  // orphaned ids that nothing could display anyway.
+  const resolvable = new Set(interactionPosts.map(p => p.id));
   return {
     preferences: { ...DEFAULT_PREFERENCES, ...(raw.preferences ?? {}) },
     likedPosts: (raw.likedPosts ?? []).filter(id => resolvable.has(id)),
@@ -104,7 +103,6 @@ function migrateState(raw: Partial<AppPersistedState>): AppPersistedState {
       sessionCount: (raw.aiProfile?.sessionCount ?? 0) + 1,
     },
     notifications: raw.notifications ?? MOCK_NOTIFICATIONS,
-    createdPosts,
     location: raw.location ?? null,
     locationEnabled: raw.locationEnabled ?? false,
     hasSeenLocationPrompt: raw.hasSeenLocationPrompt ?? false,
@@ -127,7 +125,6 @@ const DEFAULT_STATE: AppPersistedState = {
   hasOnboarded: false,
   aiProfile: { categoryEngagement: {}, totalInteractions: 0, lastActive: Date.now(), sessionCount: 1 },
   notifications: MOCK_NOTIFICATIONS,
-  createdPosts: [],
   location: null,
   locationEnabled: false,
   hasSeenLocationPrompt: false,
@@ -158,12 +155,11 @@ type Action =
   | { type: 'ADD_NOTIFICATION'; notif: NovaNotification }
   | { type: 'MARK_ALL_READ' }
   | { type: 'MARK_READ'; id: string }
-  | { type: 'ADD_CREATED_POST'; post: Post }
   | { type: 'COMPLETE_ONBOARDING'; prefs: UserPreferences }
   | { type: 'SET_LOCATION'; location: LocationState }
   | { type: 'SET_LOCATION_ENABLED'; enabled: boolean }
   | { type: 'SET_SEEN_LOCATION_PROMPT' }
-  | { type: 'SYNC_INTERACTIONS'; liked: string[]; saved: string[]; going: string[] }
+  | { type: 'SYNC_INTERACTIONS'; liked: string[]; saved: string[]; going: string[]; posts: Post[] }
   | { type: 'CLEAR_ALL_DATA' };
 
 function reducer(state: AppPersistedState, action: Action): AppPersistedState {
@@ -244,9 +240,6 @@ function reducer(state: AppPersistedState, action: Action): AppPersistedState {
     case 'MARK_READ':
       return { ...state, notifications: state.notifications.map(n => n.id === action.id ? { ...n, read: true } : n) };
 
-    case 'ADD_CREATED_POST':
-      return { ...state, createdPosts: [action.post, ...state.createdPosts] };
-
     case 'COMPLETE_ONBOARDING':
       return { ...state, hasOnboarded: true, preferences: action.prefs };
 
@@ -259,13 +252,18 @@ function reducer(state: AppPersistedState, action: Action): AppPersistedState {
     case 'SET_SEEN_LOCATION_PROMPT':
       return { ...state, hasSeenLocationPrompt: true };
 
-    case 'SYNC_INTERACTIONS':
+    case 'SYNC_INTERACTIONS': {
+      // Merge remote snapshots (from other devices) — local copies win
+      const existing = new Set(state.interactionPosts.map(p => p.id));
+      const remoteNew = action.posts.filter(p => p?.id && !existing.has(p.id));
       return {
         ...state,
         likedPosts: Array.from(new Set([...state.likedPosts, ...action.liked])),
         savedPosts: Array.from(new Set([...state.savedPosts, ...action.saved])),
         goingPosts: Array.from(new Set([...state.goingPosts, ...action.going])),
+        interactionPosts: [...remoteNew, ...state.interactionPosts].slice(-MAX_SNAPSHOTS),
       };
+    }
 
     case 'CLEAR_ALL_DATA':
       return { ...DEFAULT_STATE, hasOnboarded: false };
@@ -296,13 +294,12 @@ interface AppContextValue {
   setPreferences: (prefs: UserPreferences) => void;
   markAllRead: () => void;
   markRead: (id: string) => void;
-  addCreatedPost: (post: Post) => void;
   completeOnboarding: (prefs: UserPreferences) => void;
   setLocation: (loc: LocationState) => void;
   setLocationEnabled: (enabled: boolean) => void;
   markSeenLocationPrompt: () => void;
   clearAllData: () => void;
-  syncInteractions: (data: { likedPosts: string[]; savedPosts: string[]; goingPosts: string[] }) => void;
+  syncInteractions: (data: { likedPosts: string[]; savedPosts: string[]; goingPosts: string[]; posts: Post[] }) => void;
   // Toasts
   toasts: Toast[];
   addToast: (message: string, type?: Toast['type'], icon?: string) => void;
@@ -450,9 +447,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     likePost: (post) => {
       dispatch({ type: 'LIKE_POST', post });
       if (_supabaseUserId) {
+        // Sync the full snapshot so other signed-in devices can display it
         (state.likedPosts.includes(post.id)
           ? deleteInteraction(_supabaseUserId, post.id, 'like')
-          : upsertInteraction(_supabaseUserId, post.id, 'like')
+          : upsertInteraction(_supabaseUserId, post.id, 'like', post as unknown as Record<string, unknown>)
         ).catch(console.error);
       }
     },
@@ -461,7 +459,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (_supabaseUserId) {
         (state.savedPosts.includes(post.id)
           ? deleteInteraction(_supabaseUserId, post.id, 'save')
-          : upsertInteraction(_supabaseUserId, post.id, 'save')
+          : upsertInteraction(_supabaseUserId, post.id, 'save', post as unknown as Record<string, unknown>)
         ).catch(console.error);
       }
     },
@@ -472,7 +470,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (_supabaseUserId) {
         (state.goingPosts.includes(post.id)
           ? deleteInteraction(_supabaseUserId, post.id, 'going')
-          : upsertInteraction(_supabaseUserId, post.id, 'going')
+          : upsertInteraction(_supabaseUserId, post.id, 'going', post as unknown as Record<string, unknown>)
         ).catch(console.error);
       }
     },
@@ -481,12 +479,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setPreferences: (prefs) => dispatch({ type: 'SET_PREFERENCES', prefs }),
     markAllRead: () => dispatch({ type: 'MARK_ALL_READ' }),
     markRead: (id) => dispatch({ type: 'MARK_READ', id }),
-    addCreatedPost: (post) => dispatch({ type: 'ADD_CREATED_POST', post }),
     completeOnboarding: (prefs) => dispatch({ type: 'COMPLETE_ONBOARDING', prefs }),
     setLocation: (location) => dispatch({ type: 'SET_LOCATION', location }),
     setLocationEnabled: (enabled) => dispatch({ type: 'SET_LOCATION_ENABLED', enabled }),
     markSeenLocationPrompt: () => dispatch({ type: 'SET_SEEN_LOCATION_PROMPT' }),
-    syncInteractions: (data) => dispatch({ type: 'SYNC_INTERACTIONS', liked: data.likedPosts, saved: data.savedPosts, going: data.goingPosts }),
+    syncInteractions: (data) => dispatch({ type: 'SYNC_INTERACTIONS', liked: data.likedPosts, saved: data.savedPosts, going: data.goingPosts, posts: data.posts }),
     clearAllData: () => {
       dispatch({ type: 'CLEAR_ALL_DATA' });
       localStorage.removeItem(DATA_STORE);

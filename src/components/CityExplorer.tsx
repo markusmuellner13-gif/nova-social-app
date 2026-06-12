@@ -61,7 +61,9 @@ export default function CityExplorer({ currentCity, onSelectCity, onClose }: Pro
   }
 
   function selectNominatim(r: NominatimResult) {
-    const city = r.address.city || r.address.town || r.address.village || r.address.county || r.address.state || 'Unknown';
+    // Fall back to the result's own display name — never 'Unknown'
+    const city = r.address.city || r.address.town || r.address.village || r.address.county
+      || r.address.state || r.display_name.split(',')[0].trim();
     const loc: LocationState = {
       lat: parseFloat(r.lat),
       lng: parseFloat(r.lon),

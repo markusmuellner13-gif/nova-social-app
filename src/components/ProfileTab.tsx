@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Settings, Grid3X3, BookmarkIcon, ChevronDown, ChevronUp,
@@ -15,7 +15,10 @@ import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
 import { useLanguage } from '@/context/LanguageContext';
 import { LOCALE_NAMES, LOCALE_FLAGS, Locale } from '@/lib/translations';
-import { supabase, searchProfiles, followUser, unfollowUser, SupabaseProfile, signOut } from '@/lib/supabase';
+import {
+  supabase, searchProfiles, followUser, unfollowUser, SupabaseProfile, signOut,
+  getFollowers, getFollowingProfiles, getFollowerProfiles,
+} from '@/lib/supabase';
 
 const ALL_LOCALES = Object.keys(LOCALE_NAMES) as Locale[];
 
@@ -69,12 +72,30 @@ export default function ProfileTab({ onOpenAuth }: Props) {
   const [followQuery, setFollowQuery]     = useState('');
   const [followResults, setFollowResults] = useState<SupabaseProfile[]>([]);
   const [followingIds, setFollowingIds]   = useState<string[]>([]);
+  const [followersCount, setFollowersCount] = useState(0);
+  const [followingProfiles, setFollowingProfiles] = useState<SupabaseProfile[]>([]);
+  const [followerProfiles, setFollowerProfiles]   = useState<SupabaseProfile[]>([]);
+  const [showConnections, setShowConnections] = useState<'followers' | 'following' | null>(null);
+
+  // Load the user's real follower/following lists from Supabase
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    getFollowers(user.id).then(n => { if (!cancelled) setFollowersCount(n); }).catch(() => {});
+    getFollowingProfiles(user.id).then(profiles => {
+      if (cancelled) return;
+      setFollowingProfiles(profiles);
+      setFollowingIds(profiles.map(p => p.id));
+    }).catch(() => {});
+    getFollowerProfiles(user.id).then(profiles => { if (!cancelled) setFollowerProfiles(profiles); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [user]);
 
   // Only this user's real interactions, resolved from stored post snapshots
-  // (+ own created posts) so they survive app restarts
+  // so they survive app restarts
   const interactionPool = useMemo(
-    () => [...state.interactionPosts, ...state.createdPosts],
-    [state.interactionPosts, state.createdPosts]
+    () => state.interactionPosts,
+    [state.interactionPosts]
   );
   const resolvePosts = (ids: string[]): Post[] =>
     ids.map(id => interactionPool.find(p => p.id === id)).filter((p): p is Post => Boolean(p));
@@ -112,15 +133,20 @@ export default function ProfileTab({ onOpenAuth }: Props) {
     setFollowResults(res.filter(p => p.id !== user?.id));
   }
 
-  async function handleToggleFollow(targetId: string) {
+  async function handleToggleFollow(targetId: string, targetProfile?: SupabaseProfile) {
     if (!user) return;
     const isFollowing = followingIds.includes(targetId);
     if (isFollowing) {
       await unfollowUser(user.id, targetId);
       setFollowingIds(prev => prev.filter(id => id !== targetId));
+      setFollowingProfiles(prev => prev.filter(p => p.id !== targetId));
     } else {
       await followUser(user.id, targetId);
       setFollowingIds(prev => [...prev, targetId]);
+      const prof = targetProfile
+        ?? followResults.find(p => p.id === targetId)
+        ?? followerProfiles.find(p => p.id === targetId);
+      if (prof) setFollowingProfiles(prev => prev.some(p => p.id === targetId) ? prev : [...prev, prof]);
     }
   }
 
@@ -336,6 +362,81 @@ export default function ProfileTab({ onOpenAuth }: Props) {
         )}
       </AnimatePresence>
 
+      {/* Connections sheet — who you follow & who follows you */}
+      <AnimatePresence>
+        {showConnections && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40" style={{ background: 'rgba(0,0,0,0.6)' }}
+              onClick={() => setShowConnections(null)} />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl px-5 pb-8 pt-5 flex flex-col"
+              style={{ background: '#1a1a24', border: '1px solid #2a2a38', maxHeight: '75dvh' }}
+            >
+              <div className="w-10 h-1 rounded-full mx-auto mb-4" style={{ background: '#3a3a4a' }} />
+
+              {/* Tab switch */}
+              <div className="flex gap-2 mb-4">
+                {([
+                  ['followers', `${t.profile.followers} · ${followersCount}`],
+                  ['following', `${t.profile.following} · ${followingProfiles.length}`],
+                ] as const).map(([id, label]) => (
+                  <button key={id} onClick={() => setShowConnections(id)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-bold"
+                    style={{
+                      background: showConnections === id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : '#13131a',
+                      color: showConnections === id ? 'white' : '#888899',
+                      border: showConnections === id ? 'none' : '1px solid #2a2a38',
+                    }}>
+                    {label}
+                  </button>
+                ))}
+                <button onClick={() => setShowConnections(null)} className="px-3">
+                  <X size={20} style={{ color: '#666677' }} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto">
+                {(showConnections === 'followers' ? followerProfiles : followingProfiles).map(p => (
+                  <div key={p.id} className="flex items-center gap-3 py-3" style={{ borderBottom: '1px solid #2a2a38' }}>
+                    {p.avatar_url ? (
+                      <img src={p.avatar_url} alt="" className="w-10 h-10 rounded-xl object-cover" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-pink-500 flex items-center justify-center text-sm font-bold text-white">
+                        {(p.display_name || p.username || '?')[0].toUpperCase()}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-white truncate">{p.display_name || p.username}</p>
+                      <p className="text-xs" style={{ color: '#666677' }}>@{p.username}</p>
+                    </div>
+                    <motion.button whileTap={{ scale: 0.9 }} onClick={() => handleToggleFollow(p.id, p)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold"
+                      style={{
+                        background: followingIds.includes(p.id) ? 'rgba(139,92,246,0.15)' : 'linear-gradient(135deg, #8b5cf6, #ec4899)',
+                        color: followingIds.includes(p.id) ? '#a78bfa' : 'white',
+                      }}>
+                      {followingIds.includes(p.id)
+                        ? <><UserCheck size={12} /> {t.common.following}</>
+                        : <><UserPlus size={12} /> {t.common.follow}</>}
+                    </motion.button>
+                  </div>
+                ))}
+                {(showConnections === 'followers' ? followerProfiles : followingProfiles).length === 0 && (
+                  <div className="flex flex-col items-center py-10 gap-2">
+                    <Users size={28} style={{ color: '#2a2a38' }} />
+                    <p className="text-sm font-semibold text-white">{t.common.noUsersFound}</p>
+                    <p className="text-xs" style={{ color: '#666677' }}>{t.profile.findFriends} →</p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Follow search modal */}
       <AnimatePresence>
         {showFollowSearch && (
@@ -392,18 +493,35 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                 <img src={avatarUrl} alt={displayName} className="w-20 h-20 rounded-full object-cover" />
               </div>
             </div>
-            <div className="flex gap-4">
-              {[
-                { label: t.profile.events,    value: savedIds.length },
-                { label: t.profile.going,     value: goingPosts.length },
-                { label: t.profile.following, value: state.followedUsers.length },
-              ].map(({ label, value }) => (
-                <div key={label} className="flex flex-col items-center">
+            {/* People: tap to see who you follow and who follows you */}
+            <div className="flex-1 flex justify-around">
+              {([
+                { key: 'followers' as const, label: t.profile.followers, value: user ? followersCount : 0 },
+                { key: 'following' as const, label: t.profile.following, value: user ? followingProfiles.length : state.followedUsers.length },
+              ]).map(({ key, label, value }) => (
+                <motion.button key={key} whileTap={{ scale: 0.94 }}
+                  onClick={() => (user ? setShowConnections(key) : onOpenAuth())}
+                  className="flex flex-col items-center px-3">
                   <span className="text-lg font-bold text-white">{formatCount(value)}</span>
                   <span className="text-xs" style={{ color: '#888899' }}>{label}</span>
-                </div>
+                </motion.button>
               ))}
             </div>
+          </div>
+
+          {/* Real activity counts — likes, saves, going */}
+          <div className="grid grid-cols-3 gap-2 mt-4">
+            {[
+              { label: t.profile.liked, value: state.likedPosts.length, emoji: '⭐' },
+              { label: t.profile.saved, value: savedIds.length,         emoji: '🔖' },
+              { label: t.profile.going, value: goingPosts.length,       emoji: '✅' },
+            ].map(({ label, value, emoji }) => (
+              <div key={label} className="flex flex-col items-center py-2.5 rounded-2xl"
+                style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
+                <span className="text-base font-bold text-white">{emoji} {formatCount(value)}</span>
+                <span className="text-xs mt-0.5" style={{ color: '#888899' }}>{label}</span>
+              </div>
+            ))}
           </div>
 
           <div className="mt-4">
@@ -564,7 +682,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             {likedPosts.map((post, i) => (
               <motion.div key={post.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
                 className="relative overflow-hidden" style={{ aspectRatio: '1', background: '#13131a' }}>
-                <img src={post.image} alt="" className="w-full h-full object-cover object-center" />
+                <img src={post.image} alt="" className="w-full h-full object-cover object-center" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
                 <div className="absolute top-1 right-1">
                   <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
                     <Star size={10} fill="#f59e0b" style={{ color: '#f59e0b' }} />
@@ -588,7 +706,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             {savedPosts.map((post, i) => (
               <motion.div key={post.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
                 className="relative overflow-hidden" style={{ aspectRatio: '1', background: '#13131a' }}>
-                <img src={post.image} alt="" className="w-full h-full object-cover object-center" />
+                <img src={post.image} alt="" className="w-full h-full object-cover object-center" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
                 {post.isEvent && (
                   <div className="absolute bottom-0 left-0 right-0 py-0.5 text-center font-bold"
                     style={{ background: 'rgba(244,63,94,0.85)', color: 'white', fontSize: 9 }}>
@@ -627,7 +745,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                   return (
                     <div key={event.id} className="flex gap-3 p-4 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
                       <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
-                        <img src={event.image} alt="" className="w-full h-full object-cover object-center" />
+                        <img src={event.image} alt="" className="w-full h-full object-cover object-center" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${event.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-white truncate">{event.caption.split('\n')[0].slice(0, 50)}</p>

@@ -128,6 +128,24 @@ export async function getFollowers(userId: string): Promise<number> {
   return count ?? 0;
 }
 
+async function profilesByIds(ids: string[]): Promise<SupabaseProfile[]> {
+  if (!supabase || ids.length === 0) return [];
+  const { data } = await supabase.from('profiles').select('*').in('id', ids.slice(0, 100));
+  return (data ?? []) as SupabaseProfile[];
+}
+
+// People this user follows, as full profiles
+export async function getFollowingProfiles(userId: string): Promise<SupabaseProfile[]> {
+  return profilesByIds(await getFollowing(userId));
+}
+
+// People who follow this user, as full profiles
+export async function getFollowerProfiles(userId: string): Promise<SupabaseProfile[]> {
+  if (!supabase) return [];
+  const { data } = await supabase.from('follows').select('follower_id').eq('following_id', userId);
+  return profilesByIds((data ?? []).map((r: { follower_id: string }) => r.follower_id));
+}
+
 // ── Groups helpers ─────────────────────────────────────────────────────────────
 
 function generateCode(): string {
@@ -189,11 +207,20 @@ export async function removeEventFromGroup(groupId: string, postId: string) {
 
 export type InteractionType = 'like' | 'save' | 'going';
 
-export async function upsertInteraction(userId: string, postId: string, type: InteractionType) {
+export async function upsertInteraction(
+  userId: string, postId: string, type: InteractionType,
+  postData?: Record<string, unknown>
+) {
   if (!supabase) return;
-  await supabase.from('post_interactions').upsert({
-    user_id: userId, post_id: postId, interaction_type: type,
-  });
+  const row = { user_id: userId, post_id: postId, interaction_type: type };
+  if (postData) {
+    // Store the full post snapshot so other signed-in devices can display it.
+    // Falls back to a plain row if the post_data column doesn't exist yet
+    // (supabase/migrations/002_post_snapshots.sql not run).
+    const { error } = await supabase.from('post_interactions').upsert({ ...row, post_data: postData });
+    if (!error) return;
+  }
+  await supabase.from('post_interactions').upsert(row);
 }
 
 export async function deleteInteraction(userId: string, postId: string, type: InteractionType) {
@@ -202,16 +229,33 @@ export async function deleteInteraction(userId: string, postId: string, type: In
     .eq('user_id', userId).eq('post_id', postId).eq('interaction_type', type);
 }
 
-export async function getUserInteractions(userId: string): Promise<{ likedPosts: string[]; savedPosts: string[]; goingPosts: string[] } | null> {
+interface InteractionRow { post_id: string; interaction_type: string; post_data?: Record<string, unknown> | null }
+
+export async function getUserInteractions(userId: string): Promise<{
+  likedPosts: string[]; savedPosts: string[]; goingPosts: string[];
+  posts: Record<string, unknown>[];
+} | null> {
   if (!supabase) return null;
-  const { data } = await supabase
-    .from('post_interactions')
-    .select('post_id, interaction_type')
-    .eq('user_id', userId);
-  if (!data) return null;
+  // Prefer the snapshot column; fall back for projects without the migration
+  let rows: InteractionRow[] | null =
+    (await supabase.from('post_interactions').select('post_id, interaction_type, post_data').eq('user_id', userId)).data;
+  if (!rows) {
+    rows = (await supabase.from('post_interactions').select('post_id, interaction_type').eq('user_id', userId)).data;
+  }
+  if (!rows) return null;
+
+  const posts: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (r.post_data && typeof r.post_data === 'object' && !seen.has(r.post_id)) {
+      seen.add(r.post_id);
+      posts.push(r.post_data);
+    }
+  }
   return {
-    likedPosts: data.filter((r: { interaction_type: string }) => r.interaction_type === 'like').map((r: { post_id: string }) => r.post_id),
-    savedPosts: data.filter((r: { interaction_type: string }) => r.interaction_type === 'save').map((r: { post_id: string }) => r.post_id),
-    goingPosts: data.filter((r: { interaction_type: string }) => r.interaction_type === 'going').map((r: { post_id: string }) => r.post_id),
+    likedPosts: rows.filter(r => r.interaction_type === 'like').map(r => r.post_id),
+    savedPosts: rows.filter(r => r.interaction_type === 'save').map(r => r.post_id),
+    goingPosts: rows.filter(r => r.interaction_type === 'going').map(r => r.post_id),
+    posts,
   };
 }

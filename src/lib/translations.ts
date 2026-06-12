@@ -34,7 +34,7 @@ export interface AppTranslations {
     badgesEarned: string; nextBadge: string; seeAll: string;
     dataOnDevice: string; dataSyncHint: string;
     earned: string; badges_title: string;
-    today: string; tomorrow: string; daysAway: string; going_label: string;
+    today: string; tomorrow: string; daysAway: string; going_label: string; followers: string;
   };
   settings: {
     title: string; changePhoto: string; requestVerification: string;
@@ -100,7 +100,7 @@ const en: AppTranslations = {
     dataOnDevice: 'Your data is only on this device',
     dataSyncHint: 'Sign in to sync likes, saves, and reminders across all your devices.',
     earned: 'Earned', badges_title: 'Badges',
-    today: 'Today', tomorrow: 'Tomorrow', daysAway: 'd away', going_label: '✓ Going',
+    today: 'Today', tomorrow: 'Tomorrow', daysAway: 'd away', going_label: '✓ Going', followers: 'Followers',
   },
   settings: {
     title: 'Settings', changePhoto: 'Change Profile Photo', requestVerification: 'Request Verification',
@@ -173,7 +173,7 @@ const de: AppTranslations = {
     dataOnDevice: 'Deine Daten sind nur auf diesem Gerät',
     dataSyncHint: 'Melde dich an, um Likes und Saves zu synchronisieren.',
     earned: 'Erhalten', badges_title: 'Abzeichen',
-    today: 'Heute', tomorrow: 'Morgen', daysAway: 'T weg', going_label: '✓ Ich gehe',
+    today: 'Heute', tomorrow: 'Morgen', daysAway: 'T weg', going_label: '✓ Ich gehe', followers: 'Follower',
   },
   settings: {
     title: 'Einstellungen', changePhoto: 'Profilbild ändern', requestVerification: 'Verifizierung beantragen',
@@ -246,7 +246,7 @@ const es: AppTranslations = {
     dataOnDevice: 'Tus datos solo están en este dispositivo',
     dataSyncHint: 'Inicia sesión para sincronizar entre dispositivos.',
     earned: 'Obtenida', badges_title: 'Insignias',
-    today: 'Hoy', tomorrow: 'Mañana', daysAway: 'd', going_label: '✓ Voy',
+    today: 'Hoy', tomorrow: 'Mañana', daysAway: 'd', going_label: '✓ Voy', followers: 'Seguidores',
   },
   settings: {
     title: 'Ajustes', changePhoto: 'Cambiar foto de perfil', requestVerification: 'Solicitar verificación',
@@ -319,7 +319,7 @@ const fr: AppTranslations = {
     dataOnDevice: 'Tes données sont uniquement sur cet appareil',
     dataSyncHint: 'Connecte-toi pour synchroniser sur tous tes appareils.',
     earned: 'Obtenu', badges_title: 'Badges',
-    today: "Aujourd'hui", tomorrow: 'Demain', daysAway: 'j', going_label: '✓ J\'y vais',
+    today: "Aujourd'hui", tomorrow: 'Demain', daysAway: 'j', going_label: '✓ J\'y vais', followers: 'Abonnés',
   },
   settings: {
     title: 'Paramètres', changePhoto: 'Changer la photo de profil', requestVerification: 'Demander une vérification',
@@ -392,7 +392,7 @@ const it: AppTranslations = {
     dataOnDevice: 'I tuoi dati sono solo su questo dispositivo',
     dataSyncHint: 'Accedi per sincronizzare tra tutti i dispositivi.',
     earned: 'Ottenuto', badges_title: 'Badge',
-    today: 'Oggi', tomorrow: 'Domani', daysAway: 'g', going_label: '✓ Ci vado',
+    today: 'Oggi', tomorrow: 'Domani', daysAway: 'g', going_label: '✓ Ci vado', followers: 'Follower',
   },
   settings: {
     title: 'Impostazioni', changePhoto: 'Cambia foto profilo', requestVerification: 'Richiedi verifica',
@@ -465,7 +465,7 @@ const pt: AppTranslations = {
     dataOnDevice: 'Seus dados estão só neste dispositivo',
     dataSyncHint: 'Entre para sincronizar entre dispositivos.',
     earned: 'Conquistada', badges_title: 'Conquistas',
-    today: 'Hoje', tomorrow: 'Amanhã', daysAway: 'd', going_label: '✓ Vou',
+    today: 'Hoje', tomorrow: 'Amanhã', daysAway: 'd', going_label: '✓ Vou', followers: 'Seguidores',
   },
   settings: {
     title: 'Configurações', changePhoto: 'Alterar foto do perfil', requestVerification: 'Solicitar verificação',
@@ -538,7 +538,7 @@ const nl: AppTranslations = {
     dataOnDevice: 'Je gegevens staan alleen op dit apparaat',
     dataSyncHint: 'Log in om te synchroniseren tussen apparaten.',
     earned: 'Verdiend', badges_title: 'Badges',
-    today: 'Vandaag', tomorrow: 'Morgen', daysAway: 'd', going_label: '✓ Ga ik',
+    today: 'Vandaag', tomorrow: 'Morgen', daysAway: 'd', going_label: '✓ Ga ik', followers: 'Volgers',
   },
   settings: {
     title: 'Instellingen', changePhoto: 'Profielfoto wijzigen', requestVerification: 'Verificatie aanvragen',
@@ -611,7 +611,7 @@ const ja: AppTranslations = {
     dataOnDevice: 'データはこのデバイスのみ',
     dataSyncHint: 'サインインして全デバイスで同期しよう。',
     earned: '獲得', badges_title: 'バッジ',
-    today: '今日', tomorrow: '明日', daysAway: '日後', going_label: '✓ 参加予定',
+    today: '今日', tomorrow: '明日', daysAway: '日後', going_label: '✓ 参加予定', followers: 'フォロワー',
   },
   settings: {
     title: '設定', changePhoto: 'プロフィール写真を変更', requestVerification: '認証を申請',

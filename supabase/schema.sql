@@ -51,6 +51,7 @@ create table if not exists post_interactions (
   user_id          uuid references auth.users(id) on delete cascade,
   post_id          text not null,
   interaction_type text not null check (interaction_type in ('like', 'save', 'going')),
+  post_data        jsonb,
   created_at       timestamptz default now(),
   unique (user_id, post_id, interaction_type)
 );
@@ -105,6 +106,7 @@ create policy "Adder can remove events"       on group_events for delete using (
 create policy "Users can view own interactions"   on post_interactions for select using (auth.uid() = user_id);
 create policy "Users can insert own interactions" on post_interactions for insert with check (auth.uid() = user_id);
 create policy "Users can delete own interactions" on post_interactions for delete using (auth.uid() = user_id);
+create policy "Users can update own interactions" on post_interactions for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- ── Step 4: Indexes for query performance at scale ───────────────────────────
 

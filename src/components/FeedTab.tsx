@@ -99,7 +99,7 @@ interface Props {
 export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Props) {
   const { state } = useApp();
   const { t } = useLanguage();
-  const { preferences, aiProfile, createdPosts } = state;
+  const { preferences, aiProfile } = state;
   const location = state.location;
 
   const { posts: aiPosts, loading: aiLoading, hasMore: aiHasMore, fetchMore, reset: resetAI } = useAIFeed(location);
@@ -190,11 +190,11 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
   // Curated pool for discover mode — user-created posts always; generic mock
   // posts only as a fallback when no location is known yet
   const curatedPool = useMemo(() => {
-    let pool = hasCity ? [...createdPosts] : [...createdPosts, ...MOCK_POSTS];
+    let pool = hasCity ? [] : [...MOCK_POSTS];
     if (activeChipCategory) pool = pool.filter(p => p.category === activeChipCategory);
     if (sortMode === 'recent') return [...pool].sort((a, b) => b.timestamp - a.timestamp);
     return sortFeed(pool, preferences, aiProfile);
-  }, [createdPosts, preferences, aiProfile, activeChipCategory, sortMode, hasCity]);
+  }, [preferences, aiProfile, activeChipCategory, sortMode, hasCity]);
 
   // Events / Sport / Sightseeing tabs show ONLY real location-based data —
   // never demo posts pretending to be local events

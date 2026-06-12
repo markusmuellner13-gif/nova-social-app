@@ -155,7 +155,6 @@ export interface AppPersistedState {
   hasOnboarded: boolean;
   aiProfile: AIProfile;
   notifications: NovaNotification[];
-  createdPosts: Post[];
   location: LocationState | null;
   locationEnabled: boolean;
   hasSeenLocationPrompt: boolean;
