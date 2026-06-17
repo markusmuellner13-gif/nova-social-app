@@ -16,8 +16,10 @@ const securityHeaders = [
       "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://pagead2.googlesyndication.com https://partner.googleadservices.com https://tpc.googlesyndication.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
-      // Images: self (proxy) + all direct CDN sources used by the app + Google avatars
-      "img-src 'self' data: blob: https://images.unsplash.com https://images.pexels.com https://upload.wikimedia.org https://s1.ticketm.net https://s4.ticketm.net https://*.ticketmaster.com https://*.livenation.com https://logo.clearbit.com https://ui-avatars.com https://i.pravatar.cc https://lh3.googleusercontent.com",
+      // Images: real venue photos come from unpredictable hosts (a venue's own
+      // og:image, Google Places photos on *.googleusercontent.com, etc.), so we
+      // allow any https image source. Scripts/styles/connect stay locked down.
+      "img-src 'self' data: blob: https:",
       // Connections: Supabase (REST + realtime), Vercel Analytics
       "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com",
       "frame-ancestors 'none'",

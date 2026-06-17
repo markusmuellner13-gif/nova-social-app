@@ -104,6 +104,39 @@ export async function fetchOgImage(website: string): Promise<string | null> {
   return result;
 }
 
+// ── Google Places photo (gated on GOOGLE_PLACES_API_KEY) ──────────────────────
+// The highest-quality "real photo of the actual venue" source. The key is read
+// from env and never reaches the client: we resolve the Places photo redirect
+// server-side and return the final googleusercontent URL. No key → returns null.
+const placePhotoCache = new Map<string, string | null>();
+
+export async function fetchGooglePlacePhoto(name: string, lat: number, lng: number): Promise<string | null> {
+  const key = process.env.GOOGLE_PLACES_API_KEY;
+  if (!key) return null;
+  const cacheKey = `${name}|${lat.toFixed(3)}|${lng.toFixed(3)}`;
+  if (placePhotoCache.has(cacheKey)) return placePhotoCache.get(cacheKey) ?? null;
+
+  let result: string | null = null;
+  try {
+    const findUrl =
+      `https://maps.googleapis.com/maps/api/place/findplacefromtext/json` +
+      `?input=${encodeURIComponent(name)}&inputtype=textquery` +
+      `&locationbias=point:${lat},${lng}&fields=photos&key=${key}`;
+    const findRes = await fetch(findUrl, { signal: AbortSignal.timeout(3000) });
+    if (findRes.ok) {
+      const d = await findRes.json() as { candidates?: { photos?: { photo_reference?: string }[] }[] };
+      const ref = d.candidates?.[0]?.photos?.[0]?.photo_reference;
+      if (ref) {
+        const photoUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=600&photo_reference=${ref}&key=${key}`;
+        const photoRes = await fetch(photoUrl, { redirect: 'manual', signal: AbortSignal.timeout(3000) });
+        result = photoRes.headers.get('location');
+      }
+    }
+  } catch { /* fall through to og:image / stock */ }
+  placePhotoCache.set(cacheKey, result);
+  return result;
+}
+
 export async function overpassToPost(
   el: OverpassElement, city: string, category: string, description: string,
   unsplashKey?: string, pexelsKey?: string, tryOgImage = false
@@ -131,9 +164,13 @@ export async function overpassToPost(
   };
   const imgQ = IMG_QUERIES[category] ?? `${category} place interior`;
 
-  // Real photo from the venue's own website when available, else stock
+  // Real photo of the actual venue, best source first:
+  //   1. Google Places (gated on key) → 2. the venue's own og:image → 3. stock
   let image: string | null = null;
-  if (tryOgImage && website) {
+  if (tryOgImage) {
+    image = await fetchGooglePlacePhoto(name, elLat, elLng);
+  }
+  if (!image && tryOgImage && website) {
     image = await fetchOgImage(website);
     if (image) image = proxyImage(image);
   }

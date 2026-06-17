@@ -1,12 +1,15 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Star, Bookmark, MessageCircle, Share2, BadgeCheck, MapPin,
   Calendar, ExternalLink, Sparkles, CheckCircle2, Bell, BellOff, X,
 } from 'lucide-react';
 import { Post as PostType } from '@/types';
+import { buildShareUrl } from '@/lib/shareLink';
+import { ensureNotificationPermission } from '@/lib/notifications';
+import { trackEvent } from '@/lib/track';
 import { formatCount, timeAgo } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -62,6 +65,11 @@ export default function Post({ post, showHint = false }: Props) {
   const likeCount  = post.likes + (liked ? 1 : 0);
   const goingCount = going ? 1 : 0;
 
+  // ── Advertiser impression tracking (#9) — count once per sponsored render ──
+  useEffect(() => {
+    if (post.isSponsored) trackEvent('impression', post.id);
+  }, [post.isSponsored, post.id]);
+
   // ── Countdown for saved events ────────────────────────────────────────────
   const countdown = saved && post.isEvent ? daysUntil(post.eventDateRaw) : null;
 
@@ -88,19 +96,19 @@ export default function Post({ post, showHint = false }: Props) {
     else addToast('Removed from going', 'info');
   }, [going, goPost, post, addToast, t.common.goingLabel]);
 
-  // Feature 5 — Deep link share: uses real event URL when available
+  // Feature 5/6 — Share a rich, link-previewable Nova page (/e/<id>) so the link
+  // shows a proper card on WhatsApp/IG/iMessage. This is the core growth loop.
   const handleShare = useCallback(async () => {
     const eventTitle = post.caption.split('\n')[0].slice(0, 80);
-    const shareUrl   = (post.isEvent && post.eventUrl) ? post.eventUrl : window.location.href;
-    const text = post.isEvent && post.eventUrl
-      ? `${eventTitle}\n\nFound on Nova — ${shareUrl}`
-      : `Check this out on Nova: "${eventTitle}…" ${shareUrl}`;
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const shareUrl = buildShareUrl(post, origin);
+    const text = `${eventTitle}\n\nFound on Nova`;
 
     if (navigator.share) {
       try { await navigator.share({ title: 'Nova', text, url: shareUrl }); }
       catch { /* cancelled */ }
     } else {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(`${text} — ${shareUrl}`);
       addToast('Link copied!', 'info', '🔗');
     }
   }, [post, addToast]);
@@ -115,6 +123,8 @@ export default function Post({ post, showHint = false }: Props) {
 
   const handleSetReminder = useCallback((minutesBefore: number) => {
     if (!post.eventDateRaw) return;
+    // Ask for notification permission so the reminder can actually fire (#4).
+    void ensureNotificationPermission();
     addReminder({
       postId: post.id,
       title: post.caption.split('\n')[0].slice(0, 60),
@@ -367,7 +377,7 @@ export default function Post({ post, showHint = false }: Props) {
             <a href={post.eventUrl} target="_blank" rel="noopener noreferrer"
               className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-bold mt-2 mb-3"
               style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)', color: '#0a0a0f' }}
-              onClick={e => e.stopPropagation()}>
+              onClick={e => { e.stopPropagation(); trackEvent('click', post.id); }}>
               <ExternalLink size={14} />
               {post.sponsoredCta ?? 'Visit Website'}
             </a>

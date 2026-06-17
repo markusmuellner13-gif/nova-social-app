@@ -20,6 +20,7 @@ import { LanguageProvider } from '@/context/LanguageContext';
 import { getUserInteractions } from '@/lib/supabase';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { useLocation, persistManualLocation } from '@/hooks/useLocation';
+import { initNotifications, subscribeToPush } from '@/lib/notifications';
 import { LocationState, Post } from '@/types';
 
 function AppShell() {
@@ -33,6 +34,12 @@ function AppShell() {
 
   const { location, permission, requestLocation } = useLocation();
   const handleSplashComplete = useCallback(() => setSplashDone(true), []);
+
+  // Register the service worker once and (if a push backend is configured)
+  // subscribe to web push. Safe no-op when unsupported/unconfigured.
+  useEffect(() => {
+    void initNotifications().then(() => { void subscribeToPush(); });
+  }, []);
 
   // Sync Supabase user ID and load remote interactions when auth state changes
   useEffect(() => {

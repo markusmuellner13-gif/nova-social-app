@@ -215,6 +215,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             </div>
 
             {[
+              { icon: Star,          label: 'List your business ✨', action: () => window.open('/business', '_blank') },
               { icon: MessageSquare, label: 'Contact Leone Nero', action: () => setShowContactSheet(true) },
               { icon: Shield,        label: 'Privacy Policy',     action: () => window.open('/privacy', '_blank') },
               { icon: FileText,      label: 'Terms of Service',   action: () => window.open('/terms', '_blank') },

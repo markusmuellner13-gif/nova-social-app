@@ -10,6 +10,7 @@ import {
   enrichEventDescriptions, enrichPlaceDescriptions, enrichSightseeingDescriptions,
   searchRealEventsWithClaude,
 } from '@/lib/sources/claudeAI';
+import { eventsCacheKey, cacheTtl, cacheGet, cacheSet } from '@/lib/serverCache';
 
 export const maxDuration = 60;
 
@@ -169,7 +170,44 @@ function rankAndMix(posts: ApiPost[], count: number): ApiPost[] {
 // GET /api/feed — one request, every relevant source, deduped + ranked
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Caching wrapper (#1 ingestion pipeline) ───────────────────────────────────
+// Serves from the Redis ingestion cache when warm; on a miss, computes live and
+// stores the result so the next users (and the cron warmer) are instant. The
+// expensive Ticketmaster/Claude/Overpass work runs once per area+category, not
+// once per user. No-ops transparently when Upstash isn't configured.
 export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const noStore = searchParams.get('fresh') === '1';
+
+  const rawCatKey = searchParams.get('category') ?? 'events';
+  const key = eventsCacheKey({
+    category: VALID_CATEGORIES.has(rawCatKey) ? rawCatKey : 'events',
+    city:   (searchParams.get('city') || '').slice(0, 60),
+    lat:    parseFloat(searchParams.get('lat') || '0'),
+    lng:    parseFloat(searchParams.get('lng') || '0'),
+    page:   parseInt(searchParams.get('page') || '0', 10),
+    radius: parseInt(searchParams.get('radius') || '25', 10),
+    source: 'feed',
+  });
+
+  if (!noStore) {
+    const cached = await cacheGet<{ posts: unknown[] }>(key);
+    if (cached && Array.isArray(cached.posts) && cached.posts.length > 0) {
+      return NextResponse.json(cached, { headers: { 'Cache-Control': 'no-store', 'x-nova-cache': 'HIT' } });
+    }
+  }
+
+  const res = await computeFeed(request);
+  try {
+    const payload = await res.clone().json() as { posts?: unknown[] };
+    if (Array.isArray(payload.posts) && payload.posts.length > 0) {
+      await cacheSet(key, payload, cacheTtl('feed', rawCatKey));
+    }
+  } catch { /* skip caching non-JSON */ }
+  return res;
+}
+
+async function computeFeed(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
   const cityParam    = (searchParams.get('city')    ?? '').slice(0, 100).replace(/[<>'"\\]/g, '');
