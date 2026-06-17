@@ -17,7 +17,18 @@ import { Redis } from '@upstash/redis';
 const url   = process.env.UPSTASH_REDIS_REST_URL   ?? process.env.KV_REST_API_URL   ?? '';
 const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN ?? '';
 
-const redis: Redis | null = url && token ? new Redis({ url, token }) : null;
+// The Upstash REST client requires an https URL and throws synchronously on a
+// bad value (e.g. a redis:// connection string). That would crash the build at
+// module load, so we validate first and swallow any construction error — the
+// app then just runs without a cache instead of failing to deploy.
+let redis: Redis | null = null;
+try {
+  if (url.startsWith('https://') && token) {
+    redis = new Redis({ url, token });
+  }
+} catch {
+  redis = null;
+}
 
 export const cacheEnabled = redis !== null;
 
