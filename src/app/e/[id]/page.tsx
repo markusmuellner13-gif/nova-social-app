@@ -57,7 +57,7 @@ export default async function EventSharePage({ searchParams }: { params: PP; sea
   }
 
   return (
-    <main style={{ minHeight: '100vh', background: '#0a0a0f', color: '#fff', display: 'flex', justifyContent: 'center' }}>
+    <main style={{ height: '100dvh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', background: '#0a0a0f', color: '#fff', display: 'flex', justifyContent: 'center' }}>
       <div style={{ width: '100%', maxWidth: 480 }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 18px' }}>

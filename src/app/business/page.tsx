@@ -54,7 +54,7 @@ export default function BusinessPage() {
 
   if (done) {
     return (
-      <main style={{ minHeight: '100vh', background: '#0a0a0f', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, textAlign: 'center' }}>
+      <main style={{ height: '100dvh', overflowY: 'auto', background: '#0a0a0f', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, textAlign: 'center' }}>
         <div style={{ fontSize: 48 }}>🎉</div>
         <h1 style={{ fontSize: 24, fontWeight: 800 }}>You’re on the list!</h1>
         <p style={{ color: '#9aa', maxWidth: 380 }}>
@@ -67,7 +67,7 @@ export default function BusinessPage() {
   }
 
   return (
-    <main style={{ minHeight: '100vh', background: '#0a0a0f', color: '#fff' }}>
+    <main style={{ height: '100dvh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', background: '#0a0a0f', color: '#fff' }}>
       <div style={{ maxWidth: 560, margin: '0 auto', padding: '28px 18px 60px' }}>
         {/* Hero */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
