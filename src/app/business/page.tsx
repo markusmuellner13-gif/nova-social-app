@@ -113,11 +113,11 @@ export default function BusinessPage() {
         <form onSubmit={handleSubmit} style={{ marginTop: 26, display: 'grid', gap: 14 }}>
           <div>
             <label style={label}>Business name *</label>
-            <input style={input} value={form.business} onChange={e => set('business', e.target.value)} placeholder="e.g. Trattoria da Marco" />
+            <input style={input} required value={form.business} onChange={e => set('business', e.target.value)} placeholder="e.g. Trattoria da Marco" />
           </div>
           <div>
             <label style={label}>Email *</label>
-            <input style={input} type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="you@business.com" />
+            <input style={input} required type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="you@business.com" />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div>
@@ -136,19 +136,26 @@ export default function BusinessPage() {
             <input style={input} value={form.website} onChange={e => set('website', e.target.value)} placeholder="https://…" />
           </div>
 
-          {error && <p style={{ color: '#f87171', fontSize: 13 }}>{error}</p>}
+          {error && (
+            <p style={{ color: '#fff', fontSize: 13, fontWeight: 600, background: 'rgba(244,63,94,0.18)', border: '1px solid rgba(244,63,94,0.4)', borderRadius: 10, padding: '10px 12px' }}>
+              ⚠️ {error}
+            </p>
+          )}
 
-          <button type="submit" disabled={submitting}
-            style={{
-              marginTop: 4, padding: '14px', borderRadius: 14, border: 'none', cursor: submitting ? 'default' : 'pointer',
-              background: 'linear-gradient(135deg,#8b5cf6,#ec4899)', color: '#fff', fontWeight: 800, fontSize: 15,
-              opacity: submitting ? 0.6 : 1,
-            }}>
-            {submitting ? 'Processing…' : `Continue — ${PLANS.find(p => p.id === plan)?.price}/mo`}
-          </button>
-          <p style={{ fontSize: 11, color: '#666677', textAlign: 'center' }}>
-            Cancel anytime. We verify every business before its post goes live.
-          </p>
+          {/* Sticky so it's always reachable, even before scrolling the form */}
+          <div style={{ position: 'sticky', bottom: 0, paddingTop: 8, paddingBottom: 12, background: 'linear-gradient(to top, #0a0a0f 70%, transparent)' }}>
+            <button type="submit" disabled={submitting}
+              style={{
+                width: '100%', padding: '15px', borderRadius: 14, border: 'none', cursor: submitting ? 'default' : 'pointer',
+                background: 'linear-gradient(135deg,#8b5cf6,#ec4899)', color: '#fff', fontWeight: 800, fontSize: 16,
+                opacity: submitting ? 0.6 : 1,
+              }}>
+              {submitting ? 'Processing…' : `Continue to payment — ${PLANS.find(p => p.id === plan)?.price}/mo`}
+            </button>
+            <p style={{ fontSize: 11, color: '#666677', textAlign: 'center', marginTop: 8 }}>
+              Cancel anytime. We verify every business before its post goes live.
+            </p>
+          </div>
         </form>
       </div>
     </main>
