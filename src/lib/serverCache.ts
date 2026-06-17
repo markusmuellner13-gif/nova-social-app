@@ -14,8 +14,17 @@ import { Redis } from '@upstash/redis';
 // exactly as before (compute live every time). Nothing breaks without the keys.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const url   = process.env.UPSTASH_REDIS_REST_URL   ?? process.env.KV_REST_API_URL   ?? '';
-const token = process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN ?? '';
+// Prefer the Vercel Storage (Upstash) integration vars (KV_REST_API_*) since
+// that's what the dashboard "Connect Store" flow populates; fall back to
+// manually-set UPSTASH_* vars. Only the first non-empty https URL is used.
+function firstValid(...candidates: (string | undefined)[]): string {
+  for (const c of candidates) { if (c && c.startsWith('https://')) return c; }
+  return '';
+}
+const url   = firstValid(process.env.KV_REST_API_URL,   process.env.UPSTASH_REDIS_REST_URL);
+const token = (url === process.env.KV_REST_API_URL)
+  ? (process.env.KV_REST_API_TOKEN   ?? '')
+  : (process.env.UPSTASH_REDIS_REST_TOKEN ?? '');
 
 // The Upstash REST client requires an https URL and throws synchronously on a
 // bad value (e.g. a redis:// connection string). That would crash the build at
