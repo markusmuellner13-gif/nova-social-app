@@ -56,7 +56,12 @@ export async function GET(request: NextRequest) {
   }
 
   const sp = new URL(request.url).searchParams;
-  const offset = Math.max(0, parseInt(sp.get('offset') || '0', 10));
+  // When invoked by the daily cron (no offset), rotate the starting point each
+  // day so every city gets refreshed over a few days despite the 60s cap.
+  const dayRotation = (Math.floor(Date.now() / 86_400_000) * 21) % work.length;
+  const offset = sp.has('offset')
+    ? Math.max(0, parseInt(sp.get('offset') || '0', 10))
+    : dayRotation;
   const deadline = Date.now() + 45_000; // stay safely under the 60s cap
 
   let ingested = 0;
@@ -88,7 +93,7 @@ export async function GET(request: NextRequest) {
   }
 
   const done = i >= work.length;
-  if (done) await purgeExpiredEvents().catch(() => {});
+  await purgeExpiredEvents().catch(() => {}); // cheap single DELETE; run every time
 
   return NextResponse.json({
     ok: true, ingested, processed, offset, nextOffset: done ? null : i,
