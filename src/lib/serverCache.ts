@@ -91,3 +91,24 @@ export async function cacheIncr(key: string, ttlSeconds: number): Promise<number
 export async function cacheGetRaw<T>(key: string): Promise<T | null> {
   return cacheGet<T>(key);
 }
+
+export async function cacheDelete(key: string): Promise<void> {
+  if (!redis) return;
+  try { await redis.del(key); } catch { /* ignore */ }
+}
+
+// Delete every key matching a prefix (SCAN-based, safe on large keyspaces).
+// Used for admin cleanup, e.g. wiping all sponsored posts.
+export async function cacheClearPrefix(prefix: string): Promise<number> {
+  if (!redis) return 0;
+  let cursor = '0';
+  let deleted = 0;
+  try {
+    do {
+      const [next, keys] = await redis.scan(cursor, { match: `${prefix}*`, count: 200 });
+      cursor = String(next);
+      if (keys.length) { await redis.del(...keys); deleted += keys.length; }
+    } while (cursor !== '0');
+  } catch { /* ignore */ }
+  return deleted;
+}
