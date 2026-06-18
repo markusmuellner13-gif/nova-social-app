@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbWriteEnabled, upsertEvents, purgeExpiredEvents, postToRow } from '@/lib/eventsDb';
 import type { ApiPost } from '@/lib/sources/shared';
 
-export const maxDuration = 300;
+export const maxDuration = 60; // Hobby plan cap; the route self-limits to ~45s and resumes via ?offset
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Ingestion worker — populates the app's OWN events DB so users are served from
@@ -46,30 +46,52 @@ export async function GET(request: NextRequest) {
   }
 
   const origin = new URL(request.url).origin;
+
+  // Flatten to (city × category) work items so we can resume across invocations —
+  // the Hobby plan caps functions at ~60s, so each call processes a time-bounded
+  // slice and returns nextOffset. Call repeatedly until done=true.
+  const work: { city: string; country: string; lat: number; lng: number; category: string }[] = [];
+  for (const [city, country, lat, lng] of CITIES) {
+    for (const category of CATEGORIES) work.push({ city, country, lat, lng, category });
+  }
+
+  const sp = new URL(request.url).searchParams;
+  const offset = Math.max(0, parseInt(sp.get('offset') || '0', 10));
+  const deadline = Date.now() + 45_000; // stay safely under the 60s cap
+
   let ingested = 0;
+  let processed = 0;
   const errors: string[] = [];
 
-  for (const [city, country, lat, lng] of CITIES) {
-    for (const category of CATEGORIES) {
-      try {
-        const params = new URLSearchParams({
-          city, country, lat: String(lat), lng: String(lng),
-          page: '0', radius: '25', count: '20', category, fresh: '1',
-        });
-        const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(40000) });
-        if (!res.ok) { errors.push(`${city}/${category}:${res.status}`); continue; }
-        const data = await res.json() as { posts?: ApiPost[] };
-        const posts = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
-        if (!posts.length) continue;
+  let i = offset;
+  for (; i < work.length; i++) {
+    if (Date.now() > deadline) break;
+    const { city, country, lat, lng, category } = work[i];
+    try {
+      const params = new URLSearchParams({
+        city, country, lat: String(lat), lng: String(lng),
+        page: '0', radius: '25', count: '15', category, fresh: '1',
+      });
+      const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(20000) });
+      if (!res.ok) { errors.push(`${city}/${category}:${res.status}`); processed++; continue; }
+      const data = await res.json() as { posts?: ApiPost[] };
+      const posts = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
+      if (posts.length) {
         const rows = posts.map(p => postToRow(p, sourceOf(p.id)));
         ingested += await upsertEvents(rows);
-      } catch (err) {
-        errors.push(`${city}/${category}:${err instanceof Error ? err.message : 'err'}`);
       }
+      processed++;
+    } catch (err) {
+      errors.push(`${city}/${category}:${err instanceof Error ? err.message : 'err'}`);
+      processed++;
     }
   }
 
-  await purgeExpiredEvents().catch(() => {});
+  const done = i >= work.length;
+  if (done) await purgeExpiredEvents().catch(() => {});
 
-  return NextResponse.json({ ok: true, ingested, cities: CITIES.length, categories: CATEGORIES.length, errors: errors.slice(0, 12) });
+  return NextResponse.json({
+    ok: true, ingested, processed, offset, nextOffset: done ? null : i,
+    total: work.length, done, errors: errors.slice(0, 8),
+  });
 }
