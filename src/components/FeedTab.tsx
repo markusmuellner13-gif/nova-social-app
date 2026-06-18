@@ -128,7 +128,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
     if (activeMainTab === 'events')      return 'events';
     if (activeMainTab === 'sightseeing') return 'sightseeing';
     if (activeMainTab === 'sport')       return 'sports';
-    if (activeMainTab === 'discover')    return activeChipCategory ?? undefined;
+    if (activeMainTab === 'discover')    return activeChipCategory ?? 'discover';
     return undefined;
   }, [activeMainTab, activeChipCategory]);
 

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, X, MapPin, Loader2 } from 'lucide-react';
+import { Search, X, MapPin, Loader2, CornerDownLeft } from 'lucide-react';
 import { LocationState } from '@/types';
 
 interface Props {
@@ -45,20 +45,60 @@ export default function CityExplorer({ currentCity, onSelectCity, onClose }: Pro
   const [query, setQuery]     = useState('');
   const [results, setResults] = useState<NominatimResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reqIdRef = useRef(0);
 
-  async function handleSearch(q: string) {
-    setQuery(q);
-    if (q.trim().length < 2) { setResults([]); return; }
+  // Run the actual geocoder search. No `featuretype=city` filter — that returns
+  // almost nothing for smaller towns; instead we ask for any place and keep the
+  // city/town/village/municipality results so even small towns show up.
+  const runSearch = useCallback(async (q: string) => {
+    const trimmed = q.trim();
+    if (trimmed.length < 2) { setResults([]); setSearching(false); return; }
+    const myReq = ++reqIdRef.current;
     setSearching(true);
     try {
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&limit=6&featuretype=city`,
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(trimmed)}` +
+        `&format=json&addressdetails=1&limit=8&accept-language=en`,
         { headers: { 'Accept-Language': 'en' } }
       );
       const data = await res.json() as NominatimResult[];
-      setResults(data);
-    } catch { setResults([]); } finally { setSearching(false); }
+      if (myReq !== reqIdRef.current) return; // a newer keystroke superseded this
+      // Keep only populated places (city/town/village/etc), dedupe by city name
+      const seen = new Set<string>();
+      const filtered = data.filter(r => {
+        const name = r.address?.city || r.address?.town || r.address?.village
+          || r.address?.county || r.address?.state || r.display_name.split(',')[0];
+        if (!name) return false;
+        const key = `${name}|${r.address?.country ?? ''}`.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      setResults(filtered);
+    } catch { setResults([]); } finally {
+      if (myReq === reqIdRef.current) setSearching(false);
+    }
+  }, []);
+
+  // Debounce keystrokes (Nominatim asks for ≤1 req/sec); 350ms feels instant.
+  function handleSearch(q: string) {
+    setQuery(q);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (q.trim().length < 2) { setResults([]); return; }
+    debounceRef.current = setTimeout(() => { void runSearch(q); }, 350);
   }
+
+  // Enter → search immediately and, if there's already a top match, pick it.
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (results.length > 0) { selectNominatim(results[0]); return; }
+    void runSearch(query);
+  }
+
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
 
   function selectNominatim(r: NominatimResult) {
     // Fall back to the result's own display name — never 'Unknown'
@@ -89,13 +129,25 @@ export default function CityExplorer({ currentCity, onSelectCity, onClose }: Pro
           <Search size={16} style={{ color: '#666677', flexShrink: 0 }} />
           <input
             type="text"
+            inputMode="search"
+            enterKeyHint="search"
             value={query}
             onChange={e => handleSearch(e.target.value)}
-            placeholder="Search any city in the world…"
-            className="flex-1 bg-transparent text-sm text-white outline-none"
+            onKeyDown={handleKeyDown}
+            placeholder="Type any city or town…"
+            className="flex-1 bg-transparent text-sm text-white outline-none min-w-0"
             autoFocus
           />
-          {searching && <Loader2 size={14} className="animate-spin" style={{ color: '#8b5cf6' }} />}
+          {searching
+            ? <Loader2 size={14} className="animate-spin" style={{ color: '#8b5cf6', flexShrink: 0 }} />
+            : query.trim().length >= 2 && (
+                <button onClick={() => { if (results.length) selectNominatim(results[0]); else void runSearch(query); }}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg flex-shrink-0"
+                  style={{ background: 'linear-gradient(135deg,#8b5cf6,#ec4899)' }}>
+                  <CornerDownLeft size={12} style={{ color: '#fff' }} />
+                  <span className="text-xs font-bold text-white">Go</span>
+                </button>
+              )}
         </div>
         <button onClick={onClose}><X size={22} style={{ color: '#888899' }} /></button>
       </div>

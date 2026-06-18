@@ -34,6 +34,16 @@ export async function POST(request: NextRequest) {
   const city     = (body.city || '').slice(0, 80).trim();
   const category = (body.category || '').slice(0, 40).trim();
   const website  = (body.website || '').slice(0, 200).trim();
+  // Ad content + verification payload (from /api/business/verify)
+  const tagline  = (body.tagline || '').slice(0, 240).trim();
+  const ctaUrl   = (body.ctaUrl || website || '').slice(0, 240).trim();
+  const ctaLabel = (body.ctaLabel || 'Visit').slice(0, 30).trim();
+  const verified = body.verified === 'true' || body.verified === '1';
+  const placeId  = (body.placeId || '').slice(0, 120);
+  const photo    = (body.photo || '').slice(0, 600);
+  const address  = (body.address || '').slice(0, 200);
+  const lat      = parseFloat(body.lat || '0') || 0;
+  const lng      = parseFloat(body.lng || '0') || 0;
 
   if (!business || !email) {
     return NextResponse.json({ ok: false, error: 'Business name and email are required.' }, { status: 400 });
@@ -43,12 +53,14 @@ export async function POST(request: NextRequest) {
   const lead = {
     id: leadId, business, email, city, category, website,
     plan: planId, amount: plan.amount,
-    status: 'pending', verified: false, createdAt: new Date().toISOString(),
+    tagline, ctaUrl, ctaLabel,
+    verified, placeId, photo, address, lat, lng,
+    status: 'pending', published: false, createdAt: new Date().toISOString(),
   };
 
   // Capture the lead regardless of payment configuration (waitlist / review queue).
   if (cacheEnabled) {
-    await cacheSet(`nova:business:lead:${leadId}`, lead, 60 * 60 * 24 * 365);
+    await cacheSet(`nova:business:lead:${leadId}`, lead, 60 * 60 * 24 * 400);
   }
 
   const stripeKey = process.env.STRIPE_SECRET_KEY;
@@ -62,7 +74,8 @@ export async function POST(request: NextRequest) {
   // Build a Stripe Checkout subscription session via REST (form-encoded).
   const form = new URLSearchParams();
   form.set('mode', 'subscription');
-  form.set('success_url', `${origin}/business?status=success`);
+  // session_id lets the success page activate (publish) the post immediately.
+  form.set('success_url', `${origin}/business?status=success&session_id={CHECKOUT_SESSION_ID}`);
   form.set('cancel_url', `${origin}/business?status=cancelled`);
   form.set('customer_email', email);
   form.set('client_reference_id', leadId);
