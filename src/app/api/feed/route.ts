@@ -11,6 +11,7 @@ import {
   searchRealEventsWithClaude,
 } from '@/lib/sources/claudeAI';
 import { eventsCacheKey, cacheTtl, cacheGet, cacheSet } from '@/lib/serverCache';
+import { dbReadEnabled, queryEventsNear } from '@/lib/eventsDb';
 
 export const maxDuration = 60;
 
@@ -194,6 +195,35 @@ export async function GET(request: NextRequest) {
     const cached = await cacheGet<{ posts: unknown[] }>(key);
     if (cached && Array.isArray(cached.posts) && cached.posts.length > 0) {
       return NextResponse.json(cached, { headers: { 'Cache-Control': 'no-store', 'x-nova-cache': 'HIT' } });
+    }
+
+    // ── DB-first: serve from our OWN events DB when it has coverage here ──────
+    // Falls through to the live-API compute below if the DB is empty/unconfigured.
+    if (dbReadEnabled) {
+      try {
+        const cat    = VALID_CATEGORIES.has(rawCatKey) ? rawCatKey : 'events';
+        const lat    = parseFloat(searchParams.get('lat') || '0');
+        const lng    = parseFloat(searchParams.get('lng') || '0');
+        const radius = Math.max(1, Math.min(200, parseInt(searchParams.get('radius') || '25', 10)));
+        const count  = Math.max(1, Math.min(20, parseInt(searchParams.get('count') || '8', 10)));
+        const page   = Math.max(0, parseInt(searchParams.get('page') || '0', 10));
+        if (lat || lng) {
+          const dbPosts = await queryEventsNear({
+            lat, lng, radiusKm: radius, category: cat,
+            afterIso: new Date().toISOString(), limit: count, offset: page * count,
+          });
+          if (dbPosts.length >= 4) {
+            const payload = {
+              posts: dbPosts,
+              city: searchParams.get('city') || '',
+              country: searchParams.get('country') || '',
+              sources: ['db'], hasMore: dbPosts.length >= count,
+            };
+            await cacheSet(key, payload, cacheTtl('feed', rawCatKey));
+            return NextResponse.json(payload, { headers: { 'Cache-Control': 'no-store', 'x-nova-cache': 'DB' } });
+          }
+        }
+      } catch { /* DB read failed — fall back to live */ }
     }
   }
 
