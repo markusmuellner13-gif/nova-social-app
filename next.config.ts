@@ -25,7 +25,7 @@ const securityHeaders = [
       // allow any https image source. Scripts/styles/connect stay locked down.
       "img-src 'self' data: blob: https:",
       // Connections: Supabase (REST + realtime), Vercel Analytics
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com",
+      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com https://*.sentry.io https://*.ingest.sentry.io https://*.ingest.de.sentry.io",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

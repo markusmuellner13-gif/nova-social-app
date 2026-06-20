@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GDPR / ePrivacy (Italian Garante) cookie & analytics consent banner.
@@ -43,18 +43,29 @@ function setConsent(value: ConsentValue) {
   window.dispatchEvent(new CustomEvent('nova:consent', { detail: value }));
 }
 
+// Subscribe to consent changes (custom event + cross-tab storage event).
+function subscribe(cb: () => void): () => void {
+  window.addEventListener('nova:consent', cb);
+  window.addEventListener('storage', cb);
+  return () => {
+    window.removeEventListener('nova:consent', cb);
+    window.removeEventListener('storage', cb);
+  };
+}
+
+// Canonical SSR-safe way to read an external store (localStorage) in React.
+export function useConsent(): ConsentValue | null {
+  return useSyncExternalStore(subscribe, getConsent, () => null);
+}
+
 export default function CookieConsent() {
-  const [visible, setVisible] = useState(false);
+  const consent = useConsent();
 
-  useEffect(() => {
-    if (getConsent() === null) setVisible(true);
-  }, []);
-
-  if (!visible) return null;
+  // Already chosen → nothing to show.
+  if (consent !== null) return null;
 
   function choose(value: ConsentValue) {
-    setConsent(value);
-    setVisible(false);
+    setConsent(value); // updates the store → this component re-renders and hides
   }
 
   return (

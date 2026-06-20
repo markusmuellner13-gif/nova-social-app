@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "eslint",
     "build:android": "next build && npx cap sync android",
     "build:ios": "next build && npx cap sync ios",
@@ -16,6 +18,7 @@
   "dependencies": {
     "@capacitor/cli": "^8.4.0",
     "@capacitor/core": "^8.4.0",
+    "@sentry/nextjs": "^10.59.0",
     "@supabase/supabase-js": "^2.107.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
@@ -36,6 +39,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^2.1.9"
   }
 }
