@@ -104,6 +104,24 @@ export async function queryEventsNear(opts: {
   return ((data ?? []) as { raw: ApiPost }[]).map(r => r.raw).filter(Boolean);
 }
 
+// A worldwide spread of live events for the globe view. Pulls the most popular
+// upcoming events across every city/category we've ingested, so the World Map
+// is covered with real pins instead of demo data. Public anon read (RLS).
+export async function sampleEventsWorldwide(limit = 400): Promise<ApiPost[]> {
+  if (!readClient) return [];
+  const { data, error } = await readClient
+    .from('events')
+    .select('raw')
+    .gt('expires_at', new Date().toISOString())
+    .not('lat', 'is', null)
+    .order('popularity', { ascending: false })
+    .limit(limit);
+  if (error) { console.error('[eventsDb/sample]', error.message); return []; }
+  return ((data ?? []) as { raw: ApiPost }[])
+    .map(r => r.raw)
+    .filter(p => p && p.location && Number.isFinite(p.location.lat) && Number.isFinite(p.location.lng));
+}
+
 // Housekeeping: delete long-expired rows (called by the ingest cron).
 export async function purgeExpiredEvents(): Promise<void> {
   if (!writeClient) return;

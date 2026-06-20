@@ -10,6 +10,7 @@ interface UseLocationReturn {
   permission: PermissionStatus;
   requestLocation: () => Promise<void>;
   setLocationEnabled: (enabled: boolean) => void;
+  setManualLocation: (loc: LocationState) => void;
 }
 
 interface GeoResult { city: string; country: string; countryCode: string }
@@ -206,5 +207,16 @@ export function useLocation(): UseLocationReturn {
     if (!enabled) setPermission('denied');
   }, []);
 
-  return { location, permission, requestLocation, setLocationEnabled };
+  // A city the user picked by hand (City Explorer). Updating the hook's OWN
+  // `location` state is what makes the change stick: AppShell mirrors this state
+  // into the global context every time it changes, so the feed reloads for the
+  // new city immediately. Marking it manual stops GPS from silently overriding.
+  const setManualLocation = useCallback((loc: LocationState) => {
+    const next: LocationState = { ...loc, enabled: true };
+    persistManualLocation(next);
+    setLocation(next);
+    setPermission('granted');
+  }, []);
+
+  return { location, permission, requestLocation, setLocationEnabled, setManualLocation };
 }

@@ -14,20 +14,69 @@ export const maxDuration = 60; // Hobby plan cap; the route self-limits to ~45s 
 // is configured (writes need it). Reads/serving fall back to live until then.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Worldwide coverage so every user — wherever they open the app — is served
+// from our own DB. Austria is dense (the home market: Vienna, Graz, Linz,
+// Salzburg, Innsbruck, Baden, Wiener Neustadt, Klagenfurt) plus the major
+// European and global metros. The cron resumes across days via ?offset, so a
+// long list is fine — each daily slice just refreshes the next chunk.
 const CITIES: [string, string, number, number][] = [
-  ['Rome',     'Italy',   41.9028, 12.4964],
-  ['Milan',    'Italy',   45.4642,  9.1900],
-  ['Florence', 'Italy',   43.7696, 11.2558],
-  ['Venice',   'Italy',   45.4408, 12.3155],
-  ['Naples',   'Italy',   40.8518, 14.2681],
-  ['Turin',    'Italy',   45.0703,  7.6869],
-  ['Bologna',  'Italy',   44.4949, 11.3426],
-  ['Verona',   'Italy',   45.4384, 10.9916],
-  ['Vienna',   'Austria', 48.2082, 16.3738],
+  // ── Austria (home market) ──
+  ['Vienna',          'Austria',     48.2082, 16.3738],
+  ['Graz',            'Austria',     47.0707, 15.4395],
+  ['Linz',            'Austria',     48.3069, 14.2858],
+  ['Salzburg',        'Austria',     47.8095, 13.0550],
+  ['Innsbruck',       'Austria',     47.2692, 11.4041],
+  ['Klagenfurt',      'Austria',     46.6247, 14.3050],
+  ['Baden',           'Austria',     48.0059, 16.2342],
+  ['Wiener Neustadt', 'Austria',     47.8149, 16.2425],
+  ['Bregenz',         'Austria',     47.5031,  9.7471],
+  ['St. Pölten',      'Austria',     48.2047, 15.6256],
+  // ── Italy ──
+  ['Rome',            'Italy',       41.9028, 12.4964],
+  ['Milan',           'Italy',       45.4642,  9.1900],
+  ['Florence',        'Italy',       43.7696, 11.2558],
+  ['Venice',          'Italy',       45.4408, 12.3155],
+  ['Naples',          'Italy',       40.8518, 14.2681],
+  ['Turin',           'Italy',       45.0703,  7.6869],
+  ['Bologna',         'Italy',       44.4949, 11.3426],
+  // ── Germany / Switzerland ──
+  ['Berlin',          'Germany',     52.5200, 13.4050],
+  ['Munich',          'Germany',     48.1351, 11.5820],
+  ['Hamburg',         'Germany',     53.5511,  9.9937],
+  ['Cologne',         'Germany',     50.9375,  6.9603],
+  ['Frankfurt',       'Germany',     50.1109,  8.6821],
+  ['Zurich',          'Switzerland', 47.3769,  8.5417],
+  // ── Rest of Europe ──
+  ['London',          'UK',          51.5074, -0.1278],
+  ['Paris',           'France',      48.8566,  2.3522],
+  ['Barcelona',       'Spain',       41.3851,  2.1734],
+  ['Madrid',          'Spain',       40.4168, -3.7038],
+  ['Amsterdam',       'Netherlands', 52.3676,  4.9041],
+  ['Prague',          'Czechia',     50.0755, 14.4378],
+  ['Budapest',        'Hungary',     47.4979, 19.0402],
+  ['Lisbon',          'Portugal',    38.7223, -9.1393],
+  ['Dublin',          'Ireland',     53.3498, -6.2603],
+  ['Copenhagen',      'Denmark',     55.6761, 12.5683],
+  // ── Americas / Asia / Oceania ──
+  ['New York',        'USA',         40.7128, -74.0060],
+  ['Los Angeles',     'USA',         34.0522, -118.2437],
+  ['Toronto',         'Canada',      43.6532, -79.3832],
+  ['Dubai',           'UAE',         25.2048, 55.2708],
+  ['Tokyo',           'Japan',       35.6762, 139.6503],
+  ['Sydney',          'Australia',  -33.8688, 151.2093],
 ];
 
-// DB-friendly categories (served by fast APIs: Ticketmaster/SeatGeek/OSM/Wikipedia)
-const CATEGORIES = ['events', 'music', 'sports', 'art', 'restaurants', 'hotels', 'rentals', 'venues', 'sightseeing'];
+// Every category the app surfaces, so each city carries a full spread across
+// all chips. Place categories come from OSM, sightseeing from Wikipedia,
+// events/music/sports/art from Ticketmaster/SeatGeek/Eventbrite, and the
+// long-tail (food/fitness/lifestyle/community/tech/fashion/travel/pets) is
+// filled by Eventbrite + the AI web-search fallback when the fast sources are
+// sparse — exactly mirroring the live /api/feed behaviour.
+const CATEGORIES = [
+  'events', 'music', 'sports', 'art', 'sightseeing',
+  'restaurants', 'hotels', 'rentals', 'venues', 'shops',
+  'food', 'fitness', 'lifestyle', 'community', 'tech', 'fashion', 'travel', 'pets',
+];
 
 function sourceOf(id: string): string {
   return (id.split('_')[0] || 'feed').slice(0, 12);

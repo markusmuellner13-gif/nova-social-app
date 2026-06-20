@@ -1,15 +1,16 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   ComposableMap,
   Geographies,
   Geography,
   Marker,
-  ZoomableGroup,
+  Sphere,
+  Graticule,
 } from 'react-simple-maps';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ExternalLink, Plus, Minus, Locate } from 'lucide-react';
+import { X, ExternalLink, Plus, Minus, Locate, Navigation, Play, Pause } from 'lucide-react';
 import { Post, Category } from '@/types';
 import { formatCount } from '@/data/mockData';
 
@@ -60,205 +61,246 @@ const CATEGORY_COLOR: Record<Category, string> = {
 interface Props {
   posts: Post[];
   onPostOpen?: (post: Post) => void;
+  /** Optional point to spin the globe to on mount (e.g. the user's city). */
+  focus?: { lat: number; lng: number } | null;
 }
 
-export default function WorldMap({ posts, onPostOpen }: Props) {
-  const [selected, setSelected] = useState<Post | null>(null);
-  const [zoom, setZoom] = useState(1.2);
-  const [center, setCenter] = useState<[number, number]>([10, 25]);
+const BASE_SCALE = 220;       // orthographic radius at zoom = 1
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 6;
+const HEIGHT = 420;
 
-  const handleMoveEnd = useCallback(({ zoom: z, coordinates }: { zoom: number; coordinates: [number, number] }) => {
-    setZoom(z);
-    setCenter(coordinates);
+// Angular distance (degrees) between two lon/lat points — used to hide pins on
+// the back of the globe (orthographic shows only the front hemisphere).
+function angularDistance(aLng: number, aLat: number, bLng: number, bLat: number): number {
+  const toRad = Math.PI / 180;
+  const dLng = (bLng - aLng) * toRad;
+  const lat1 = aLat * toRad, lat2 = bLat * toRad;
+  const c = Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return Math.acos(Math.min(1, Math.max(-1, c))) / toRad;
+}
+
+export default function WorldMap({ posts, onPostOpen, focus }: Props) {
+  const [selected, setSelected] = useState<Post | null>(null);
+  const [zoom, setZoom] = useState(1.15);
+  // Rotation: the visible centre of the globe sits at lon=-rotate[0], lat=-rotate[1]
+  const [rotation, setRotation] = useState<[number, number]>(
+    focus ? [-focus.lng, -focus.lat] : [-10, -25]
+  );
+  const [autoRotate, setAutoRotate] = useState(true);
+
+  const draggingRef = useRef(false);
+  const lastPosRef  = useRef<{ x: number; y: number } | null>(null);
+  const movedRef    = useRef(false);
+  const rafRef      = useRef<number | null>(null);
+
+  // Spin to a focus point if it arrives after mount
+  useEffect(() => {
+    if (focus) setRotation([-focus.lng, -focus.lat]);
+  }, [focus?.lat, focus?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Gentle auto-rotation when the user isn't interacting and nothing is open
+  useEffect(() => {
+    if (!autoRotate || selected) return;
+    let raf = 0;
+    const tick = () => {
+      if (!draggingRef.current) {
+        setRotation(([lng, lat]) => [(lng - 0.12) % 360, lat]);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [autoRotate, selected]);
+
+  // Drag-to-spin
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    draggingRef.current = true;
+    movedRef.current = false;
+    lastPosRef.current = { x: e.clientX, y: e.clientY };
+    (e.target as Element).setPointerCapture?.(e.pointerId);
   }, []);
 
-  const zoomIn  = useCallback(() => setZoom(z => Math.min(z * 1.5, 12)), []);
-  const zoomOut = useCallback(() => setZoom(z => Math.max(z / 1.5, 0.8)), []);
-  const reset   = useCallback(() => { setZoom(1.2); setCenter([10, 25]); }, []);
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!draggingRef.current || !lastPosRef.current) return;
+    const dx = e.clientX - lastPosRef.current.x;
+    const dy = e.clientY - lastPosRef.current.y;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) movedRef.current = true;
+    lastPosRef.current = { x: e.clientX, y: e.clientY };
+    const sensitivity = 0.32 / zoom;
+    setRotation(([lng, lat]) => [
+      lng + dx * sensitivity,
+      Math.max(-90, Math.min(90, lat - dy * sensitivity)),
+    ]);
+  }, [zoom]);
 
-  // Scale marker size with zoom (bigger markers when zoomed in)
-  const markerR    = Math.max(3, Math.min(7, 6 / Math.sqrt(zoom)));
-  const pulseR     = markerR * 2.2;
-  const showEmoji  = zoom > 2.5;
-  const showAvatar = zoom > 5;
+  const endDrag = useCallback(() => {
+    draggingRef.current = false;
+    lastPosRef.current = null;
+  }, []);
+
+  const onWheel = useCallback((e: React.WheelEvent) => {
+    setZoom(z => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z * (e.deltaY < 0 ? 1.12 : 0.89))));
+  }, []);
+
+  const zoomIn  = useCallback(() => setZoom(z => Math.min(z * 1.4, MAX_ZOOM)), []);
+  const zoomOut = useCallback(() => setZoom(z => Math.max(z / 1.4, MIN_ZOOM)), []);
+  const reset   = useCallback(() => {
+    setZoom(1.15);
+    setRotation(focus ? [-focus.lng, -focus.lat] : [-10, -25]);
+  }, [focus]);
+
+  // Centre of the visible hemisphere, for back-face culling
+  const centerLng = -rotation[0];
+  const centerLat = -rotation[1];
+
+  // Bigger pins as you zoom in
+  const markerR  = Math.max(5, Math.min(13, 6 * Math.sqrt(zoom)));
+  const showEmoji = zoom > 2;
+
+  // Only render pins on the front of the globe — keeps it fast and correct
+  const visiblePosts = useMemo(() => {
+    return posts.filter(p =>
+      p.location &&
+      Number.isFinite(p.location.lat) &&
+      Number.isFinite(p.location.lng) &&
+      angularDistance(centerLng, centerLat, p.location.lng, p.location.lat) < 89
+    );
+  }, [posts, centerLng, centerLat]);
+
+  function openDirections(p: Post) {
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${p.location.lat},${p.location.lng}`;
+    if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer');
+  }
 
   return (
     <div
-      className="relative w-full rounded-2xl overflow-hidden"
-      style={{ height: 340, background: '#06111f' }}
+      className="relative w-full rounded-2xl overflow-hidden select-none"
+      style={{ height: HEIGHT, background: 'radial-gradient(ellipse at 50% 40%, #0c1b30 0%, #05080f 75%)', touchAction: 'none' }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerLeave={endDrag}
+      onWheel={onWheel}
     >
-      {/* Ocean background */}
-      <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse at 50% 60%, #0d1e33 0%, #060e18 100%)' }} />
-
       <ComposableMap
-        projection="geoMercator"
-        projectionConfig={{ scale: 130, center: [0, 20] }}
-        style={{ width: '100%', height: '100%' }}
+        projection="geoOrthographic"
+        width={800}
+        height={HEIGHT}
+        projectionConfig={{ rotate: [rotation[0], rotation[1], 0], scale: BASE_SCALE * zoom }}
+        style={{ width: '100%', height: '100%', cursor: draggingRef.current ? 'grabbing' : 'grab' }}
       >
-        <ZoomableGroup
-          zoom={zoom}
-          center={center}
-          onMoveEnd={handleMoveEnd}
-          minZoom={0.8}
-          maxZoom={12}
-        >
-          <Geographies geography={GEO_URL}>
-            {({ geographies }) =>
-              geographies.map((geo) => (
-                <Geography
-                  key={geo.rsmKey}
-                  geography={geo}
-                  fill="#1c2a42"
-                  stroke="#0d1828"
-                  strokeWidth={0.4}
-                  style={{
-                    default: { outline: 'none' },
-                    hover:   { fill: '#263550', outline: 'none' },
-                    pressed: { outline: 'none' },
-                  }}
-                />
-              ))
-            }
-          </Geographies>
+        {/* Ocean sphere with a soft glow rim */}
+        <defs>
+          <radialGradient id="globeOcean" cx="42%" cy="38%" r="68%">
+            <stop offset="0%"  stopColor="#163a5f" />
+            <stop offset="70%" stopColor="#0a1d33" />
+            <stop offset="100%" stopColor="#06101d" />
+          </radialGradient>
+          <filter id="globeShadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="0" stdDeviation="6" floodColor="#3b82f6" floodOpacity="0.35" />
+          </filter>
+        </defs>
 
-          {/* Post markers */}
-          {posts.map((post) => {
-            const color = CATEGORY_COLOR[post.category] ?? '#8b5cf6';
-            const emoji = CATEGORY_EMOJI[post.category] ?? '📍';
-            const isSelected = selected?.id === post.id;
+        <Sphere id="globe-sphere" fill="url(#globeOcean)" stroke="#2b6cb0" strokeWidth={1.2} style={{ filter: 'url(#globeShadow)' }} />
+        <Graticule stroke="#1b3a5c" strokeWidth={0.4} />
 
-            return (
-              <Marker
-                key={post.id}
-                coordinates={[post.location.lng, post.location.lat]}
+        <Geographies geography={GEO_URL}>
+          {({ geographies }) =>
+            geographies.map((geo) => (
+              <Geography
+                key={geo.rsmKey}
+                geography={geo}
+                fill="#1f3a2e"
+                stroke="#0f2a1f"
+                strokeWidth={0.4}
+                style={{
+                  default: { fill: '#22432f', outline: 'none' },
+                  hover:   { fill: '#2c5740', outline: 'none' },
+                  pressed: { outline: 'none' },
+                }}
+              />
+            ))
+          }
+        </Geographies>
+
+        {/* Event pins (front hemisphere only) */}
+        {visiblePosts.map((post) => {
+          const color = CATEGORY_COLOR[post.category] ?? '#8b5cf6';
+          const emoji = CATEGORY_EMOJI[post.category] ?? '📍';
+          const isSelected = selected?.id === post.id;
+          return (
+            <Marker key={post.id} coordinates={[post.location.lng, post.location.lat]}>
+              <g
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (movedRef.current) return; // ignore clicks that were really drags
+                  setSelected(isSelected ? null : post);
+                }}
+                style={{ cursor: 'pointer' }}
               >
-                <motion.g
-                  onClick={() => setSelected(isSelected ? null : post)}
-                  style={{ cursor: 'pointer' }}
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 20, delay: Math.random() * 0.3 }}
-                  whileHover={{ scale: 1.3 }}
-                  whileTap={{ scale: 0.9 }}
-                >
-                  {/* Outer pulse ring */}
-                  {!isSelected && (
-                    <circle
-                      r={pulseR}
-                      fill={`${color}30`}
-                      className="pulse-dot"
-                    />
-                  )}
-
-                  {/* Selection ring */}
-                  {isSelected && (
-                    <circle
-                      r={pulseR * 1.4}
-                      fill="none"
-                      stroke={color}
-                      strokeWidth={1.5}
-                      opacity={0.8}
-                    />
-                  )}
-
-                  {/* Main dot */}
-                  <circle
-                    r={markerR}
-                    fill={color}
-                    stroke="white"
-                    strokeWidth={1.2}
-                    style={{ filter: `drop-shadow(0 0 ${markerR}px ${color}88)` }}
-                  />
-
-                  {/* Category emoji (shows when zoomed in) */}
-                  {showEmoji && !showAvatar && (
-                    <text
-                      y={-(markerR + 4)}
-                      textAnchor="middle"
-                      style={{
-                        fontSize: Math.min(12, markerR * 2.2),
-                        pointerEvents: 'none',
-                        userSelect: 'none',
-                      }}
-                    >
-                      {emoji}
-                    </text>
-                  )}
-
-                  {/* Tiny avatar image (shows when very zoomed in) */}
-                  {showAvatar && (
-                    <image
-                      href={post.user.avatar}
-                      x={-markerR * 2}
-                      y={-(markerR * 2 + markerR * 4 + 2)}
-                      width={markerR * 4}
-                      height={markerR * 4}
-                      clipPath={`url(#avatarClip_${post.id})`}
-                    />
-                  )}
-
-                  <defs>
-                    <clipPath id={`avatarClip_${post.id}`}>
-                      <circle cx={0} cy={-(markerR * 4)} r={markerR * 2} />
-                    </clipPath>
-                  </defs>
-                </motion.g>
-              </Marker>
-            );
-          })}
-
-          {/* Gradient def for fallback dots */}
-          <defs>
-            <radialGradient id="oceanGlow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#0d2244" />
-              <stop offset="100%" stopColor="#060e18" />
-            </radialGradient>
-          </defs>
-        </ZoomableGroup>
+                {/* pulse ring */}
+                <circle r={markerR * 2} fill={`${color}28`} className="pulse-dot" />
+                {isSelected && (
+                  <circle r={markerR * 2.6} fill="none" stroke={color} strokeWidth={2} opacity={0.9} />
+                )}
+                {/* main pin */}
+                <circle
+                  r={isSelected ? markerR * 1.35 : markerR}
+                  fill={color}
+                  stroke="white"
+                  strokeWidth={2}
+                  style={{ filter: `drop-shadow(0 0 ${markerR}px ${color})` }}
+                />
+                {showEmoji && (
+                  <text
+                    y={markerR * 0.55}
+                    textAnchor="middle"
+                    style={{ fontSize: markerR * 1.5, pointerEvents: 'none', userSelect: 'none' }}
+                  >
+                    {emoji}
+                  </text>
+                )}
+              </g>
+            </Marker>
+          );
+        })}
       </ComposableMap>
 
-      {/* Map controls */}
+      {/* Controls */}
       <div className="absolute top-3 right-3 flex flex-col gap-1.5 z-10">
-        <button
-          onClick={zoomIn}
-          className="w-8 h-8 rounded-xl flex items-center justify-center"
-          style={{ background: 'rgba(13,20,30,0.9)', border: '1px solid rgba(255,255,255,0.1)', color: 'white' }}
-        >
-          <Plus size={14} />
-        </button>
-        <button
-          onClick={zoomOut}
-          className="w-8 h-8 rounded-xl flex items-center justify-center"
-          style={{ background: 'rgba(13,20,30,0.9)', border: '1px solid rgba(255,255,255,0.1)', color: 'white' }}
-        >
-          <Minus size={14} />
-        </button>
-        <button
-          onClick={reset}
-          className="w-8 h-8 rounded-xl flex items-center justify-center"
-          style={{ background: 'rgba(13,20,30,0.9)', border: '1px solid rgba(255,255,255,0.1)', color: 'white' }}
-        >
-          <Locate size={13} />
-        </button>
+        {[
+          { icon: <Plus size={14} />,  fn: zoomIn,  label: 'Zoom in' },
+          { icon: <Minus size={14} />, fn: zoomOut, label: 'Zoom out' },
+          { icon: <Locate size={13} />, fn: reset,  label: 'Reset' },
+          { icon: autoRotate ? <Pause size={13} /> : <Play size={13} />, fn: () => setAutoRotate(a => !a), label: 'Spin' },
+        ].map((b, i) => (
+          <button
+            key={i}
+            onClick={(e) => { e.stopPropagation(); b.fn(); }}
+            aria-label={b.label}
+            className="w-9 h-9 rounded-xl flex items-center justify-center"
+            style={{ background: 'rgba(10,16,28,0.92)', border: '1px solid rgba(255,255,255,0.12)', color: 'white' }}
+          >
+            {b.icon}
+          </button>
+        ))}
       </div>
 
       {/* Header label */}
       <div
-        className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-semibold"
+        className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-semibold pointer-events-none"
         style={{ background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.3)' }}
       >
-        🌍 {posts.length} events worldwide
+        🌍 {posts.length.toLocaleString()} live events
       </div>
 
-      {/* Zoom hint */}
-      <div
-        className="absolute bottom-3 left-3 text-xs font-medium"
-        style={{ color: 'rgba(255,255,255,0.3)' }}
-      >
-        Pinch or scroll to zoom · Drag to pan
+      {/* Hint */}
+      <div className="absolute bottom-3 left-3 text-xs font-medium pointer-events-none" style={{ color: 'rgba(255,255,255,0.35)' }}>
+        Drag to spin · scroll to zoom · tap a pin
       </div>
 
-      {/* Post preview popup */}
+      {/* Selected event popup */}
       <AnimatePresence>
         {selected && (
           <motion.div
@@ -267,48 +309,39 @@ export default function WorldMap({ posts, onPostOpen }: Props) {
             exit={{ opacity: 0, y: 16, scale: 0.94 }}
             transition={{ duration: 0.22 }}
             className="absolute bottom-4 left-3 right-3 rounded-2xl overflow-hidden flex gap-3 p-3 z-20"
-            style={{ background: 'rgba(13,18,28,0.97)', border: `1px solid ${CATEGORY_COLOR[selected.category]}44`, backdropFilter: 'blur(20px)' }}
+            style={{ background: 'rgba(13,18,28,0.97)', border: `1px solid ${CATEGORY_COLOR[selected.category]}55`, backdropFilter: 'blur(20px)' }}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
           >
-            {/* Category color stripe */}
-            <div
-              className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl"
-              style={{ background: CATEGORY_COLOR[selected.category] }}
-            />
+            <div className="absolute left-0 top-0 bottom-0 w-1 rounded-l-2xl" style={{ background: CATEGORY_COLOR[selected.category] }} />
 
-            <img
-              src={selected.image}
-              alt=""
-              className="w-14 h-14 rounded-xl object-cover flex-shrink-0 ml-1"
-            />
+            <img src={selected.image} alt="" className="w-16 h-16 rounded-xl object-cover flex-shrink-0 ml-1" />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <img
-                  src={selected.user.avatar}
-                  alt=""
-                  className="w-4 h-4 rounded-full object-cover"
-                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                />
-                <span className="text-xs font-semibold text-white truncate">{selected.user.name}</span>
-              </div>
-              <p className="text-xs line-clamp-2 leading-snug" style={{ color: '#888899' }}>
-                {selected.caption.split('\n')[0]}
+              <p className="text-sm font-bold text-white truncate">{selected.caption.split('\n')[0]}</p>
+              <p className="text-xs truncate mt-0.5" style={{ color: '#9aa0b5' }}>
+                📍 {selected.location.name}{selected.eventDate ? ` · ${selected.eventDate}` : ''}
               </p>
               <div className="flex items-center gap-2 mt-1.5">
-                <span className="text-xs" style={{ color: CATEGORY_COLOR[selected.category] }}>
+                <span className="text-xs font-semibold" style={{ color: CATEGORY_COLOR[selected.category] }}>
                   {CATEGORY_EMOJI[selected.category]} {selected.category}
                 </span>
-                <span className="text-xs" style={{ color: '#444455' }}>
-                  ⭐ {formatCount(selected.likes)}
-                </span>
+                <span className="text-xs" style={{ color: '#555566' }}>⭐ {formatCount(selected.likes)}</span>
               </div>
             </div>
 
-            <div className="flex flex-col gap-1 flex-shrink-0">
+            <div className="flex flex-col gap-1.5 flex-shrink-0">
+              <button
+                onClick={() => openDirections(selected)}
+                className="px-2.5 py-1.5 rounded-xl text-xs font-bold text-white flex items-center justify-center gap-1"
+                style={{ background: `linear-gradient(135deg, ${CATEGORY_COLOR[selected.category]}, #8b5cf6)` }}
+              >
+                <Navigation size={11} /> Directions
+              </button>
               {onPostOpen && (
                 <button
                   onClick={() => { onPostOpen(selected); setSelected(null); }}
-                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold text-white"
-                  style={{ background: `linear-gradient(135deg, ${CATEGORY_COLOR[selected.category]}, #8b5cf6)` }}
+                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold"
+                  style={{ background: '#1a1a24', color: '#c4b5fd', border: '1px solid #2a2a38' }}
                 >
                   Open
                 </button>
@@ -320,12 +353,11 @@ export default function WorldMap({ posts, onPostOpen }: Props) {
                   rel="noopener noreferrer"
                   className="px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1"
                   style={{ background: '#1a1a24', color: '#a78bfa', border: '1px solid #2a2a38' }}
-                  onClick={(e) => e.stopPropagation()}
                 >
                   <ExternalLink size={10} /> Info
                 </a>
               )}
-              <button onClick={() => setSelected(null)} className="p-1 flex items-center justify-center" style={{ color: '#444455' }}>
+              <button onClick={() => setSelected(null)} className="p-1 flex items-center justify-center self-center" style={{ color: '#555566' }}>
                 <X size={14} />
               </button>
             </div>

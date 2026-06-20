@@ -19,7 +19,7 @@ import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { LanguageProvider } from '@/context/LanguageContext';
 import { getUserInteractions } from '@/lib/supabase';
 import ErrorBoundary from '@/components/ErrorBoundary';
-import { useLocation, persistManualLocation } from '@/hooks/useLocation';
+import { useLocation } from '@/hooks/useLocation';
 import { initNotifications, subscribeToPush } from '@/lib/notifications';
 import { LocationState, Post } from '@/types';
 
@@ -32,7 +32,7 @@ function AppShell() {
   const [showCityExplorer,   setShowCityExplorer]    = useState(false);
   const [showLocationPrompt, setShowLocationPrompt]  = useState(false);
 
-  const { location, permission, requestLocation } = useLocation();
+  const { location, permission, requestLocation, setManualLocation } = useLocation();
   const handleSplashComplete = useCallback(() => setSplashDone(true), []);
 
   // Register the service worker once and (if a push backend is configured)
@@ -52,10 +52,14 @@ function AppShell() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  // Sync geolocation into context
+  // Mirror the useLocation state (device GPS *and* hand-picked cities) into the
+  // global context. Depends ONLY on `location` — not on `setLocation`, whose
+  // identity changes every render and would otherwise re-fire this effect and
+  // re-push a stale GPS city over a city the user just picked by hand.
   useEffect(() => {
     if (location && location.enabled) setLocation(location);
-  }, [location, setLocation]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location?.city, location?.lat, location?.lng]);
 
   // Show location prompt once after onboarding
   useEffect(() => {
@@ -77,10 +81,12 @@ function AppShell() {
   }
 
   function handleManualCity(loc: LocationState) {
-    setLocation(loc);
-    // Sticky: the chosen city survives reloads and isn't overridden by GPS
-    // until the user explicitly re-enables device location
-    persistManualLocation(loc);
+    // Push straight into context so the feed reloads instantly for the new city…
+    setLocation({ ...loc, enabled: true });
+    // …and into the useLocation hook's own state so the sync effect above stays
+    // consistent (otherwise the next GPS tick would clobber the choice). This
+    // also persists it as a sticky manual pick that survives reloads.
+    setManualLocation(loc);
   }
 
   const handleTabChange = useCallback((tab: Tab) => {

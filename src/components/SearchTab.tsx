@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, Hash, TrendingUp, Flame } from 'lucide-react';
 import dynamic from 'next/dynamic';
@@ -8,6 +8,7 @@ import { MOCK_POSTS, formatCount } from '@/data/mockData';
 import { Post, Category } from '@/types';
 import CommentsSheet from './CommentsSheet';
 import { useLanguage } from '@/context/LanguageContext';
+import { useApp } from '@/context/AppContext';
 
 const WorldMap = dynamic(() => import('./WorldMap'), {
   ssr: false,
@@ -36,13 +37,36 @@ const TRENDING = [
 
 export default function SearchTab() {
   const { t } = useLanguage();
+  const { state } = useApp();
   const categories = CATEGORY_EMOJIS.map(({ id, emoji }) => ({ id, emoji, label: t.categories[id] }));
 
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
   const [focused, setFocused] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  const [mapPosts, setMapPosts] = useState<Post[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Real, live events worldwide for the globe — fetched from our own events DB.
+  // Falls back to the local sample if the DB is empty/unreachable so the map is
+  // never blank.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/map')
+      .then(res => (res.ok ? res.json() : null))
+      .then((data: { posts?: Post[] } | null) => {
+        if (cancelled) return;
+        const real = data?.posts ?? [];
+        if (real.length > 0) setMapPosts(real);
+      })
+      .catch(() => { /* keep fallback */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  const globePosts = mapPosts.length > 0 ? mapPosts : MOCK_POSTS;
+  const globeFocus = state.location
+    ? { lat: state.location.lat, lng: state.location.lng }
+    : null;
 
   const filteredPosts = useMemo(() => {
     let results = MOCK_POSTS;
@@ -143,9 +167,9 @@ export default function SearchTab() {
                     <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
                       <span style={{ fontSize: 12 }}>🌍</span>
                     </div>
-                    <h3 className="text-sm font-semibold text-white">Posts Around the World</h3>
+                    <h3 className="text-sm font-semibold text-white">Live Events Around the World</h3>
                   </div>
-                  <WorldMap posts={MOCK_POSTS} onPostOpen={setSelectedPost} />
+                  <WorldMap posts={globePosts} onPostOpen={setSelectedPost} focus={globeFocus} />
                 </div>
 
                 {/* Trending */}
