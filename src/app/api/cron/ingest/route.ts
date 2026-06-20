@@ -111,7 +111,10 @@ export async function GET(request: NextRequest) {
   const offset = sp.has('offset')
     ? Math.max(0, parseInt(sp.get('offset') || '0', 10))
     : dayRotation;
-  const deadline = Date.now() + 45_000; // stay safely under the 60s cap
+  // Stay well under the 60s platform cap. The deadline is checked *between*
+  // items, and any single item can run up to its own fetch timeout past that
+  // check — so deadline + per-item timeout must stay < 60s. 35s + 14s = 49s.
+  const deadline = Date.now() + 35_000;
 
   let ingested = 0;
   let processed = 0;
@@ -124,9 +127,9 @@ export async function GET(request: NextRequest) {
     try {
       const params = new URLSearchParams({
         city, country, lat: String(lat), lng: String(lng),
-        page: '0', radius: '25', count: '15', category, fresh: '1',
+        page: '0', radius: '25', count: '12', category, fresh: '1',
       });
-      const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(20000) });
+      const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(14000) });
       if (!res.ok) { errors.push(`${city}/${category}:${res.status}`); processed++; continue; }
       const data = await res.json() as { posts?: ApiPost[] };
       const posts = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
