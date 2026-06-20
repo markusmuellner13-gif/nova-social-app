@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cacheEnabled, cacheSet } from '@/lib/serverCache';
+import { verifyTurnstile } from '@/lib/turnstile';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Self-serve paid-post checkout (#8) — the monetization entry point.
@@ -47,6 +48,13 @@ export async function POST(request: NextRequest) {
 
   if (!business || !email) {
     return NextResponse.json({ ok: false, error: 'Business name and email are required.' }, { status: 400 });
+  }
+
+  // Bot / abuse protection. No-ops until TURNSTILE_SECRET_KEY is configured.
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0].trim();
+  const captcha = await verifyTurnstile(body.turnstileToken, ip);
+  if (!captcha.success) {
+    return NextResponse.json({ ok: false, error: 'Please complete the human-verification check and try again.' }, { status: 403 });
   }
 
   const leadId = `lead_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;

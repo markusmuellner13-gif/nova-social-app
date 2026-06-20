@@ -17,15 +17,17 @@ const securityHeaders = [
     value: [
       "default-src 'self'",
       // Next.js requires unsafe-inline for hydration; unsafe-eval for some runtime features
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://pagead2.googlesyndication.com https://partner.googleadservices.com https://tpc.googlesyndication.com",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://pagead2.googlesyndication.com https://partner.googleadservices.com https://tpc.googlesyndication.com https://challenges.cloudflare.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
+      // Cloudflare Turnstile renders its challenge in an iframe.
+      "frame-src 'self' https://challenges.cloudflare.com",
       // Images: real venue photos come from unpredictable hosts (a venue's own
       // og:image, Google Places photos on *.googleusercontent.com, etc.), so we
       // allow any https image source. Scripts/styles/connect stay locked down.
       "img-src 'self' data: blob: https:",
       // Connections: Supabase (REST + realtime), Vercel Analytics
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com https://*.sentry.io https://*.ingest.sentry.io https://*.ingest.de.sentry.io",
+      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com https://*.sentry.io https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://challenges.cloudflare.com",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

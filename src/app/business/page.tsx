@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import TurnstileWidget from '@/components/TurnstileWidget';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Self-serve paid-post portal. Flow:
@@ -43,6 +44,11 @@ export default function BusinessPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<null | 'live' | 'review' | 'queued'>(null);
+  const [captchaToken, setCaptchaToken] = useState('');
+
+  // Human-verification is required only when a Turnstile site key is configured.
+  const captchaRequired = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  const captchaReady = !captchaRequired || captchaToken.length > 0;
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
   const catValue = CATEGORIES.find(c => c.label === form.categoryLabel)?.value ?? 'lifestyle';
@@ -99,6 +105,7 @@ export default function BusinessPage() {
           category: catValue, website: form.website,
           tagline: form.tagline, ctaUrl: form.website, ctaLabel: form.ctaLabel,
           plan,
+          turnstileToken: captchaToken,
           verified: verif?.verified ? 'true' : 'false',
           placeId: verif?.placeId ?? '', photo: verif?.photo ?? '',
           address: verif?.address ?? '',
@@ -246,12 +253,17 @@ export default function BusinessPage() {
             <p style={{ color: '#fff', fontSize: 13, fontWeight: 600, background: 'rgba(244,63,94,0.18)', border: '1px solid rgba(244,63,94,0.4)', borderRadius: 10, padding: '10px 12px' }}>⚠️ {error}</p>
           )}
 
+          {/* Human verification (Cloudflare Turnstile — only renders when configured) */}
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <TurnstileWidget onToken={setCaptchaToken} />
+          </div>
+
           {/* Sticky submit */}
           <div style={{ position: 'sticky', bottom: 0, paddingTop: 8, paddingBottom: 12, background: 'linear-gradient(to top, #0a0a0f 70%, transparent)' }}>
-            <button type="submit" disabled={submitting || !canCheckout}
-              style={{ width: '100%', padding: '15px', borderRadius: 14, border: 'none', cursor: (submitting || !canCheckout) ? 'default' : 'pointer',
-                background: 'linear-gradient(135deg,#8b5cf6,#ec4899)', color: '#fff', fontWeight: 800, fontSize: 16, opacity: (submitting || !canCheckout) ? 0.55 : 1 }}>
-              {submitting ? 'Processing…' : !canCheckout ? 'Verify your business first ↑' : `Continue to payment — ${PLANS.find(p => p.id === plan)?.price}/mo`}
+            <button type="submit" disabled={submitting || !canCheckout || !captchaReady}
+              style={{ width: '100%', padding: '15px', borderRadius: 14, border: 'none', cursor: (submitting || !canCheckout || !captchaReady) ? 'default' : 'pointer',
+                background: 'linear-gradient(135deg,#8b5cf6,#ec4899)', color: '#fff', fontWeight: 800, fontSize: 16, opacity: (submitting || !canCheckout || !captchaReady) ? 0.55 : 1 }}>
+              {submitting ? 'Processing…' : !canCheckout ? 'Verify your business first ↑' : !captchaReady ? 'Complete the verification check ↑' : `Continue to payment — ${PLANS.find(p => p.id === plan)?.price}/mo`}
             </button>
             <p style={{ fontSize: 11, color: '#666677', textAlign: 'center', marginTop: 8 }}>
               Cancel anytime. Verified businesses go live instantly.
