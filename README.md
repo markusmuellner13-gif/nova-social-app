@@ -1,36 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Nova — location-first discovery app
 
-## Getting Started
+Nova is a mobile-first, location-based discovery app. It shows **only real local
+content** (events, concerts, sports, restaurants, hotels, rentals, sightseeing)
+for the user's current city, blended from multiple live sources and an own events
+database.
 
-First, run the development server:
+- **Stack:** Next.js 16 (App Router), React 19, Tailwind v4, Framer Motion,
+  Supabase (auth + Postgres/PostGIS), Upstash Redis, Stripe (REST), Capacitor (iOS/Android wrapper).
+- **Live:** https://nova-phi-liart.vercel.app
+
+## Getting started
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # fill in real values (see below)
+npm run dev                  # http://localhost:3000
+npm run build                # production build / type-check
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Without any keys the app still runs: OpenStreetMap + Wikipedia paths work, and
+every gated feature (AI, Ticketmaster, Redis, Stripe, Supabase) no-ops cleanly.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Architecture
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Feed engine** — `src/lib/sources/*` (osm, ticketmaster, seatgeek, eventbrite,
+  wikipedia, claudeAI, geocode, shared). The client (`useAIFeed`) calls
+  **`/api/feed`**, which merges all relevant sources, dedupes, ranks and caches.
+- **Serving order** — Redis cache → own events DB (Supabase + PostGIS) → live
+  compute. `fresh=1` bypasses cache + DB.
+- **Ingestion** — `/api/cron/ingest` (daily) populates the events DB;
+  `/api/cron/warm` pre-warms popular Italian cities.
+- **City search** — `/api/geocode` proxies Nominatim server-side (cached,
+  rate-limited) so the autocomplete scales without hitting OSM from every browser.
+- **Monetization** — `/business` self-serve paid posts → Stripe Checkout →
+  `/api/business/activate` + `/api/business/webhook` publish a sponsored post.
 
-## Learn More
+## Security
 
-To learn more about Next.js, take a look at the following resources:
+See [SECURITY.md](./SECURITY.md). In short: per-IP tiered rate limiting on every
+API route (middleware), strict security headers + CSP, host-allowlisted image
+proxy, RLS on all tables, signature-verified Stripe webhooks, header-only admin
+auth, and GDPR data export / account deletion.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Environment variables
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+All configured in Vercel (Production + Preview). See `.env.example` for the full
+list and notes. Key ones:
 
-## Deploy on Vercel
+| Variable | Purpose |
+| --- | --- |
+| `ANTHROPIC_API_KEY` | AI enrichment + web search |
+| `TICKETMASTER_API_KEY` | Events & sport |
+| `NEXT_PUBLIC_SUPABASE_URL` / `_ANON_KEY` | Auth + DB (client) |
+| `SUPABASE_SERVICE_ROLE_KEY` | DB ingestion + account deletion (server only) |
+| `KV_REST_API_URL` / `_TOKEN` (or `UPSTASH_*`) | Redis cache + rate limiting |
+| `CRON_SECRET` / `ADMIN_SECRET` | Protect cron / admin endpoints |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Payments |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Deploy
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Push to `master` auto-deploys on Vercel, or run `vercel --prod --yes` from this
+folder. Crons in `vercel.json` must be **daily** on the Hobby plan — upgrade to
+Pro for higher concurrency, longer functions, and finer cron schedules before a
+large launch.
+
+## Release checklist (before scaling)
+
+- [ ] Upgrade Vercel from Hobby → Pro/Enterprise (concurrency, function limits, SLA)
+- [ ] Set `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_SECRET`, `CRON_SECRET` in Vercel
+- [ ] Wire an error monitor (Sentry env vars are scaffolded in `.env.example`)
+- [ ] Finalise legal entity details in `/privacy`, `/terms`, `/cookie` (lawyer review)
+- [ ] Add automated tests + CI before shipping hotfixes at scale

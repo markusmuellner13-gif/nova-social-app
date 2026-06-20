@@ -8,6 +8,7 @@ import {
   MapPin, MapPinOff, Calendar, Users, Star, Trophy, Search,
   UserPlus, UserCheck, X, LogIn, Globe, Heart, Check,
   MessageSquare, FileText, Info, ExternalLink, Phone,
+  Download, UserX,
 } from 'lucide-react';
 import { CURRENT_USER, formatCount } from '@/data/mockData';
 import { Category, Post } from '@/types';
@@ -18,6 +19,7 @@ import { LOCALE_NAMES, LOCALE_FLAGS, Locale } from '@/lib/translations';
 import {
   supabase, searchProfiles, followUser, unfollowUser, SupabaseProfile, signOut,
   getFollowers, getFollowingProfiles, getFollowerProfiles,
+  exportMyData, deleteMyAppData, getSession,
 } from '@/lib/supabase';
 
 const ALL_LOCALES = Object.keys(LOCALE_NAMES) as Locale[];
@@ -66,6 +68,8 @@ export default function ProfileTab({ onOpenAuth }: Props) {
   const [showPrefs, setShowPrefs]         = useState(false);
   const [showSettings, setShowSettings]   = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [showFollowSearch, setShowFollowSearch] = useState(false);
   const [showLanguagePicker, setShowLanguagePicker] = useState(false);
   const [showContactSheet, setShowContactSheet] = useState(false);
@@ -165,6 +169,55 @@ export default function ProfileTab({ onOpenAuth }: Props) {
     addToast('Signed out', 'info');
   }
 
+  // GDPR Art. 15/20 — download everything we hold about the user as JSON.
+  async function handleExportData() {
+    if (!user) return;
+    try {
+      addToast('Preparing your data…', 'info', '📦');
+      const data = await exportMyData(user.id);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `nova-my-data-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      addToast('Your data was downloaded', 'success', '✅');
+    } catch {
+      addToast('Could not export data. Email privacy@nova-app.com', 'error');
+    }
+  }
+
+  // GDPR Art. 17 — permanently delete the account and all associated data.
+  async function handleDeleteAccount() {
+    if (!user || deleting) return;
+    setDeleting(true);
+    try {
+      // 1) Best-effort wipe of app data via the user's own session (RLS-guarded).
+      await deleteMyAppData(user.id).catch(() => {});
+      // 2) Full erasure of the auth record (cascades everything) via service role.
+      const session = await getSession();
+      const token = session?.access_token;
+      if (token) {
+        await fetch('/api/account/delete', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      }
+      // 3) Clear local device data and sign out.
+      clearAllData();
+      await signOut();
+      setShowDeleteConfirm(false);
+      addToast('Your account and data were deleted', 'success', '🗑️');
+    } catch {
+      addToast('Deletion failed. Email privacy@nova-app.com', 'error');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? CURRENT_USER.username;
   const avatarUrl   = profile?.avatar_url ?? CURRENT_USER.avatar;
 
@@ -199,7 +252,11 @@ export default function ProfileTab({ onOpenAuth }: Props) {
               { icon: Bell, label: t.settings.notificationSettings, action: () => {} },
               { icon: Globe, label: `${t.settings.language} · ${LOCALE_FLAGS[locale]} ${LOCALE_NAMES[locale]}`, action: () => setShowLanguagePicker(true) },
               { icon: Trash2, label: t.settings.clearData, danger: true, action: () => setShowClearConfirm(true) },
-              ...(user ? [{ icon: LogOut, label: t.settings.signOut, danger: true, action: handleSignOut }] : []),
+              ...(user ? [
+                { icon: Download, label: 'Download my data', action: handleExportData },
+                { icon: UserX, label: 'Delete account & data', danger: true, action: () => setShowDeleteConfirm(true) },
+                { icon: LogOut, label: t.settings.signOut, danger: true, action: handleSignOut },
+              ] : []),
             ].map(({ icon: Icon, label, danger, action }) => (
               <button key={label} onClick={action}
                 className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-medium"
@@ -285,6 +342,35 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                 <button onClick={handleClearData} className="flex-1 py-3 rounded-xl text-sm font-semibold"
                   style={{ background: '#ef4444', color: 'white' }}>
                   {t.settings.clearButton}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete account confirm — GDPR Art. 17 */}
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center px-6" style={{ background: 'rgba(0,0,0,0.7)' }}>
+            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }}
+              className="w-full max-w-sm rounded-3xl p-6" style={{ background: '#13131a', border: '1px solid #ef444455' }}>
+              <h3 className="text-lg font-bold text-white mb-2">Delete your account?</h3>
+              <p className="text-sm mb-5" style={{ color: '#888899' }}>
+                This permanently erases your profile, follows, groups, saved items and all data
+                we hold — on our servers and on this device. This cannot be undone.
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowDeleteConfirm(false)} disabled={deleting}
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold"
+                  style={{ background: '#1a1a24', color: '#888899', border: '1px solid #2a2a38' }}>
+                  Cancel
+                </button>
+                <button onClick={handleDeleteAccount} disabled={deleting}
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold"
+                  style={{ background: '#ef4444', color: 'white', opacity: deleting ? 0.6 : 1 }}>
+                  {deleting ? 'Deleting…' : 'Delete forever'}
                 </button>
               </div>
             </motion.div>

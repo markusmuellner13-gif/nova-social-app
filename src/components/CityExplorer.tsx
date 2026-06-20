@@ -11,19 +11,14 @@ interface Props {
   onClose: () => void;
 }
 
-interface NominatimResult {
-  lat: string;
-  lon: string;
-  display_name: string;
-  address: {
-    city?: string;
-    town?: string;
-    village?: string;
-    county?: string;
-    state?: string;
-    country?: string;
-    country_code?: string;
-  };
+// Shape returned by our own /api/geocode proxy (see src/app/api/geocode/route.ts)
+interface GeocodeCity {
+  city: string;
+  country: string;
+  countryCode: string;
+  lat: number;
+  lng: number;
+  label: string;
 }
 
 const POPULAR_CITIES: { name: string; country: string; lat: number; lng: number; emoji: string }[] = [
@@ -43,39 +38,25 @@ const POPULAR_CITIES: { name: string; country: string; lat: number; lng: number;
 
 export default function CityExplorer({ currentCity, onSelectCity, onClose }: Props) {
   const [query, setQuery]     = useState('');
-  const [results, setResults] = useState<NominatimResult[]>([]);
+  const [results, setResults] = useState<GeocodeCity[]>([]);
   const [searching, setSearching] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reqIdRef = useRef(0);
 
-  // Run the actual geocoder search. No `featuretype=city` filter — that returns
-  // almost nothing for smaller towns; instead we ask for any place and keep the
-  // city/town/village/municipality results so even small towns show up.
+  // Run the geocoder search through our OWN cached proxy (/api/geocode) rather
+  // than hitting Nominatim from the browser — the proxy adds a proper User-Agent,
+  // a Redis cache, and is rate-limited, so city search stays fast and reliable
+  // even at scale (direct client calls to Nominatim get 429'd in bulk).
   const runSearch = useCallback(async (q: string) => {
     const trimmed = q.trim();
     if (trimmed.length < 2) { setResults([]); setSearching(false); return; }
     const myReq = ++reqIdRef.current;
     setSearching(true);
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(trimmed)}` +
-        `&format=json&addressdetails=1&limit=8&accept-language=en`,
-        { headers: { 'Accept-Language': 'en' } }
-      );
-      const data = await res.json() as NominatimResult[];
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(trimmed)}`);
+      const data = await res.json() as { results?: GeocodeCity[] };
       if (myReq !== reqIdRef.current) return; // a newer keystroke superseded this
-      // Keep only populated places (city/town/village/etc), dedupe by city name
-      const seen = new Set<string>();
-      const filtered = data.filter(r => {
-        const name = r.address?.city || r.address?.town || r.address?.village
-          || r.address?.county || r.address?.state || r.display_name.split(',')[0];
-        if (!name) return false;
-        const key = `${name}|${r.address?.country ?? ''}`.toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      setResults(filtered);
+      setResults(Array.isArray(data.results) ? data.results : []);
     } catch { setResults([]); } finally {
       if (myReq === reqIdRef.current) setSearching(false);
     }
@@ -100,16 +81,13 @@ export default function CityExplorer({ currentCity, onSelectCity, onClose }: Pro
 
   useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
 
-  function selectNominatim(r: NominatimResult) {
-    // Fall back to the result's own display name — never 'Unknown'
-    const city = r.address.city || r.address.town || r.address.village || r.address.county
-      || r.address.state || r.display_name.split(',')[0].trim();
+  function selectNominatim(r: GeocodeCity) {
     const loc: LocationState = {
-      lat: parseFloat(r.lat),
-      lng: parseFloat(r.lon),
-      city,
-      country: r.address.country ?? '',
-      countryCode: (r.address.country_code ?? '').toUpperCase(),
+      lat: r.lat,
+      lng: r.lng,
+      city: r.city,
+      country: r.country,
+      countryCode: r.countryCode,
       enabled: true,
     };
     onSelectCity(loc);
@@ -159,20 +137,17 @@ export default function CityExplorer({ currentCity, onSelectCity, onClose }: Pro
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-6">
               <p className="text-xs font-bold mb-3" style={{ color: '#666677' }}>SEARCH RESULTS</p>
               <div className="flex flex-col gap-2">
-                {results.map((r, i) => {
-                  const city = r.address.city || r.address.town || r.address.village || r.address.state || 'City';
-                  return (
-                    <motion.button key={i} whileTap={{ scale: 0.97 }} onClick={() => selectNominatim(r)}
-                      className="flex items-center gap-3 p-3.5 rounded-2xl text-left"
-                      style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
-                      <MapPin size={18} style={{ color: '#8b5cf6', flexShrink: 0 }} />
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-white truncate">{city}</p>
-                        <p className="text-xs truncate" style={{ color: '#666677' }}>{r.address.country}</p>
-                      </div>
-                    </motion.button>
-                  );
-                })}
+                {results.map((r, i) => (
+                  <motion.button key={`${r.city}-${r.lat}-${i}`} whileTap={{ scale: 0.97 }} onClick={() => selectNominatim(r)}
+                    className="flex items-center gap-3 p-3.5 rounded-2xl text-left"
+                    style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
+                    <MapPin size={18} style={{ color: '#8b5cf6', flexShrink: 0 }} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-white truncate">{r.city || 'City'}</p>
+                      <p className="text-xs truncate" style={{ color: '#666677' }}>{r.country}</p>
+                    </div>
+                  </motion.button>
+                ))}
               </div>
             </motion.div>
           )}

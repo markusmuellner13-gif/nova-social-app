@@ -229,6 +229,47 @@ export async function deleteInteraction(userId: string, postId: string, type: In
     .eq('user_id', userId).eq('post_id', postId).eq('interaction_type', type);
 }
 
+// ── GDPR: data access & erasure (Art. 15, 17, 20) ─────────────────────────────
+
+// Right of access / portability: assemble everything we hold about the user into
+// a single machine-readable object the UI can download as JSON.
+export async function exportMyData(userId: string): Promise<Record<string, unknown>> {
+  if (!supabase) return { error: 'sync_disabled' };
+  const [profile, following, followers, interactions, groups] = await Promise.all([
+    supabase.from('profiles').select('*').eq('id', userId).single().then(r => r.data),
+    supabase.from('follows').select('following_id, created_at').eq('follower_id', userId).then(r => r.data ?? []),
+    supabase.from('follows').select('follower_id, created_at').eq('following_id', userId).then(r => r.data ?? []),
+    supabase.from('post_interactions').select('*').eq('user_id', userId).then(r => r.data ?? []),
+    supabase.from('group_members').select('group_id, joined_at, groups(*)').eq('user_id', userId).then(r => r.data ?? []),
+  ]);
+  return {
+    exportedAt: new Date().toISOString(),
+    userId,
+    profile,
+    following,
+    followers,
+    interactions,
+    groups,
+  };
+}
+
+// Right to erasure: delete all rows the user owns. Returns true if it ran.
+// NOTE: this removes APP data via the user's own (RLS-guarded) session. Deleting
+// the underlying auth.users record requires the service role and is done by
+// POST /api/account/delete (which also signs the user out).
+export async function deleteMyAppData(userId: string): Promise<boolean> {
+  if (!supabase) return false;
+  await Promise.allSettled([
+    supabase.from('post_interactions').delete().eq('user_id', userId),
+    supabase.from('follows').delete().eq('follower_id', userId),
+    supabase.from('follows').delete().eq('following_id', userId),
+    supabase.from('group_members').delete().eq('user_id', userId),
+    supabase.from('group_events').delete().eq('added_by', userId),
+    supabase.from('profiles').delete().eq('id', userId),
+  ]);
+  return true;
+}
+
 interface InteractionRow { post_id: string; interaction_type: string; post_data?: Record<string, unknown> | null }
 
 export async function getUserInteractions(userId: string): Promise<{

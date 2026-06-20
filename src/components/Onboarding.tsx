@@ -25,6 +25,8 @@ export default function Onboarding() {
   const { completeOnboarding } = useApp();
   const [screen, setScreen] = useState<0 | 1 | 2>(0);
   const [selected, setSelected] = useState<Set<Category>>(new Set());
+  // Italy (Art. 8 GDPR / D.Lgs. 101/2018) sets the digital-consent age at 14.
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
 
   function toggleInterest(cat: Category) {
     setSelected(prev => {
@@ -36,7 +38,7 @@ export default function Onboarding() {
   }
 
   function handleContinue() {
-    if (screen === 0) { setScreen(1); return; }
+    if (screen === 0) { if (!ageConfirmed) return; setScreen(1); return; }
     if (screen === 1) {
       if (selected.size < 3) return;
       setScreen(2);
@@ -125,13 +127,38 @@ export default function Onboarding() {
             </motion.div>
 
             <motion.button
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.85 }}
+              type="button"
+              onClick={() => setAgeConfirmed(v => !v)}
+              className="w-full flex items-start gap-3 mb-3 text-left"
+            >
+              <span
+                className="flex-shrink-0 mt-0.5 w-5 h-5 rounded-md flex items-center justify-center"
+                style={{
+                  background: ageConfirmed ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : '#13131a',
+                  border: ageConfirmed ? 'none' : '1px solid #2a2a38',
+                }}
+              >
+                {ageConfirmed && <CheckCircle2 size={14} color="white" />}
+              </span>
+              <span className="text-xs leading-relaxed" style={{ color: '#9a9aae' }}>
+                I confirm I am at least 14 years old and I accept the{' '}
+                <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: '#a78bfa' }}>Terms</a> and{' '}
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: '#a78bfa' }}>Privacy Policy</a>.
+              </span>
+            </motion.button>
+
+            <motion.button
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.9 }}
-              whileTap={{ scale: 0.97 }}
+              whileTap={{ scale: ageConfirmed ? 0.97 : 1 }}
               onClick={handleContinue}
-              className="w-full py-4 rounded-2xl text-base font-bold text-white flex items-center justify-center gap-2"
-              style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}
+              disabled={!ageConfirmed}
+              className="w-full py-4 rounded-2xl text-base font-bold text-white flex items-center justify-center gap-2 transition-opacity"
+              style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', opacity: ageConfirmed ? 1 : 0.5 }}
             >
               Get Started <ChevronRight size={20} />
             </motion.button>

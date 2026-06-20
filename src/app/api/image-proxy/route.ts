@@ -58,7 +58,17 @@ export async function GET(req: NextRequest) {
     return new NextResponse('Not an image', { status: 415 });
   }
 
+  // Reject oversized payloads to protect serverless memory (declared size first).
+  const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+  const declared = parseInt(upstream.headers.get('Content-Length') ?? '', 10);
+  if (Number.isFinite(declared) && declared > MAX_BYTES) {
+    return new NextResponse('Image too large', { status: 413 });
+  }
+
   const body = await upstream.arrayBuffer();
+  if (body.byteLength > MAX_BYTES) {
+    return new NextResponse('Image too large', { status: 413 });
+  }
 
   return new NextResponse(body, {
     status: 200,

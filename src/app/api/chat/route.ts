@@ -26,11 +26,29 @@ RESPONSE FORMAT:
 - End with a follow-up suggestion ("Also ask me about [related thing]!")
 - Do NOT invent specific dates/prices unless asked — give general timing and price ranges`;
 
-export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const { message, city, country } = body as { message: string; city?: string; country?: string };
+// Hard caps — prevent abuse of the (paid) Anthropic key via oversized prompts.
+const MAX_MESSAGE_LEN = 1000;
+const MAX_CITY_LEN    = 80;
 
-  if (!message?.trim()) {
+export async function POST(request: NextRequest) {
+  let body: { message?: string; city?: string; country?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ reply: 'Something went wrong reading your message. Try again! 🔄' }, { status: 400 });
+  }
+
+  const rawMessage = typeof body.message === 'string' ? body.message : '';
+  // Reject obviously abusive payloads outright (cheaper than truncating + calling).
+  if (rawMessage.length > 4000) {
+    return NextResponse.json({ reply: 'That message is a bit too long — try a shorter question! ✂️' }, { status: 413 });
+  }
+
+  const message = rawMessage.trim().slice(0, MAX_MESSAGE_LEN);
+  const city    = typeof body.city === 'string'    ? body.city.slice(0, MAX_CITY_LEN).replace(/[<>{}]/g, '')    : undefined;
+  const country = typeof body.country === 'string' ? body.country.slice(0, MAX_CITY_LEN).replace(/[<>{}]/g, '') : undefined;
+
+  if (!message) {
     return NextResponse.json({ reply: 'What city or event are you curious about? 🌍' });
   }
 
@@ -57,6 +75,7 @@ export async function POST(request: NextRequest) {
         system: `${SYSTEM_PROMPT}\n\n${locationContext}`,
         messages: [{ role: 'user', content: message }],
       }),
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!res.ok) throw new Error(`API ${res.status}`);

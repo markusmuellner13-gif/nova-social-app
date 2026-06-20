@@ -7,7 +7,11 @@ const securityHeaders = [
   { key: 'X-XSS-Protection',            value: '1; mode=block' },
   { key: 'Referrer-Policy',             value: 'strict-origin-when-cross-origin' },
   { key: 'Strict-Transport-Security',   value: 'max-age=63072000; includeSubDomains; preload' },
-  { key: 'Permissions-Policy',          value: 'camera=(), microphone=(), geolocation=(self)' },
+  { key: 'Permissions-Policy',          value: 'camera=(), microphone=(), geolocation=(self), payment=(), usb=(), magnetometer=(), accelerometer=(), gyroscope=(), interest-cohort=()' },
+  // Isolate the browsing context — blocks cross-origin window references / tab-nabbing.
+  { key: 'Cross-Origin-Opener-Policy',  value: 'same-origin' },
+  // Disallow Adobe cross-domain policy files.
+  { key: 'X-Permitted-Cross-Domain-Policies', value: 'none' },
   {
     key: 'Content-Security-Policy',
     value: [

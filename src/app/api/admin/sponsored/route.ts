@@ -1,19 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'node:crypto';
 import { cacheClearPrefix, cacheDelete } from '@/lib/serverCache';
 import { listSponsored } from '@/lib/sponsored';
 import { slugify } from '@/lib/sources/shared';
 
-// Admin: inspect / clear sponsored posts. Protected by CRON_SECRET.
-// GET  ?secret=…&city=Rome           → list that city's live sponsored posts
-// POST ?secret=…  body {action:'clearAll'}            → wipe every sponsored post
-// POST ?secret=…  body {action:'clearCity', city}     → wipe one city's posts
+// Admin: inspect / clear sponsored posts.
+// Auth is HEADER-ONLY (Authorization: Bearer <secret>) so the secret never lands
+// in server access logs or browser history the way a ?secret= query string would.
+// Prefers a dedicated ADMIN_SECRET; falls back to CRON_SECRET for back-compat.
+// GET  ?city=Rome                                  → list that city's sponsored posts
+// POST body {action:'clearAll'}                    → wipe every sponsored post
+// POST body {action:'clearCity', city}             → wipe one city's posts
+
+function safeEqual(a: string, b: string): boolean {
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+}
+
 function authed(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
+  const secret = process.env.ADMIN_SECRET || process.env.CRON_SECRET;
   if (!secret) return false; // refuse if no secret configured
-  const url = new URL(request.url);
-  const provided = url.searchParams.get('secret')
-    ?? (request.headers.get('authorization') || '').replace('Bearer ', '');
-  return provided === secret;
+  const provided = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!provided) return false;
+  return safeEqual(provided, secret);
 }
 
 export async function GET(request: NextRequest) {

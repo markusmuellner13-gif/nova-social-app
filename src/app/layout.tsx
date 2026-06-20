@@ -1,8 +1,9 @@
 import type { Metadata, Viewport } from 'next';
-import Script from 'next/script';
 import './globals.css';
 import { AppProvider } from '@/context/AppContext';
-import { Analytics } from '@vercel/analytics/react';
+import CookieConsent from '@/components/CookieConsent';
+import ConsentedAnalytics from '@/components/ConsentedAnalytics';
+import ConsentedAdsScript from '@/components/ConsentedAdsScript';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://nova-phi-liart.vercel.app'),
@@ -48,19 +49,16 @@ export const viewport: Viewport = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GOOGLE ADSENSE SETUP INSTRUCTIONS
+// GOOGLE ADSENSE SETUP
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Apply at https://adsense.google.com (free, takes 1-3 days to approve)
-// 2. Once approved, get your Publisher ID: ca-pub-XXXXXXXXXXXXXXXXX
-// 3. Add to Vercel Environment Variables:
+// 2. Once approved, add to Vercel Environment Variables:
 //      NEXT_PUBLIC_ADSENSE_CLIENT_ID   = ca-pub-XXXXXXXXXXXXXXXXX
 //      NEXT_PUBLIC_ADSENSE_SLOT_FEED   = (slot ID from AdSense dashboard)
 //      NEXT_PUBLIC_ADSENSE_SLOT_SQUARE = (second slot ID)
-// 4. Uncomment the <Script> tag below and replace YOUR_PUBLISHER_ID
-// 5. Redeploy — ads will appear automatically in the feed
+// The loader (components/ConsentedAdsScript) injects the script ONLY after the
+// user accepts analytics/ads consent — required under the Italian Garante.
 // ─────────────────────────────────────────────────────────────────────────────
-
-const ADSENSE_ID = process.env.NEXT_PUBLIC_ADSENSE_CLIENT_ID ?? '';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -68,22 +66,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-
-        {/* Google AdSense — loads only when publisher ID is set */}
-        {ADSENSE_ID && (
-          // eslint-disable-next-line @next/next/no-sync-scripts
-          <script
-            async
-            src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_ID}`}
-            crossOrigin="anonymous"
-          />
-        )}
       </head>
       <body style={{ height: '100%', margin: 0, overflow: 'hidden' }}>
         <AppProvider>
           {children}
         </AppProvider>
-        <Analytics />
+        <CookieConsent />
+        <ConsentedAnalytics />
+        {/* Google AdSense — loads only with a publisher ID AND user consent */}
+        <ConsentedAdsScript />
       </body>
     </html>
   );
