@@ -134,7 +134,7 @@ export async function GET(request: NextRequest) {
       const data = await res.json() as { posts?: ApiPost[] };
       const posts = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
       if (posts.length) {
-        const rows = posts.map(p => postToRow(p, sourceOf(p.id)));
+        const rows = posts.map(p => postToRow(p, sourceOf(p.id), country));
         ingested += await upsertEvents(rows);
       }
       processed++;

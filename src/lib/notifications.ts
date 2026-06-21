@@ -48,8 +48,12 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   return arr;
 }
 
+interface PushLocation { city?: string; lat?: number; lng?: number }
+
 // Subscribe to web push. Returns true if a subscription was created & stored.
-export async function subscribeToPush(): Promise<boolean> {
+// Pass the user's location so the daily digest cron can send "events near you"
+// for their actual city. Safe to call repeatedly (re-registers location).
+export async function subscribeToPush(loc?: PushLocation): Promise<boolean> {
   if (!VAPID_PUBLIC_KEY) return false; // push backend not configured yet
   const reg = await initNotifications();
   if (!reg || !('pushManager' in reg)) return false;
@@ -67,7 +71,7 @@ export async function subscribeToPush(): Promise<boolean> {
     await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(sub),
+      body: JSON.stringify({ subscription: sub, ...(loc ?? {}) }),
     });
     return true;
   } catch {

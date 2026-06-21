@@ -63,5 +63,14 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true, warmed, total: CITIES.length * CATEGORIES.length, errors: errors.slice(0, 10) });
+  // Fire the daily "events near you" push digest as a sub-step (keeps us to two
+  // Vercel cron entries). Best-effort + gated — no-ops without VAPID keys.
+  let pushResult: unknown = null;
+  try {
+    const headers = secret ? { Authorization: `Bearer ${secret}` } : undefined;
+    const pres = await fetch(`${origin}/api/cron/push`, { headers, signal: AbortSignal.timeout(55000) });
+    pushResult = await pres.json().catch(() => null);
+  } catch { /* push digest is best-effort */ }
+
+  return NextResponse.json({ ok: true, warmed, total: CITIES.length * CATEGORIES.length, push: pushResult, errors: errors.slice(0, 10) });
 }

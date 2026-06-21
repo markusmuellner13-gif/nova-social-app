@@ -1,0 +1,76 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { cacheEnabled, cacheScanKeys, cacheGet, cacheDelete } from '@/lib/serverCache';
+import { webPushEnabled, sendPush, PushSub } from '@/lib/webpush';
+import { dbReadEnabled, queryEventsNear } from '@/lib/eventsDb';
+import type { ApiPost } from '@/lib/sources/shared';
+
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Daily "events near you" push digest — the retention loop.
+//
+// Walks every stored push subscription and sends each user the soonest upcoming
+// event near their saved city (from our events DB), so people come back even
+// when the app is closed. Time-bounded to stay under the function cap; dead
+// subscriptions (404/410) are pruned.
+//
+// Triggered by the daily warm cron (see /api/cron/warm) to avoid a 3rd Vercel
+// cron entry. Can also be called directly with the CRON_SECRET. No-ops cleanly
+// until VAPID keys + Redis are configured.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface Envelope {
+  subscription: PushSub;
+  city?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+}
+
+export async function GET(request: NextRequest) {
+  const secret = process.env.CRON_SECRET;
+  if (secret) {
+    const auth = request.headers.get('authorization');
+    if (auth !== `Bearer ${secret}`) {
+      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+    }
+  }
+  if (!webPushEnabled) {
+    return NextResponse.json({ ok: false, sent: 0, note: 'web push disabled (set NEXT_PUBLIC_VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY)' });
+  }
+  if (!cacheEnabled) {
+    return NextResponse.json({ ok: false, sent: 0, note: 'no subscription store (set Redis/Upstash)' });
+  }
+
+  const keys = await cacheScanKeys('nova:push:sub:', 5000);
+  const deadline = Date.now() + 45_000;
+  let sent = 0, removed = 0, processed = 0;
+
+  for (const key of keys) {
+    if (Date.now() > deadline) break;
+    const env = await cacheGet<Envelope>(key);
+    if (!env?.subscription?.endpoint) continue;
+    processed++;
+
+    // Personalise with the soonest upcoming event near the user's saved city.
+    let top: ApiPost | null = null;
+    if (dbReadEnabled && Number.isFinite(env.lat) && Number.isFinite(env.lng)) {
+      const near = await queryEventsNear({
+        lat: env.lat as number, lng: env.lng as number, radiusKm: 50,
+        category: 'events', afterIso: new Date().toISOString(), limit: 5, offset: 0,
+      }).catch(() => [] as ApiPost[]);
+      top = near.find(p => p.isEvent) ?? near[0] ?? null;
+    }
+
+    const cityLabel = env.city || 'your area';
+    const payload = top
+      ? { title: `What's on in ${cityLabel} 🎉`, body: top.caption.split('\n')[0].slice(0, 100), url: '/', tag: 'nova-digest' }
+      : { title: 'New events near you ✨', body: `Fresh events just landed in ${cityLabel}. Tap to explore.`, url: '/', tag: 'nova-digest' };
+
+    const res = await sendPush(env.subscription, payload);
+    if (res.ok) sent++;
+    else if (res.gone) { await cacheDelete(key); removed++; }
+  }
+
+  return NextResponse.json({ ok: true, sent, removed, processed, total: keys.length });
+}

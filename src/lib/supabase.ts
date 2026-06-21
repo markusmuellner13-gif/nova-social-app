@@ -38,19 +38,25 @@ export type SupabaseGroupEvent = {
 
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 
-export async function signUpEmail(email: string, password: string, username: string) {
+// captchaToken is from the Cloudflare Turnstile widget. It's only enforced once
+// CAPTCHA is enabled in the Supabase dashboard (Auth → Settings → enable Turnstile)
+// AND the site key is set; otherwise it's an empty string Supabase ignores, so
+// signup keeps working before keys are configured.
+export async function signUpEmail(email: string, password: string, username: string, captchaToken?: string) {
   if (!supabase) throw new Error('Supabase not configured');
   const { data, error } = await supabase.auth.signUp({
     email, password,
-    options: { data: { username, display_name: username } },
+    options: { data: { username, display_name: username }, captchaToken: captchaToken || undefined },
   });
   if (error) throw error;
   return data;
 }
 
-export async function signInEmail(email: string, password: string) {
+export async function signInEmail(email: string, password: string, captchaToken?: string) {
   if (!supabase) throw new Error('Supabase not configured');
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email, password, options: { captchaToken: captchaToken || undefined },
+  });
   if (error) throw error;
   return data;
 }

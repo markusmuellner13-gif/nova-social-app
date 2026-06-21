@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 import { signUpEmail, signInEmail, signInGoogle, supabase } from '@/lib/supabase';
+import TurnstileWidget from './TurnstileWidget';
 
 interface Props {
   onClose: () => void;
@@ -19,6 +20,7 @@ export default function AuthModal({ onClose }: Props) {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
+  const [captchaToken, setCaptchaToken] = useState('');
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -28,11 +30,11 @@ export default function AuthModal({ onClose }: Props) {
       if (mode === 'signup') {
         if (!username.trim()) { setError('Username is required'); setLoading(false); return; }
         if (username.length < 3) { setError('Username must be at least 3 characters'); setLoading(false); return; }
-        await signUpEmail(email, password, username.trim().toLowerCase());
+        await signUpEmail(email, password, username.trim().toLowerCase(), captchaToken);
         setError('Check your email to confirm your account, then sign in.');
         setMode('signin');
       } else {
-        await signInEmail(email, password);
+        await signInEmail(email, password, captchaToken);
         onClose();
       }
     } catch (err: unknown) {
@@ -157,6 +159,9 @@ export default function AuthModal({ onClose }: Props) {
               </motion.p>
             )}
           </AnimatePresence>
+
+          {/* Bot/abuse protection — renders only when NEXT_PUBLIC_TURNSTILE_SITE_KEY is set */}
+          <TurnstileWidget onToken={setCaptchaToken} />
 
           <motion.button whileTap={{ scale: 0.97 }} type="submit" disabled={loading}
             className="w-full py-3.5 rounded-2xl text-sm font-bold text-white mt-1"

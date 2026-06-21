@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, ExternalLink, Plus, Minus, Locate, Navigation, Play, Pause } from 'lucide-react';
 import { Post, Category } from '@/types';
 import { formatCount } from '@/data/mockData';
+import { angularDistance } from '@/lib/geo';
 
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
 
@@ -69,16 +70,6 @@ const BASE_SCALE = 220;       // orthographic radius at zoom = 1
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
 const HEIGHT = 420;
-
-// Angular distance (degrees) between two lon/lat points — used to hide pins on
-// the back of the globe (orthographic shows only the front hemisphere).
-function angularDistance(aLng: number, aLat: number, bLng: number, bLat: number): number {
-  const toRad = Math.PI / 180;
-  const dLng = (bLng - aLng) * toRad;
-  const lat1 = aLat * toRad, lat2 = bLat * toRad;
-  const c = Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(dLng);
-  return Math.acos(Math.min(1, Math.max(-1, c))) / toRad;
-}
 
 export default function WorldMap({ posts, onPostOpen, focus }: Props) {
   const [selected, setSelected] = useState<Post | null>(null);
@@ -158,15 +149,27 @@ export default function WorldMap({ posts, onPostOpen, focus }: Props) {
   const markerR  = Math.max(5, Math.min(13, 6 * Math.sqrt(zoom)));
   const showEmoji = zoom > 2;
 
-  // Only render pins on the front of the globe — keeps it fast and correct
+  // Only render pins on the front of the globe (orthographic shows one
+  // hemisphere) and DECLUTTER at low zoom: bucket nearby events onto a grid that
+  // gets coarser the further out you are, keeping the most popular per bucket so
+  // the globe reads cleanly instead of as a blob of overlapping dots.
   const visiblePosts = useMemo(() => {
-    return posts.filter(p =>
+    const front = posts.filter(p =>
       p.location &&
       Number.isFinite(p.location.lat) &&
       Number.isFinite(p.location.lng) &&
       angularDistance(centerLng, centerLat, p.location.lng, p.location.lat) < 89
     );
-  }, [posts, centerLng, centerLat]);
+    if (zoom >= 3) return front; // zoomed in → show everything
+    const grid = zoom >= 2 ? 1.5 : zoom >= 1.4 ? 3 : 6; // degrees per bucket
+    const best = new Map<string, Post>();
+    for (const p of front) {
+      const key = `${Math.round(p.location.lat / grid)}:${Math.round(p.location.lng / grid)}`;
+      const cur = best.get(key);
+      if (!cur || (p.likes ?? 0) > (cur.likes ?? 0)) best.set(key, p);
+    }
+    return Array.from(best.values());
+  }, [posts, centerLng, centerLat, zoom]);
 
   function openDirections(p: Post) {
     const url = `https://www.google.com/maps/dir/?api=1&destination=${p.location.lat},${p.location.lng}`;

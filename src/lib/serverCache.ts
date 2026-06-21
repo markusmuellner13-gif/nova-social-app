@@ -97,6 +97,22 @@ export async function cacheDelete(key: string): Promise<void> {
   try { await redis.del(key); } catch { /* ignore */ }
 }
 
+// Return every key matching a prefix (SCAN-based, safe on large keyspaces).
+// Used by the push digest cron to enumerate stored subscriptions.
+export async function cacheScanKeys(prefix: string, max = 5000): Promise<string[]> {
+  if (!redis) return [];
+  let cursor = '0';
+  const out: string[] = [];
+  try {
+    do {
+      const [next, keys] = await redis.scan(cursor, { match: `${prefix}*`, count: 200 });
+      cursor = String(next);
+      for (const k of keys) { out.push(k); if (out.length >= max) return out; }
+    } while (cursor !== '0');
+  } catch { /* ignore */ }
+  return out;
+}
+
 // Delete every key matching a prefix (SCAN-based, safe on large keyspaces).
 // Used for admin cleanup, e.g. wiping all sponsored posts.
 export async function cacheClearPrefix(prefix: string): Promise<number> {

@@ -47,7 +47,10 @@ export interface EventRow {
 }
 
 // Build an EventRow from a feed post object produced by the source modules.
-export function postToRow(post: ApiPost & { eventDateRaw?: string | null }, source: string, defaultExpiryDays = 3): EventRow {
+// `country` comes from the ingest work item (the feed payload carries it at the
+// top level, individual posts don't), so we can store it on the row for
+// country-level fallback queries.
+export function postToRow(post: ApiPost & { eventDateRaw?: string | null }, source: string, country?: string | null, defaultExpiryDays = 3): EventRow {
   const now = Date.now();
   const startMs = post.eventDateRaw ? Date.parse(`${post.eventDateRaw}T00:00:00Z`) : NaN;
   // Events expire the day after they happen; places/no-date rows live a few days.
@@ -61,6 +64,7 @@ export function postToRow(post: ApiPost & { eventDateRaw?: string | null }, sour
     title: post.caption?.split('\n')[0]?.slice(0, 300) ?? null,
     description: post.caption ?? null,
     city: post.location?.name?.split(',').slice(-1)[0]?.trim() ?? null,
+    country: country ?? null,
     venue: post.eventVenue ?? null,
     lat: post.location?.lat ?? null,
     lng: post.location?.lng ?? null,
@@ -101,6 +105,25 @@ export async function queryEventsNear(opts: {
     in_offset: opts.offset,
   });
   if (error) { console.error('[eventsDb/query]', error.message); return []; }
+  return ((data ?? []) as { raw: ApiPost }[]).map(r => r.raw).filter(Boolean);
+}
+
+// Cold-start fallback: when nothing is happening within the user's radius (a tiny
+// village with no nearby data even after radius expansion), serve upcoming events
+// from anywhere in their country so the feed is never dead. Soonest first.
+export async function queryEventsByCountry(opts: {
+  country: string; category: string; limit: number; offset: number;
+}): Promise<ApiPost[]> {
+  if (!readClient || !opts.country) return [];
+  const { data, error } = await readClient
+    .from('events')
+    .select('raw')
+    .ilike('country', opts.country)
+    .eq('category', opts.category)
+    .gt('expires_at', new Date().toISOString())
+    .order('start_at', { ascending: true, nullsFirst: false })
+    .range(opts.offset, opts.offset + opts.limit - 1);
+  if (error) { console.error('[eventsDb/byCountry]', error.message); return []; }
   return ((data ?? []) as { raw: ApiPost }[]).map(r => r.raw).filter(Boolean);
 }
 

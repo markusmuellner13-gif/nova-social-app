@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cacheEnabled, cacheSet } from '@/lib/serverCache';
 
-// Stores a web-push subscription so the backend can later send "event near you"
-// pushes. Persists in Redis when configured; otherwise accepts and no-ops (the
-// app's in-session local reminders keep working regardless).
+// Stores a web-push subscription (+ the user's city/coords) so the daily digest
+// cron (/api/cron/push) can send "events near you". Persists in Redis when
+// configured; otherwise accepts and no-ops (in-session reminders still work).
+//
+// Accepts both the new envelope { subscription, city, lat, lng } and the legacy
+// bare PushSubscription for backwards compatibility.
 export async function POST(request: NextRequest) {
   try {
-    const sub = await request.json() as { endpoint?: string };
+    const body = await request.json() as {
+      subscription?: { endpoint?: string };
+      endpoint?: string;
+      city?: string; lat?: number; lng?: number;
+    };
+    const sub = body.subscription ?? (body.endpoint ? body : null);
     if (!sub?.endpoint) {
       return NextResponse.json({ ok: false, error: 'invalid subscription' }, { status: 400 });
     }
@@ -14,7 +22,14 @@ export async function POST(request: NextRequest) {
       // Key by a hash of the endpoint so re-subscribing overwrites cleanly.
       let h = 2166136261;
       for (let i = 0; i < sub.endpoint.length; i++) { h ^= sub.endpoint.charCodeAt(i); h = Math.imul(h, 16777619); }
-      await cacheSet(`nova:push:sub:${(h >>> 0).toString(36)}`, sub, 60 * 60 * 24 * 60); // 60 days
+      const envelope = {
+        subscription: sub,
+        city: typeof body.city === 'string' ? body.city.slice(0, 80) : null,
+        lat: Number.isFinite(body.lat) ? body.lat : null,
+        lng: Number.isFinite(body.lng) ? body.lng : null,
+        ts: Date.now(),
+      };
+      await cacheSet(`nova:push:sub:${(h >>> 0).toString(36)}`, envelope, 60 * 60 * 24 * 60); // 60 days
     }
     return NextResponse.json({ ok: true, stored: cacheEnabled });
   } catch {

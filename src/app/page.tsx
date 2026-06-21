@@ -35,11 +35,20 @@ function AppShell() {
   const { location, permission, requestLocation, setManualLocation } = useLocation();
   const handleSplashComplete = useCallback(() => setSplashDone(true), []);
 
-  // Register the service worker once and (if a push backend is configured)
-  // subscribe to web push. Safe no-op when unsupported/unconfigured.
+  // Register the service worker once. Safe no-op when unsupported.
   useEffect(() => {
-    void initNotifications().then(() => { void subscribeToPush(); });
+    void initNotifications();
   }, []);
+
+  // Subscribe to web push with the user's city so the daily digest can send
+  // "events near you". Re-runs when the city changes. Gated: no-ops without a
+  // VAPID key. Depends only on the city so it doesn't re-fire on every render.
+  useEffect(() => {
+    const loc = state.location;
+    if (!loc?.city) return;
+    void subscribeToPush({ city: loc.city, lat: loc.lat, lng: loc.lng });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.location?.city]);
 
   // Sync Supabase user ID and load remote interactions when auth state changes
   useEffect(() => {

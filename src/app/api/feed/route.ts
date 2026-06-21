@@ -11,7 +11,8 @@ import {
   searchRealEventsWithClaude,
 } from '@/lib/sources/claudeAI';
 import { eventsCacheKey, cacheTtl, cacheGet, cacheSet } from '@/lib/serverCache';
-import { dbReadEnabled, queryEventsNear } from '@/lib/eventsDb';
+import { dbReadEnabled, queryEventsNear, queryEventsByCountry } from '@/lib/eventsDb';
+import { aiBudgetExceeded, noteAiCall } from '@/lib/aiBudget';
 
 export const maxDuration = 60;
 
@@ -332,9 +333,12 @@ async function computeFeed(request: NextRequest) {
   let anyMore = results.some(r => r.hasMore);
 
   // ── AI web search only when the free sources came up nearly empty ─────────
-  // (saves credits AND latency — it's the slowest source by far)
-  if (pool.length < Math.max(3, Math.floor(count / 2)) && claudeKey) {
+  // (saves credits AND latency — it's the slowest source by far). Also gated by
+  // a soft daily spend cap (AI_DAILY_BUDGET) so a traffic spike or a big
+  // ingestion sweep can't run up an unbounded Anthropic bill.
+  if (pool.length < Math.max(3, Math.floor(count / 2)) && claudeKey && !(await aiBudgetExceeded())) {
     try {
+      await noteAiCall();
       const aiPosts = await searchRealEventsWithClaude(
         city, country, todayStr(), count, page, category, claudeKey, unsplashKey, pexelsKey, lat, lng
       );
@@ -350,7 +354,21 @@ async function computeFeed(request: NextRequest) {
 
   // No invented events: if every real source is empty, return an honest empty
   // page — the client shows a clear "no events found" state instead
-  const final = rankAndMix(withDistance(pool, lat, lng), count * 2);
+  let final = rankAndMix(withDistance(pool, lat, lng), count * 2);
+
+  // Cold-start cushion: tiny towns can have nothing within radius even after
+  // expansion. Rather than a dead feed, fall back to upcoming events anywhere in
+  // the same country (from our DB). Honest — still real events, just farther out.
+  if (final.length === 0 && dbReadEnabled && country) {
+    try {
+      const countryPosts = await queryEventsByCountry({ country, category, limit: count, offset: page * count });
+      if (countryPosts.length > 0) {
+        final = withDistance(countryPosts, lat, lng);
+        sources.push('db_country');
+        anyMore = anyMore || countryPosts.length >= count;
+      }
+    } catch { /* fall back to empty */ }
+  }
 
   return NextResponse.json(
     {
