@@ -12,7 +12,7 @@ import GroupsTab from '@/components/GroupsTab';
 import AuthModal from '@/components/AuthModal';
 import CityExplorer from '@/components/CityExplorer';
 import ToastContainer from '@/components/ToastContainer';
-import AIChatBar from '@/components/AIChatBar';
+import ChatTab from '@/components/ChatTab';
 import LocationPermissionPrompt from '@/components/LocationPermissionPrompt';
 import { useApp, setSupabaseUser } from '@/context/AppContext';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
@@ -31,6 +31,7 @@ function AppShell() {
   const [showAuth,           setShowAuth]            = useState(false);
   const [showCityExplorer,   setShowCityExplorer]    = useState(false);
   const [showLocationPrompt, setShowLocationPrompt]  = useState(false);
+  const [showNotifications,  setShowNotifications]   = useState(false);
 
   const { location, permission, requestLocation, setManualLocation } = useLocation();
   const handleSplashComplete = useCallback(() => setSplashDone(true), []);
@@ -113,11 +114,11 @@ function AppShell() {
             exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: 'easeInOut' }}
             style={{ position: 'absolute', inset: 0 }}>
             <ErrorBoundary>
-              {activeTab === 'feed'          && <FeedTab onOpenLocationPrompt={() => setShowLocationPrompt(true)} onOpenCityExplorer={() => setShowCityExplorer(true)} />}
-              {activeTab === 'explore'       && <SearchTab />}
-              {activeTab === 'groups'        && <GroupsTab onOpenAuth={() => setShowAuth(true)} />}
-              {activeTab === 'notifications' && <NotificationsTab />}
-              {activeTab === 'profile'       && <ProfileTab onOpenAuth={() => setShowAuth(true)} />}
+              {activeTab === 'feed'    && <FeedTab onOpenLocationPrompt={() => setShowLocationPrompt(true)} onOpenCityExplorer={() => setShowCityExplorer(true)} onOpenNotifications={() => setShowNotifications(true)} />}
+              {activeTab === 'explore' && <SearchTab />}
+              {activeTab === 'groups'  && <GroupsTab onOpenAuth={() => setShowAuth(true)} />}
+              {activeTab === 'chat'    && <ChatTab location={state.location} />}
+              {activeTab === 'profile' && <ProfileTab onOpenAuth={() => setShowAuth(true)} />}
             </ErrorBoundary>
           </motion.div>
         </AnimatePresence>
@@ -125,7 +126,22 @@ function AppShell() {
 
       <BottomNav active={activeTab} onChange={handleTabChange} />
       <ToastContainer />
-      <AIChatBar location={state.location} />
+
+      {/* Notifications — opened from the header bell (Instagram-style) */}
+      <AnimatePresence>
+        {showNotifications && (
+          <motion.div
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 24 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            className="fixed inset-0 z-40"
+            style={{ background: '#0a0a0f' }}
+          >
+            <NotificationsTab onClose={() => setShowNotifications(false)} />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Auth modal */}
       <AnimatePresence>

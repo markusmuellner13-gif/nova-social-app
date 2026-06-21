@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Compass, Sparkles, RefreshCw, ChevronDown, MapPin, Loader2, SlidersHorizontal } from 'lucide-react';
+import { Compass, Sparkles, RefreshCw, ChevronDown, MapPin, Loader2, SlidersHorizontal, Bell } from 'lucide-react';
 import { MOCK_POSTS, SPONSORED_POSTS } from '@/data/mockData';
 import { Category, Post } from '@/types';
 import { sortFeed, getTopCategories } from '@/lib/aiEngine';
@@ -94,10 +94,11 @@ function sortByEventDate(posts: Post[]): Post[] {
 interface Props {
   onOpenLocationPrompt: () => void;
   onOpenCityExplorer: () => void;
+  onOpenNotifications: () => void;
 }
 
-export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Props) {
-  const { state } = useApp();
+export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOpenNotifications }: Props) {
+  const { state, unreadCount } = useApp();
   const { t } = useLanguage();
   const { preferences, aiProfile } = state;
   const location = state.location;
@@ -398,6 +399,23 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
                 <ChevronDown size={9} />
               </motion.button>
             )}
+
+            {/* Notifications bell (Instagram-style) */}
+            <motion.button
+              whileTap={{ scale: 0.88 }}
+              onClick={onOpenNotifications}
+              aria-label="Notifications"
+              className="relative w-8 h-8 flex items-center justify-center rounded-full"
+              style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}
+            >
+              <Bell size={16} style={{ color: '#c4b5fd' }} />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-4 h-4 rounded-full flex items-center justify-center text-white font-bold"
+                  style={{ background: 'linear-gradient(135deg, #ec4899, #8b5cf6)', fontSize: 9, padding: '0 3px' }}>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </motion.button>
           </div>
         </div>
 

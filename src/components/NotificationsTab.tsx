@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, Calendar, Bell, BellOff, MapPin, TrendingUp, Star } from 'lucide-react';
+import { Sparkles, Calendar, Bell, BellOff, MapPin, TrendingUp, Star, ChevronLeft } from 'lucide-react';
 import { NovaNotification } from '@/types';
 import { timeAgo } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
@@ -72,7 +72,7 @@ function NotifRow({ notif, onPostOpen }: { notif: NovaNotification; onPostOpen: 
   );
 }
 
-export default function NotificationsTab() {
+export default function NotificationsTab({ onClose }: { onClose?: () => void } = {}) {
   const { state, markAllRead, addToast } = useApp();
   const { t } = useLanguage();
 
@@ -102,7 +102,14 @@ export default function NotificationsTab() {
         {/* Header */}
         <div className="glass flex items-center justify-between px-4 flex-shrink-0"
           style={{ height: 52, borderBottom: '1px solid #1e1e2a' }}>
-          <h2 className="text-base font-bold text-white">{t.notifications.title}</h2>
+          <div className="flex items-center gap-1.5">
+            {onClose && (
+              <button onClick={onClose} className="w-8 h-8 -ml-2 flex items-center justify-center rounded-full" aria-label="Back" style={{ color: '#c4b5fd' }}>
+                <ChevronLeft size={20} />
+              </button>
+            )}
+            <h2 className="text-base font-bold text-white">{t.notifications.title}</h2>
+          </div>
           <div className="flex items-center gap-2">
             {unread.length > 0 && (
               <button onClick={markAllRead} className="text-xs font-semibold" style={{ color: '#a78bfa' }}>

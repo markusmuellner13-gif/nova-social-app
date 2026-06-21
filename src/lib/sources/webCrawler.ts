@@ -17,7 +17,8 @@
 // the events DB without spending credits.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { ApiPost, makeUser, picsumUrl, slugify, todayStr, haversineKm } from './shared';
+import { ApiPost, makeUser, picsumUrl, slugify, todayStr, haversineKm, fetchOgImage, proxyImage } from './shared';
+import { validateBatch } from '@/lib/eventValidation';
 
 // The schema.org Event subtypes we treat as real events.
 const EVENT_TYPES = new Set([
@@ -313,11 +314,26 @@ export async function crawlCityEvents(opts: {
     }
   }
 
-  const posts: ApiPost[] = [];
+  let posts: ApiPost[] = [];
   for (let i = 0; i < events.length && posts.length < count; i++) {
     const p = toApiPost(events[i], i, city, country, lat, lng, category);
     if (p) posts.push(p);
   }
+
+  // Quality gate: drop anything corrupt / fake / past / mislocated before it can
+  // reach the feed or the DB. maxKm guards against an event page spilling another
+  // region's listings stamped at this city's centroid.
+  posts = validateBatch(posts, { cityLat: lat, cityLng: lng, maxKm: 150 }).valid;
+
+  // Real photos: for the first few posts that don't already carry a real image,
+  // fetch the event page's og:image (the actual event poster/photo). Capped and
+  // run in parallel so it never slows the feed much.
+  await Promise.all(posts.slice(0, 6).map(async p => {
+    const hasReal = p.image && !p.image.includes('picsum.photos');
+    if (hasReal || !p.eventUrl || p.eventUrl === '#') return;
+    const og = await fetchOgImage(p.eventUrl, 3500);
+    if (og) p.image = proxyImage(og);
+  }));
 
   // Sort soonest-first; prefer events with real geo near the search point.
   return posts.sort((a, b) => {

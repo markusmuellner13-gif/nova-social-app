@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbWriteEnabled, upsertEvents, purgeExpiredEvents, postToRow } from '@/lib/eventsDb';
+import { validateBatch } from '@/lib/eventValidation';
+import { recordSourceYield } from '@/lib/sourceStats';
 import type { ApiPost } from '@/lib/sources/shared';
 
 export const maxDuration = 60; // Hobby plan cap; the route self-limits to ~45s and resumes via ?offset
@@ -158,8 +160,12 @@ export async function GET(request: NextRequest) {
   const deadline = Date.now() + 35_000;
 
   let ingested = 0;
+  let rejected = 0;
   let processed = 0;
   const errors: string[] = [];
+  // Accumulate per-source accept/reject so the learning layer knows which
+  // sources actually deliver good data.
+  const srcYield: Record<string, { a: number; r: number }> = {};
 
   let i = offset;
   for (; i < work.length; i++) {
@@ -170,12 +176,27 @@ export async function GET(request: NextRequest) {
         city, country, lat: String(lat), lng: String(lng),
         page: '0', radius: '25', count: '12', category, fresh: '1',
       });
-      const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(14000) });
+      const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(16000) });
       if (!res.ok) { errors.push(`${city}/${category}:${res.status}`); processed++; continue; }
       const data = await res.json() as { posts?: ApiPost[] };
-      const posts = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
-      if (posts.length) {
-        const rows = posts.map(p => postToRow(p, sourceOf(p.id), country));
+      const raw = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
+
+      // QUALITY GATE — only validated, real, correctly-located events are stored.
+      const { valid, rejected: rej } = validateBatch(raw, { cityLat: lat, cityLng: lng, maxKm: 120 });
+      rejected += rej;
+
+      // Tally per-source accept/reject for the learning layer.
+      const bySource: Record<string, { raw: number; ok: number }> = {};
+      for (const p of raw)   (bySource[sourceOf(p.id)] ??= { raw: 0, ok: 0 }).raw++;
+      for (const p of valid) (bySource[sourceOf(p.id)] ??= { raw: 0, ok: 0 }).ok++;
+      for (const [s, v] of Object.entries(bySource)) {
+        (srcYield[s] ??= { a: 0, r: 0 });
+        srcYield[s].a += v.ok;
+        srcYield[s].r += v.raw - v.ok;
+      }
+
+      if (valid.length) {
+        const rows = valid.map(p => postToRow(p, sourceOf(p.id), country));
         ingested += await upsertEvents(rows);
       }
       processed++;
@@ -188,8 +209,13 @@ export async function GET(request: NextRequest) {
   const done = i >= work.length;
   await purgeExpiredEvents().catch(() => {}); // cheap single DELETE; run every time
 
+  // Persist what we learned about each source this run (gated/no-op w/o Redis).
+  await Promise.all(Object.entries(srcYield).map(([s, y]) =>
+    recordSourceYield(s, y.a, Math.max(0, y.r)).catch(() => {})
+  ));
+
   return NextResponse.json({
-    ok: true, ingested, processed, offset, nextOffset: done ? null : i,
+    ok: true, ingested, rejected, processed, offset, nextOffset: done ? null : i,
     total: work.length, done, errors: errors.slice(0, 8),
   });
 }

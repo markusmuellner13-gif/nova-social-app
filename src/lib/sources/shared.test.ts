@@ -96,6 +96,6 @@ describe('proxyImage', () => {
 
 describe('picsumUrl', () => {
   it('produces a deterministic, sanitised seed url', () => {
-    expect(picsumUrl('Rome Events!')).toBe('https://picsum.photos/seed/rome_events_/600/750');
+    expect(picsumUrl('Rome Events!')).toBe('https://picsum.photos/seed/rome_events_/1080/1350');
   });
 });

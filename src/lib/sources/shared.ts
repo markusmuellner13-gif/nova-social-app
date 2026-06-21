@@ -58,8 +58,43 @@ export function makeUser(name: string, domain?: string) {
   };
 }
 
+// High-res 4:5 portrait. Bumped from 600×750 → 1080×1350 so event cards look
+// crisp on modern high-DPI phones.
 export function picsumUrl(seed: string) {
-  return `https://picsum.photos/seed/${seed.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 32)}/600/750`;
+  return `https://picsum.photos/seed/${seed.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 32)}/1080/1350`;
+}
+
+// Pull the real, high-quality hero image a page advertises to social crawlers
+// (og:image / twitter:image / link rel=image_src). This is how we get the
+// ACTUAL event photo rather than a stock stand-in. Fail-soft → null.
+export async function fetchOgImage(pageUrl: string, timeoutMs = 4500): Promise<string | null> {
+  if (!pageUrl || !/^https?:\/\//.test(pageUrl)) return null;
+  try {
+    const res = await fetch(pageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; NovaBot/1.0; +https://nova-app.com)',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return null;
+    const html = (await res.text()).slice(0, 120_000); // <head> is near the top
+    const patterns = [
+      /<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
+      /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+      /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i,
+    ];
+    for (const re of patterns) {
+      const m = html.match(re);
+      if (m?.[1]) {
+        let src = m[1].trim().replace(/&amp;/g, '&');
+        if (src.startsWith('//')) src = `https:${src}`;
+        if (/^https?:\/\//.test(src)) return src;
+      }
+    }
+    return null;
+  } catch { return null; }
 }
 
 // Route rate-limited image sources (Unsplash, Pexels, Wikipedia) through our
@@ -145,7 +180,7 @@ async function fetchUnsplashImage(query: string, key: string): Promise<string | 
     const base = d.urls?.raw ?? d.urls?.regular;
     if (!base) return null;
     const sep = base.includes('?') ? '&' : '?';
-    return `${base}${sep}auto=format&fit=crop&w=600&h=750&q=80&crop=faces,entropy`;
+    return `${base}${sep}auto=format&fit=crop&w=1080&h=1350&q=85&crop=faces,entropy`;
   } catch { return null; }
 }
 
@@ -163,7 +198,7 @@ async function fetchPexelsImage(query: string, key: string): Promise<string | nu
     if (!base) return null;
     // Pexels supports ?w=&h=&fit=crop via their CDN
     const sep = base.includes('?') ? '&' : '?';
-    return `${base}${sep}w=600&h=750&fit=crop`;
+    return `${base}${sep}w=1080&h=1350&fit=crop`;
   } catch { return null; }
 }
 

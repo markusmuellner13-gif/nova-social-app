@@ -1,11 +1,10 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { Compass, Search, Users, Bell, User } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
+import { Compass, Search, Users, Sparkles, User } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 
-export type Tab = 'feed' | 'explore' | 'groups' | 'notifications' | 'profile';
+export type Tab = 'feed' | 'explore' | 'groups' | 'chat' | 'profile';
 
 interface Props {
   active: Tab;
@@ -40,15 +39,14 @@ function NavButton({ id, Icon, label, isActive, onClick, badge }: {
 }
 
 export default function BottomNav({ active, onChange }: Props) {
-  const { unreadCount } = useApp();
   const { t } = useLanguage();
 
   const tabs: { id: Tab; Icon: React.ElementType; label: string; badge?: number; center?: boolean }[] = [
-    { id: 'feed',          Icon: Compass, label: t.nav.discover  },
-    { id: 'explore',       Icon: Search,  label: t.nav.explore   },
-    { id: 'groups',        Icon: Users,   label: t.nav.groups,   center: true },
-    { id: 'notifications', Icon: Bell,    label: t.nav.activity,  badge: unreadCount },
-    { id: 'profile',       Icon: User,    label: t.nav.profile   },
+    { id: 'feed',    Icon: Compass,  label: t.nav.discover },
+    { id: 'explore', Icon: Search,   label: t.nav.explore  },
+    { id: 'groups',  Icon: Users,    label: t.nav.groups,  center: true },
+    { id: 'chat',    Icon: Sparkles, label: 'Nova AI' },
+    { id: 'profile', Icon: User,     label: t.nav.profile  },
   ];
 
   return (
