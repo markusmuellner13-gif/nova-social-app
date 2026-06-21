@@ -192,33 +192,29 @@ function isDifferentMajorCity(venueCity: string, searchCity: string): boolean {
 }
 
 // ── Source URL builders (worldwide, no key) ───────────────────────────────────
-// allevents.in and 10times.com expose city + category pages whose HTML embeds
-// schema.org Event JSON-LD, are worldwide, and tolerate a normal browser fetch.
-// Eventbrite is handled by its own dedicated source module, so we don't repeat
-// it here. Each builder returns 0+ URLs; failures are ignored per-URL.
+// We only crawl sites that actually embed schema.org Event JSON-LD in the HTML
+// they serve to a plain server fetch (many event sites render their listings
+// client-side in JS, or 403 a non-browser — those are useless to us and are
+// deliberately NOT used). Verified working server-side:
+//   • bandsintown.com/c/<city>-<country>  → dozens of real concerts/gigs with
+//     names, dates, venues and geo. Concert-focused, worldwide, no key.
+// Eventbrite is already crawled by its own dedicated source module (also real
+// JSON-LD), so the feed gets two independent free web sources. Each builder
+// returns 0+ URLs; per-URL failures are ignored.
 
-const ALLEVENTS_CAT: Record<string, string> = {
-  events: '', music: 'music', sports: 'sports', art: 'arts', fitness: 'health-wellness',
-  food: 'food-drinks', restaurants: 'food-drinks', community: 'community', tech: 'business',
-  fashion: 'fashion', lifestyle: 'health-wellness', travel: 'trips-adventures',
-  sightseeing: 'trips-adventures', discover: '',
-};
+// Categories where a live-music/concert crawl is genuinely on-topic — so a
+// concert is never mislabelled as e.g. "art".
+const MUSIC_LIKE = new Set(['music', 'events', 'discover']);
 
-function buildSourceUrls(city: string, country: string, category: string, page: number): string[] {
+function buildSourceUrls(city: string, country: string, category: string): string[] {
   const citySlug = slugify(city);
   if (!citySlug) return [];
   const urls: string[] = [];
 
-  // allevents.in — /<city>/<category>?page=N
-  const aeCat = ALLEVENTS_CAT[category];
-  if (aeCat !== undefined) {
-    const path = aeCat ? `${citySlug}/${aeCat}` : citySlug;
-    urls.push(`https://allevents.in/${path}${page > 0 ? `?page=${page + 1}` : ''}`);
-  }
-
-  // 10times.com — business/professional events by city (great for tech/community)
-  if (['tech', 'community', 'business', 'events', 'discover', 'art', 'food'].includes(category)) {
-    urls.push(`https://10times.com/${citySlug}${country ? `-${slugify(country)}` : ''}`);
+  // bandsintown — concerts & live music by city (real Event JSON-LD server-side)
+  if (MUSIC_LIKE.has(category)) {
+    const countrySlug = slugify(country);
+    urls.push(`https://www.bandsintown.com/c/${citySlug}${countrySlug ? `-${countrySlug}` : ''}`);
   }
 
   return urls;
@@ -300,8 +296,8 @@ export async function crawlCityEvents(opts: {
   city: string; country: string; lat: number; lng: number;
   category: string; count: number; page: number;
 }): Promise<ApiPost[]> {
-  const { city, country, lat, lng, category, count, page } = opts;
-  const urls = buildSourceUrls(city, country, category, page);
+  const { city, country, lat, lng, category, count } = opts;
+  const urls = buildSourceUrls(city, country, category);
   if (urls.length === 0) return [];
 
   const htmls = await Promise.all(urls.map(u => fetchHtml(u, 7000)));
