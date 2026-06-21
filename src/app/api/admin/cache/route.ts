@@ -15,10 +15,14 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 function authed(request: NextRequest): boolean {
-  const secret = process.env.ADMIN_SECRET || process.env.CRON_SECRET;
-  if (!secret) return false;
   const provided = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
-  return !!provided && safeEqual(provided, secret);
+  if (!provided) return false;
+  // Cache purge is a benign ops action (just forces a recompute), so accept
+  // EITHER the admin secret or the cron secret.
+  for (const secret of [process.env.ADMIN_SECRET, process.env.CRON_SECRET]) {
+    if (secret && safeEqual(provided, secret)) return true;
+  }
+  return false;
 }
 
 export async function POST(request: NextRequest) {
