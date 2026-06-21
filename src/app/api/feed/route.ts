@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ApiPost, dedupePosts, dropExpired, withDistance, todayStr } from '@/lib/sources/shared';
+import { ApiPost, dedupePosts, dropExpired, withDistance, todayStr, haversineKm } from '@/lib/sources/shared';
 import { resolveRequestGeo } from '@/lib/sources/geocode';
 import { fetchTicketmaster, tmEventToPost, TM_CATEGORY_MAP } from '@/lib/sources/ticketmaster';
 import { fetchEventbriteEvents } from '@/lib/sources/eventbrite';
@@ -213,7 +213,20 @@ export async function GET(request: NextRequest) {
             lat, lng, radiusKm: radius, category: cat,
             afterIso: new Date().toISOString(), limit: count, offset: page * count,
           });
-          if (dbPosts.length >= 4) {
+          // For PLACE categories (shops/venues/restaurants/hotels/rentals/food/
+          // sightseeing) the live OSM/Wikipedia sources are authoritative and
+          // strictly local. Only serve them from the DB when the DB actually has
+          // LOCAL coverage — otherwise a small town (Baden) would get a bigger
+          // neighbour's places (Wiener Neustadt) from the DB and never fall
+          // through to the live data that has its own. Events legitimately come
+          // from farther away, so they keep the simple count gate.
+          const isPlaceCat = OSM_CATEGORIES.has(cat) || cat === 'food' || cat === 'sightseeing';
+          const nearestKm = dbPosts.length
+            ? Math.min(...dbPosts.map(p => haversineKm(lat, lng, p.location?.lat ?? 0, p.location?.lng ?? 0)))
+            : Infinity;
+          const dbIsLocalEnough = !isPlaceCat || nearestKm <= 12;
+
+          if (dbPosts.length >= 4 && dbIsLocalEnough) {
             const payload = {
               posts: dbPosts,
               city: searchParams.get('city') || '',
