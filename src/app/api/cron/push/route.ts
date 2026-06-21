@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cacheEnabled, cacheScanKeys, cacheGet, cacheDelete } from '@/lib/serverCache';
 import { webPushEnabled, sendPush, PushSub } from '@/lib/webpush';
-import { dbReadEnabled, queryEventsNear } from '@/lib/eventsDb';
+import { dbReadEnabled, queryTopEventsNear } from '@/lib/eventsDb';
+import { buildDigest, buildGenericNudge } from '@/lib/pushContent';
 import type { ApiPost } from '@/lib/sources/shared';
 
 export const runtime = 'nodejs';
@@ -52,20 +53,17 @@ export async function GET(request: NextRequest) {
     if (!env?.subscription?.endpoint) continue;
     processed++;
 
-    // Personalise with the soonest upcoming event near the user's saved city.
-    let top: ApiPost | null = null;
+    // Pull a rich, multi-category set of nearby events, then craft the copy.
+    let nearby: ApiPost[] = [];
     if (dbReadEnabled && Number.isFinite(env.lat) && Number.isFinite(env.lng)) {
-      const near = await queryEventsNear({
-        lat: env.lat as number, lng: env.lng as number, radiusKm: 50,
-        category: 'events', afterIso: new Date().toISOString(), limit: 5, offset: 0,
+      nearby = await queryTopEventsNear({
+        lat: env.lat as number, lng: env.lng as number, radiusKm: 50, limit: 12,
       }).catch(() => [] as ApiPost[]);
-      top = near.find(p => p.isEvent) ?? near[0] ?? null;
     }
 
-    const cityLabel = env.city || 'your area';
-    const payload = top
-      ? { title: `What's on in ${cityLabel} 🎉`, body: top.caption.split('\n')[0].slice(0, 100), url: '/', tag: 'nova-digest' }
-      : { title: 'New events near you ✨', body: `Fresh events just landed in ${cityLabel}. Tap to explore.`, url: '/', tag: 'nova-digest' };
+    const msg = buildDigest({ city: env.city || 'your area', events: nearby })
+      ?? buildGenericNudge(env.city);
+    const payload = { ...msg, url: '/', tag: 'nova-digest' };
 
     const res = await sendPush(env.subscription, payload);
     if (res.ok) sent++;

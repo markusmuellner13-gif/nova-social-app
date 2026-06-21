@@ -108,6 +108,28 @@ export async function queryEventsNear(opts: {
   return ((data ?? []) as { raw: ApiPost }[]).map(r => r.raw).filter(Boolean);
 }
 
+// Top upcoming events near a point across the "going out" categories — powers
+// the push digest so it can pull from concerts, sports, art, community, etc.,
+// not just the generic events bucket.
+const DIGEST_CATEGORIES = ['events', 'music', 'sports', 'art', 'community', 'venues'];
+
+export async function queryTopEventsNear(opts: {
+  lat: number; lng: number; radiusKm: number; limit: number;
+}): Promise<ApiPost[]> {
+  if (!readClient) return [];
+  const { data, error } = await readClient.rpc('events_near', {
+    in_lat: opts.lat,
+    in_lng: opts.lng,
+    in_radius_km: opts.radiusKm,
+    in_categories: DIGEST_CATEGORIES,
+    in_after: new Date().toISOString(),
+    in_limit: opts.limit,
+    in_offset: 0,
+  });
+  if (error) { console.error('[eventsDb/topNear]', error.message); return []; }
+  return ((data ?? []) as { raw: ApiPost }[]).map(r => r.raw).filter(Boolean);
+}
+
 // Cold-start fallback: when nothing is happening within the user's radius (a tiny
 // village with no nearby data even after radius expansion), serve upcoming events
 // from anywhere in their country so the feed is never dead. Soonest first.
