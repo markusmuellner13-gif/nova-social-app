@@ -29,7 +29,7 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   fashion:     ['fashion', 'vintage', 'thrift', 'shopping', 'boutique', 'designer'],
   sightseeing: ['sightseeing', 'landmark', 'landmarks', 'tour', 'tours', 'sights', 'monument', 'historic', 'attraction', 'attractions'],
   hotels:      ['hotel', 'hotels', 'stay', 'accommodation', 'spa'],
-  events:      ['event', 'events', 'happening', 'things to do', 'whats on', "what's on", 'going on', 'tonight', 'weekend'],
+  events:      ['event', 'events', 'happening', 'things to do', 'whats on', "what's on", 'going on', 'anything to do'],
 };
 
 const APP_CATEGORIES = ['events', 'music', 'sports', 'art', 'food', 'restaurants', 'fitness', 'tech', 'community', 'fashion', 'sightseeing', 'hotels'];
