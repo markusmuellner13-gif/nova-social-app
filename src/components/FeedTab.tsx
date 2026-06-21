@@ -287,7 +287,10 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
     }
     prevScrollYRef.current = top;
 
-    const nearBottom = el.scrollHeight - top - el.clientHeight < 300;
+    // Trigger well before the actual bottom (≈4 screens of runway) so the next
+    // batch is already loading — combined with the hook's 2-page prefetch the
+    // user keeps a deep buffer and almost never waits on a spinner.
+    const nearBottom = el.scrollHeight - top - el.clientHeight < 2400;
     if (!nearBottom) return;
     if (activeMainTab === 'discover' && visibleCurated < curatedPool.length) {
       setVisibleCurated(c => c + PAGE_SIZE);

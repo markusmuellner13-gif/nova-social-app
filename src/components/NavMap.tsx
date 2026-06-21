@@ -128,8 +128,21 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     mapRef.current = map;
 
     map.on('load', () => {
-      // Event pins
-      for (const p of posts) {
+      // Event pins. Building a DOM marker per post is expensive, so when the set
+      // is large we only show the ones nearest the map centre (the user / the
+      // target) — that's all that's relevant for navigation anyway, and it keeps
+      // opening the map instant instead of stalling on hundreds of markers.
+      const anchor = userLocation ?? (initialTarget?.location ?? posts[0]?.location);
+      const nearbyPosts = (() => {
+        const valid = posts.filter(p => p.location && Number.isFinite(p.location.lat) && Number.isFinite(p.location.lng));
+        if (!anchor || valid.length <= 80) return valid;
+        return valid
+          .map(p => ({ p, d: metresBetween(anchor.lat, anchor.lng, p.location.lat, p.location.lng) }))
+          .sort((a, b) => a.d - b.d)
+          .slice(0, 80)
+          .map(x => x.p);
+      })();
+      for (const p of nearbyPosts) {
         if (!p.location || !Number.isFinite(p.location.lat) || !Number.isFinite(p.location.lng)) continue;
         const el = document.createElement('button');
         const color = CATEGORY_COLOR[p.category] ?? '#8b5cf6';
@@ -183,37 +196,23 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     if (userLocation) setUserMarker(userLocation.lat, userLocation.lng);
   }, [userLocation, setUserMarker]);
 
-  // ── Fetch a route (OSRM public API) ──────────────────────────────────────────
-  const buildRoute = useCallback(async (dest: Post) => {
+  // Draw a route from a known origin to the destination. Pure render — no GPS
+  // waiting — so it returns as fast as OSRM responds.
+  const drawRoute = useCallback(async (origin: { lat: number; lng: number }, dest: Post): Promise<boolean> => {
     const map = mapRef.current;
-    if (!map) return;
-    // Origin: a FRESH device GPS fix (most accurate for navigation), falling
-    // back to the passed-in location hint if permission is denied.
-    let origin: { lat: number; lng: number } | null = null;
-    if (navigator.geolocation) {
-      origin = await new Promise<{ lat: number; lng: number } | null>((res) => {
-        navigator.geolocation.getCurrentPosition(
-          p => res({ lat: p.coords.latitude, lng: p.coords.longitude }),
-          () => res(null), { enableHighAccuracy: true, timeout: 8000 },
-        );
-      });
-    }
-    if (!origin) origin = userLocation;
-    if (!origin) { setNextStep('Enable location to get directions.'); return; }
-    setUserMarker(origin.lat, origin.lng);
-
+    if (!map) return false;
     const url = `https://router.project-osrm.org/route/v1/${profile}/${origin.lng},${origin.lat};${dest.location.lng},${dest.location.lat}?overview=full&geometries=geojson&steps=true`;
     let data: {
       routes?: { distance: number; duration: number; geometry: GeoJSON.LineString;
         legs: { steps: { maneuver: { location: [number, number]; type: string; modifier?: string }; name?: string; distance: number }[] }[] }[];
     };
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
+      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
       data = await res.json();
-    } catch { setNextStep('Could not load directions. Try again.'); return; }
+    } catch { return false; }
 
     const route = data.routes?.[0];
-    if (!route) { setNextStep('No route found.'); return; }
+    if (!route) return false;
 
     // Draw the route line
     const geo: GeoJSON.Feature = { type: 'Feature', properties: {}, geometry: route.geometry };
@@ -247,7 +246,48 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     const coords = route.geometry.coordinates as [number, number][];
     const b = coords.reduce((bb, c) => bb.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
     map.fitBounds(b, { padding: 60, maxZoom: 15 });
-  }, [userLocation, profile, setUserMarker]);
+    return true;
+  }, [profile]);
+
+  // ── Fetch a route (OSRM public API) ──────────────────────────────────────────
+  // Speed is everything when you tap "Directions": we route IMMEDIATELY from the
+  // location we already know (the city/GPS hint passed in), then refine with a
+  // fresh device fix in the background and only re-route if it moved enough to
+  // matter. The old code blocked up to 8s on a high-accuracy GPS fix before even
+  // calling OSRM — that's the lag the user felt.
+  const buildRoute = useCallback(async (dest: Post) => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const hint = userLocation;
+    if (hint) {
+      setUserMarker(hint.lat, hint.lng);
+      setNextStep('');
+      void drawRoute(hint, dest);
+    } else {
+      setNextStep('Locating you…');
+    }
+
+    if (!navigator.geolocation) {
+      if (!hint) setNextStep('Enable location to get directions.');
+      return;
+    }
+
+    // Background refine: accept a slightly stale cached fix fast (maximumAge),
+    // short timeout so it never hangs.
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const fresh = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setUserMarker(fresh.lat, fresh.lng);
+        // Only re-route if we have no route yet, or the fresh fix is >150m from
+        // the hint we already routed from.
+        const moved = !hint || metresBetween(hint.lat, hint.lng, fresh.lat, fresh.lng) > 150;
+        if (moved) void drawRoute(fresh, dest);
+      },
+      () => { if (!hint) setNextStep('Enable location to get directions.'); },
+      { enableHighAccuracy: true, maximumAge: 30000, timeout: 6000 },
+    );
+  }, [userLocation, setUserMarker, drawRoute]);
 
   // Build a route whenever a target is chosen
   useEffect(() => {

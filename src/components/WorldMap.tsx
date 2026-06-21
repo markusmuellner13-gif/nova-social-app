@@ -72,6 +72,11 @@ const BASE_SCALE = 220;       // orthographic radius at zoom = 1
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
 const HEIGHT = 420;
+// Hard cap on how many pins are ever drawn at once. SVG markers with glow/pulse
+// are the single biggest cost on this globe — past ~120 the frame rate tanks and
+// zooming in "bugs out". We always keep the most relevant ones (closest to the
+// centre of the visible hemisphere, then most popular), so the cap is invisible.
+const MAX_PINS = 120;
 
 export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props) {
   const [selected, setSelected] = useState<Post | null>(null);
@@ -92,13 +97,17 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props
     if (focus) setRotation([-focus.lng, -focus.lat]);
   }, [focus?.lat, focus?.lng]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Gentle auto-rotation when the user isn't interacting and nothing is open
+  // Gentle auto-rotation when the user isn't interacting and nothing is open.
+  // Throttled to ~30fps: every rotation change reprojects the whole globe, so
+  // updating once per frame (60fps) doubles the work for no visible benefit.
   useEffect(() => {
     if (!autoRotate || selected) return;
     let raf = 0;
-    const tick = () => {
-      if (!draggingRef.current) {
-        setRotation(([lng, lat]) => [(lng - 0.12) % 360, lat]);
+    let last = 0;
+    const tick = (now: number) => {
+      if (!draggingRef.current && now - last > 33) {
+        last = now;
+        setRotation(([lng, lat]) => [(lng - 0.22) % 360, lat]);
       }
       raf = requestAnimationFrame(tick);
     };
@@ -154,24 +163,47 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props
   // Only render pins on the front of the globe (orthographic shows one
   // hemisphere) and DECLUTTER at low zoom: bucket nearby events onto a grid that
   // gets coarser the further out you are, keeping the most popular per bucket so
-  // the globe reads cleanly instead of as a blob of overlapping dots.
+  // the globe reads cleanly instead of as a blob of overlapping dots. Whatever
+  // the zoom, the result is hard-capped at MAX_PINS (closest-to-centre first,
+  // then most popular) so the SVG never gets heavy enough to stutter.
   const visiblePosts = useMemo(() => {
-    const front = posts.filter(p =>
-      p.location &&
-      Number.isFinite(p.location.lat) &&
-      Number.isFinite(p.location.lng) &&
-      angularDistance(centerLng, centerLat, p.location.lng, p.location.lat) < 89
-    );
-    if (zoom >= 3) return front; // zoomed in → show everything
-    const grid = zoom >= 2 ? 1.5 : zoom >= 1.4 ? 3 : 6; // degrees per bucket
-    const best = new Map<string, Post>();
-    for (const p of front) {
-      const key = `${Math.round(p.location.lat / grid)}:${Math.round(p.location.lng / grid)}`;
-      const cur = best.get(key);
-      if (!cur || (p.likes ?? 0) > (cur.likes ?? 0)) best.set(key, p);
+    const front: { p: Post; d: number }[] = [];
+    for (const p of posts) {
+      if (!p.location || !Number.isFinite(p.location.lat) || !Number.isFinite(p.location.lng)) continue;
+      const d = angularDistance(centerLng, centerLat, p.location.lng, p.location.lat);
+      if (d < 89) front.push({ p, d });
     }
-    return Array.from(best.values());
+
+    let pool: Post[];
+    if (zoom >= 3) {
+      pool = front.map(f => f.p); // zoomed in → no grid declutter
+    } else {
+      const grid = zoom >= 2 ? 1.5 : zoom >= 1.4 ? 3 : 6; // degrees per bucket
+      const best = new Map<string, Post>();
+      for (const { p } of front) {
+        const key = `${Math.round(p.location.lat / grid)}:${Math.round(p.location.lng / grid)}`;
+        const cur = best.get(key);
+        if (!cur || (p.likes ?? 0) > (cur.likes ?? 0)) best.set(key, p);
+      }
+      pool = Array.from(best.values());
+    }
+
+    if (pool.length <= MAX_PINS) return pool;
+    // Too many for one frame → keep the closest-to-centre, breaking ties by
+    // popularity, so the cap is never noticeable.
+    const dist = new Map(front.map(f => [f.p.id, f.d]));
+    return pool
+      .sort((a, b) => {
+        const da = dist.get(a.id) ?? 99, db = dist.get(b.id) ?? 99;
+        if (Math.abs(da - db) > 0.5) return da - db;
+        return (b.likes ?? 0) - (a.likes ?? 0);
+      })
+      .slice(0, MAX_PINS);
   }, [posts, centerLng, centerLat, zoom]);
+
+  // Emoji glyphs and animated pulse rings are expensive per-pin — only enable
+  // them when the pin count is low enough that they stay smooth.
+  const animatePins = visiblePosts.length <= 45;
 
   function openDirections(p: Post) {
     // Prefer the in-app map + turn-by-turn navigation when available; otherwise
@@ -247,10 +279,13 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props
                 }}
                 style={{ cursor: 'pointer' }}
               >
-                {/* pulse ring */}
-                <circle r={markerR * 2} fill={`${color}28`} className="pulse-dot" />
+                {/* Soft halo — a cheap static circle instead of an SVG
+                    drop-shadow filter (filters are per-pin GPU passes that
+                    stutter once there are dozens of pins). Animated pulse only
+                    runs when there are few pins on screen. */}
+                <circle r={markerR * 1.9} fill={`${color}22`} className={animatePins ? 'pulse-dot' : undefined} />
                 {isSelected && (
-                  <circle r={markerR * 2.6} fill="none" stroke={color} strokeWidth={2} opacity={0.9} />
+                  <circle r={markerR * 2.6} fill="none" stroke={color} strokeWidth={2} opacity={0.9} className="pulse-dot" />
                 )}
                 {/* main pin */}
                 <circle
@@ -258,9 +293,8 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props
                   fill={color}
                   stroke="white"
                   strokeWidth={2}
-                  style={{ filter: `drop-shadow(0 0 ${markerR}px ${color})` }}
                 />
-                {showEmoji && (
+                {showEmoji && animatePins && (
                   <text
                     y={markerR * 0.55}
                     textAnchor="middle"

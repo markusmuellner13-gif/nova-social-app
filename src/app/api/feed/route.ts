@@ -10,6 +10,7 @@ import {
   enrichEventDescriptions, enrichPlaceDescriptions, enrichSightseeingDescriptions,
   searchRealEventsWithClaude,
 } from '@/lib/sources/claudeAI';
+import { crawlCityEvents } from '@/lib/sources/webCrawler';
 import { eventsCacheKey, cacheTtl, cacheGet, cacheSet } from '@/lib/serverCache';
 import { dbReadEnabled, queryEventsNear, queryEventsByCountry } from '@/lib/eventsDb';
 import { aiBudgetExceeded, noteAiCall } from '@/lib/aiBudget';
@@ -345,11 +346,31 @@ async function computeFeed(request: NextRequest) {
   const sources = results.filter(r => r.posts.length > 0).map(r => r.source);
   let anyMore = results.some(r => r.hasMore);
 
+  const sparseThreshold = Math.max(3, Math.floor(count / 2));
+
+  // ── Nova AI crawler (FREE) — read real events off the web ourselves ───────
+  // Our OWN web-reading engine: it fetches public event pages and extracts real
+  // events from their schema.org JSON-LD. No key, no per-call credits. Runs
+  // first whenever the keyed sources are sparse, so most "empty" feeds get
+  // filled for free before we ever consider the paid LLM path below.
+  if (pool.length < sparseThreshold && category !== 'sightseeing') {
+    try {
+      const crawled = await crawlCityEvents({ city, country, lat, lng, category, count, page });
+      if (crawled.length > 0) {
+        pool = dropExpired(dedupePosts([...pool, ...crawled]));
+        sources.push('nova_ai');
+        anyMore = anyMore || page < 6;
+      }
+    } catch (err) {
+      console.error('[feed/novaAI]', err);
+    }
+  }
+
   // ── AI web search only when the free sources came up nearly empty ─────────
   // (saves credits AND latency — it's the slowest source by far). Also gated by
   // a soft daily spend cap (AI_DAILY_BUDGET) so a traffic spike or a big
   // ingestion sweep can't run up an unbounded Anthropic bill.
-  if (pool.length < Math.max(3, Math.floor(count / 2)) && claudeKey && !(await aiBudgetExceeded())) {
+  if (pool.length < sparseThreshold && claudeKey && !(await aiBudgetExceeded())) {
     try {
       await noteAiCall();
       const aiPosts = await searchRealEventsWithClaude(

@@ -108,6 +108,27 @@ export async function queryEventsNear(opts: {
   return ((data ?? []) as { raw: ApiPost }[]).map(r => r.raw).filter(Boolean);
 }
 
+// Read feed-ready posts near a location across SEVERAL categories at once
+// (soonest first). Powers the local chatbot brain, which matches a question to a
+// set of categories and answers from one geo query instead of many.
+export async function queryEventsNearAny(opts: {
+  lat: number; lng: number; radiusKm: number; categories: string[];
+  afterIso?: string | null; limit: number; offset: number;
+}): Promise<ApiPost[]> {
+  if (!readClient || opts.categories.length === 0) return [];
+  const { data, error } = await readClient.rpc('events_near', {
+    in_lat: opts.lat,
+    in_lng: opts.lng,
+    in_radius_km: opts.radiusKm,
+    in_categories: opts.categories,
+    in_after: opts.afterIso ?? null,
+    in_limit: opts.limit,
+    in_offset: opts.offset,
+  });
+  if (error) { console.error('[eventsDb/queryAny]', error.message); return []; }
+  return ((data ?? []) as { raw: ApiPost }[]).map(r => r.raw).filter(Boolean);
+}
+
 // Top upcoming events near a point across the "going out" categories — powers
 // the push digest so it can pull from concerts, sports, art, community, etc.,
 // not just the generic events bucket.
@@ -152,7 +173,7 @@ export async function queryEventsByCountry(opts: {
 // A worldwide spread of live events for the globe view. Pulls the most popular
 // upcoming events across every city/category we've ingested, so the World Map
 // is covered with real pins instead of demo data. Public anon read (RLS).
-export async function sampleEventsWorldwide(limit = 400): Promise<ApiPost[]> {
+export async function sampleEventsWorldwide(limit = 1500): Promise<ApiPost[]> {
   if (!readClient) return [];
   const { data, error } = await readClient
     .from('events')

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { answerLocally } from '@/lib/novaBrain';
+import { resolveRequestGeo } from '@/lib/sources/geocode';
 
 const SYSTEM_PROMPT = `You are Nova's AI assistant — a hyper-local event and activity discovery expert built into the Nova social discovery app.
 
@@ -31,7 +33,7 @@ const MAX_MESSAGE_LEN = 1000;
 const MAX_CITY_LEN    = 80;
 
 export async function POST(request: NextRequest) {
-  let body: { message?: string; city?: string; country?: string };
+  let body: { message?: string; city?: string; country?: string; lat?: number; lng?: number };
   try {
     body = await request.json();
   } catch {
@@ -52,12 +54,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ reply: 'What city or event are you curious about? 🌍' });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  const locationContext = city ? `The user is currently in ${city}, ${country || ''}.` : 'User location unknown.';
+  // ── Nova Brain (FREE) — answer from our own events DB first ───────────────
+  // Resolve coordinates (explicit → IP-geo → city) so the brain can run its geo
+  // query. This costs nothing and is usually all we need.
+  let lat = typeof body.lat === 'number' ? body.lat : NaN;
+  let lng = typeof body.lng === 'number' ? body.lng : NaN;
+  let resolvedCity = city;
+  try {
+    const geo = await resolveRequestGeo(
+      request.headers,
+      Number.isFinite(lat) ? String(lat) : null,
+      Number.isFinite(lng) ? String(lng) : null,
+      city ?? '', country ?? '',
+    );
+    lat = geo.lat; lng = geo.lng; resolvedCity = geo.city || city;
+  } catch { /* keep what we had */ }
 
+  try {
+    const local = await answerLocally({ message, city: resolvedCity, country, lat, lng });
+    if (local.used && local.reply) {
+      return NextResponse.json({ reply: local.reply, source: 'nova_brain' });
+    }
+  } catch (err) {
+    console.error('[chat/brain]', err);
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const locationContext = resolvedCity ? `The user is currently in ${resolvedCity}, ${country || ''}.` : 'User location unknown.';
+
+  // No DB match and no LLM key → still give a useful, honest answer for free.
   if (!apiKey) {
     return NextResponse.json({
-      reply: `Great question! ${city ? `In ${city}` : 'In most cities'}, you'll typically find amazing live music venues, weekend markets, gallery nights, and meetup events. Enable your Nova API key in settings for AI-powered real-time recommendations! 🎉`,
+      reply: `I couldn't find anything matching that ${resolvedCity ? `in ${resolvedCity}` : 'near you'} in our live listings just yet. Try a broader question like "what's on this weekend?" or "live music near me", or open the Events tab to browse everything happening locally! 🎉`,
+      source: 'nova_brain',
     });
   }
 

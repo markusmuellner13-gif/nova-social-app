@@ -60,6 +60,8 @@ export default function AIChatBar({ location }: Props) {
           message: msg,
           city: location?.city,
           country: location?.country,
+          lat: location?.lat,
+          lng: location?.lng,
         }),
       });
       const data = await res.json();

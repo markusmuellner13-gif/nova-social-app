@@ -22,7 +22,13 @@ const BLEND_CATEGORIES = [
   'shops', 'tech', 'fashion', 'travel', 'pets',
 ];
 // How many pages deep to go through every category before stopping (≈ endless).
-const BLEND_MAX_ROUNDS = 6;
+// 18 categories × 22 rounds × ~16 posts ≈ thousands of real posts before the
+// stream ever signals "the end".
+const BLEND_MAX_ROUNDS = 22;
+
+// Posts requested per page. The feed route caps at 20; 16 gives big batches so
+// the user scrolls a long way between network round-trips.
+const PAGE_COUNT = 16;
 
 interface CacheEntry { posts: Post[]; timestamp: number; page: number; radiusTier: number }
 
@@ -232,7 +238,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       page:     page.toString(),
       radius:   radius.toString(),
       days:     days.toString(),
-      count:    '8',
+      count:    String(PAGE_COUNT),
       category,
     });
     if (loc) {
@@ -260,7 +266,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
   function prefetchNextPage(loc: LocationState | null, category: string, page: number, radius: number, days: number) {
     const params = buildParams(loc, category, page, radius, days);
     if (prefetchRef.current.has(params)) return;
-    if (prefetchRef.current.size > 6) prefetchRef.current.clear();
+    if (prefetchRef.current.size > 16) prefetchRef.current.clear();
     prefetchRef.current.set(
       params,
       fetch(`/api/feed?${params}`)
@@ -305,10 +311,13 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
         }
         blendStepRef.current = step + 1;
         setHasMore(blendStepRef.current < BLEND_CATEGORIES.length * BLEND_MAX_ROUNDS);
-        // Warm the next category's page so scrolling never shows a spinner
-        const next = blendStepRef.current;
-        prefetchNextPage(location, BLEND_CATEGORIES[next % BLEND_CATEGORIES.length],
-          Math.floor(next / BLEND_CATEGORIES.length), RADIUS_TIERS[0], DAYS_TIERS[daysTierRef.current] ?? DAYS_TIERS[0]);
+        // Warm the next TWO category pages so scrolling never shows a spinner
+        const dTier = DAYS_TIERS[daysTierRef.current] ?? DAYS_TIERS[0];
+        for (const ahead of [1, 2]) {
+          const next = step + ahead;
+          prefetchNextPage(location, BLEND_CATEGORIES[next % BLEND_CATEGORIES.length],
+            Math.floor(next / BLEND_CATEGORIES.length), RADIUS_TIERS[0], dTier);
+        }
       } catch (err) {
         console.error('[useAIFeed/blend]', err);
       } finally {
@@ -346,8 +355,10 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
         merge(newPosts, pageRef.current + 1);
         pageRef.current += 1;
         setHasMore(true);
-        // Warm the next page so the user never sees a spinner
+        // Warm the next TWO pages so the user has a deep buffer and almost never
+        // sees a loading spinner while scrolling.
         prefetchNextPage(location, cat, pageRef.current, radius, days);
+        prefetchNextPage(location, cat, pageRef.current + 1, radius, days);
         if (!apiHasMore) {
           // This source chain is ending — line up the next expansion tier
           if (radiusTierRef.current < RADIUS_TIERS.length - 1) {
