@@ -146,7 +146,84 @@ function collect(value: unknown, out: CrawledEvent[], depth = 0): void {
   if (obj.events) collect(obj.events, out, depth + 1);
 }
 
+// ── Heuristic extraction for JS-rendered sites ────────────────────────────────
+// Modern event sites (Next.js, Nuxt, etc.) render in the browser but still ship
+// their data as JSON embedded in the served HTML — `<script id="__NEXT_DATA__">`,
+// `<script type="application/json">`, hydration state. We can read that JSON
+// without a browser. This walk looks for objects that *look like* an event (a
+// name/title + a real date + a venue or url) — conservative on purpose, and the
+// validator downstream drops anything that slips through.
+
+const DATE_KEYS = ['startDate', 'start_date', 'startsAt', 'startTime', 'start_time', 'start', 'date', 'datetime', 'beginAt'];
+const NAME_KEYS = ['name', 'title', 'eventName', 'headline'];
+const VENUE_KEYS = ['venue', 'venueName', 'place', 'placeName', 'locationName'];
+const URL_KEYS = ['url', 'link', 'permalink', 'href', 'eventUrl', 'ticketUrl'];
+
+function pick(o: Json, keys: string[]): string | undefined {
+  for (const k of keys) { const s = firstString(o[k]); if (s) return s; }
+  return undefined;
+}
+
+function looseEvent(o: Json): CrawledEvent | null {
+  const name = pick(o, NAME_KEYS);
+  const dateStr = pick(o, DATE_KEYS);
+  if (!name || name.length < 4 || !dateStr) return null;
+  if (!/\d{4}-\d{2}-\d{2}/.test(dateStr)) return null;
+  const loc = (o.location ?? o.venue) as Json | undefined;
+  const locObj = (Array.isArray(loc) ? loc[0] : loc) as Json | undefined;
+  const venue = pick(o, VENUE_KEYS) ?? firstString(locObj?.name);
+  const url = pick(o, URL_KEYS);
+  if (!venue && !url) return null; // too weak to trust
+  const addr = locObj?.address as Json | undefined;
+  const geo = (o.geo ?? locObj?.geo) as Json | undefined;
+  let image = pick(o, ['image', 'imageUrl', 'photo', 'thumbnail', 'cover']);
+  if (image && image.startsWith('//')) image = `https:${image}`;
+  return {
+    name: name.slice(0, 200),
+    description: (pick(o, ['description', 'summary', 'about']) ?? '').slice(0, 500),
+    startDate: dateStr,
+    url: url ?? '',
+    image,
+    venue: venue || undefined,
+    locality: pick(o, ['city', 'cityName']) ?? (typeof addr?.addressLocality === 'string' ? addr.addressLocality : undefined),
+    lat: num(o.latitude ?? o.lat ?? geo?.latitude),
+    lng: num(o.longitude ?? o.lng ?? o.lon ?? geo?.longitude),
+    price: pick(o, ['price', 'minPrice', 'priceFrom']),
+    organizer: pick(o, ['organizer', 'organiser', 'promoter', 'host']),
+  };
+}
+
+function walkLoose(value: unknown, out: CrawledEvent[], seen: Set<string>, depth = 0): void {
+  if (!value || depth > 8 || out.length > 200) return;
+  if (Array.isArray(value)) { for (const v of value) walkLoose(v, out, seen, depth + 1); return; }
+  if (typeof value !== 'object') return;
+  const obj = value as Json;
+  const ev = looseEvent(obj);
+  if (ev) {
+    const key = `${ev.name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40)}|${ev.startDate.slice(0, 10)}`;
+    if (!seen.has(key)) { seen.add(key); out.push(ev); }
+  }
+  for (const k in obj) walkLoose(obj[k], out, seen, depth + 1);
+}
+
+export function extractEmbeddedEvents(html: string): CrawledEvent[] {
+  const out: CrawledEvent[] = [];
+  const seen = new Set<string>();
+  // __NEXT_DATA__ and any application/json script blocks (skip ld+json — handled
+  // separately with the precise schema.org walk).
+  const blocks = html.match(/<script[^>]*\btype=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi) ?? [];
+  for (const block of blocks) {
+    if (/ld\+json/i.test(block)) continue;
+    const jsonText = block.replace(/^<script[^>]*>/i, '').replace(/<\/script>$/i, '').trim();
+    if (!jsonText || jsonText.length > 4_000_000) continue;
+    try { walkLoose(JSON.parse(jsonText), out, seen); } catch { /* not valid JSON — skip */ }
+  }
+  return out;
+}
+
 // Pull and parse every JSON-LD block in a page and return the events inside.
+// Falls back to embedded-JSON heuristics (JS-rendered sites) when the page has
+// no schema.org Event markup.
 export function extractEventsFromHtml(html: string): CrawledEvent[] {
   const out: CrawledEvent[] = [];
   const blocks = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) ?? [];
@@ -163,6 +240,8 @@ export function extractEventsFromHtml(html: string): CrawledEvent[] {
       }
     }
   }
+  // If the precise schema.org walk found nothing, try the JS-data heuristic.
+  if (out.length === 0) return extractEmbeddedEvents(html);
   return out;
 }
 

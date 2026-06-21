@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractEventsFromHtml } from './webCrawler';
+import { extractEventsFromHtml, extractEmbeddedEvents } from './webCrawler';
 
 describe('extractEventsFromHtml', () => {
   it('extracts a single schema.org Event', () => {
@@ -49,5 +49,27 @@ describe('extractEventsFromHtml', () => {
       <script type="application/ld+json">{"@type":"Event","name":"No Date"}</script>
       <script type="application/ld+json">{"@type":"Event","startDate":"2099-01-01"}</script>`;
     expect(extractEventsFromHtml(html)).toHaveLength(0);
+  });
+
+  it('falls back to embedded JSON (JS-rendered sites) when no ld+json', () => {
+    const html = `
+      <script id="__NEXT_DATA__" type="application/json">
+      {"props":{"pageProps":{"events":[
+        {"title":"Beach Party","startDate":"2099-07-15T18:00","venue":"Sunset Beach","url":"https://x.com/e/9","city":"Lagos"},
+        {"name":"Marathon 2099","start_date":"2099-09-01","place":"City Park","link":"https://x.com/m"}
+      ]}}}
+      </script>`;
+    const evs = extractEventsFromHtml(html);
+    const names = evs.map(e => e.name).sort();
+    expect(names).toEqual(['Beach Party', 'Marathon 2099']);
+    expect(evs.find(e => e.name === 'Beach Party')?.venue).toBe('Sunset Beach');
+  });
+
+  it('embedded extractor ignores objects that are not event-shaped', () => {
+    const html = `<script type="application/json">
+      {"user":{"name":"Bob","date_joined":"2020-01-01"},"config":{"title":"Settings"}}
+    </script>`;
+    // "Bob" has a name + date but no venue/url → not trusted; "Settings" has no date.
+    expect(extractEmbeddedEvents(html)).toHaveLength(0);
   });
 });

@@ -46,6 +46,9 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   themeColor: '#0a0a0f',
+  // Extend under the notch / home indicator so we can apply our own safe-area
+  // padding (env(safe-area-inset-*)) — without this those insets are always 0.
+  viewportFit: 'cover',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

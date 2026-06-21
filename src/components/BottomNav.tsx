@@ -51,7 +51,12 @@ export default function BottomNav({ active, onChange }: Props) {
 
   return (
     <nav className="glass-nav fixed bottom-0 left-0 right-0 z-40 flex items-stretch justify-around"
-      style={{ height: 82, paddingBottom: 'env(safe-area-inset-bottom, 4px)' }}>
+      style={{
+        // Lift the bar a few px off the bottom edge (above the home indicator)
+        // on top of the device's own safe-area inset.
+        height: 84,
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 10px)',
+      }}>
       {tabs.map(({ id, Icon, label, badge, center }) =>
         center ? (
           <button key={id} onClick={() => onChange(id)} className="flex flex-col items-center justify-center flex-1 h-full">

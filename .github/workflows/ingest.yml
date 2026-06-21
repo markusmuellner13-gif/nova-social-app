@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Autonomous event ingestion — runs in GitHub's cloud, every 30 minutes, with
+# NO laptop and NO Vercel Pro plan required.
+#
+# Why this exists: the Vercel Hobby plan only allows ONE cron run per day. To
+# keep the database genuinely fresh ("fetch every now and then"), this scheduled
+# GitHub Action pings the app's own ingestion endpoint on a 30-minute cadence and
+# chains several slices per run, so the whole 78-city × 18-category catalogue is
+# refreshed continuously — entirely for free (GitHub Actions minutes are free for
+# public repos).
+#
+# SETUP (one-time): in the GitHub repo → Settings → Secrets and variables →
+# Actions, add a repository secret named CRON_SECRET whose value matches the
+# CRON_SECRET env var set in Vercel. (Optional) add a variable NOVA_BASE_URL to
+# override the production URL below.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Ingest events (autonomous)
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # every 30 minutes
+  workflow_dispatch:          # ...and a manual "Run workflow" button
+
+# Never run two ingests at once.
+concurrency:
+  group: nova-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Drive ingestion across several catalogue slices
+        env:
+          BASE_URL: ${{ vars.NOVA_BASE_URL || 'https://nova-phi-liart.vercel.app' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET secret is not set — add it in repo Settings → Secrets → Actions."
+            exit 1
+          fi
+          auth="Authorization: Bearer $CRON_SECRET"
+          offset=""
+          total_ingested=0
+          total_rejected=0
+          # Each call processes a ~35s slice and returns nextOffset; chain up to
+          # 10 calls (~6-7 min) so a big chunk of the catalogue refreshes per run.
+          for i in $(seq 1 10); do
+            url="$BASE_URL/api/cron/ingest"
+            if [ -n "$offset" ]; then url="$url?offset=$offset"; fi
+            resp=$(curl -s -m 90 -H "$auth" "$url" || echo '{}')
+            ing=$(echo "$resp" | grep -oE '"ingested":[0-9]+' | grep -oE '[0-9]+' || echo 0)
+            rej=$(echo "$resp" | grep -oE '"rejected":[0-9]+' | grep -oE '[0-9]+' || echo 0)
+            nxt=$(echo "$resp" | grep -oE '"nextOffset":[0-9]+' | grep -oE '[0-9]+' || echo "")
+            total_ingested=$((total_ingested + ${ing:-0}))
+            total_rejected=$((total_rejected + ${rej:-0}))
+            echo "slice $i: ingested=${ing:-0} rejected=${rej:-0} nextOffset=${nxt:-done}"
+            if [ -z "$nxt" ]; then echo "catalogue fully swept — restarting next run"; break; fi
+            offset="$nxt"
+          done
+          echo "── total this run: ingested=$total_ingested rejected=$total_rejected ──"
+
+      - name: Refresh small-town events (best-effort, never fails the run)
+        env:
+          BASE_URL: ${{ vars.NOVA_BASE_URL || 'https://nova-phi-liart.vercel.app' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        continue-on-error: true
+        run: |
+          curl -s -m 90 -H "Authorization: Bearer $CRON_SECRET" \
+            "$BASE_URL/api/cron/ingest-towns?offset=0" | head -c 400 || true
