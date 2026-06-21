@@ -73,12 +73,17 @@ interface UseAIFeedReturn {
   hasMore: boolean;
   fetchMore: (category?: string) => Promise<void>;
   reset: () => void;
+  // Index into `posts` where results from BEYOND the user's city (expanded
+  // radius — nearby towns) begin. null while everything shown is still local.
+  nearbyStartIndex: number | null;
 }
 
 export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
   const [posts, setPosts]     = useState<Post[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [nearbyStartIndex, setNearbyStartIndex] = useState<number | null>(null);
+  const nearbyStartRef = useRef<number | null>(null);
 
   const pageRef       = useRef(0);
   const radiusTierRef = useRef(0);
@@ -126,6 +131,8 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       pageRef.current       = 0;
       radiusTierRef.current = 0;
       daysTierRef.current   = 0;
+      nearbyStartRef.current = null;
+      setNearbyStartIndex(null);
       setHasMore(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -318,6 +325,12 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       setPosts(prev => {
         const existingIds = new Set(prev.map(p => p.id));
         const fresh = newPosts.filter(p => !existingIds.has(p.id));
+        // First time we append results from an EXPANDED radius (beyond the
+        // city), remember where the "nearby towns" section begins.
+        if (radiusTierRef.current > 0 && nearbyStartRef.current === null && prev.length > 0 && fresh.length > 0) {
+          nearbyStartRef.current = prev.length;
+          setNearbyStartIndex(prev.length);
+        }
         const merged = [...prev, ...fresh];
         writeCache(city, cat, merged, nextPage, radiusTierRef.current);
         return merged;
@@ -390,10 +403,12 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     inFlightRef.current   = false;
     prevCityRef.current   = null;
     blendStepRef.current  = 0;
+    nearbyStartRef.current = null;
+    setNearbyStartIndex(null);
     prefetchRef.current.clear();
     tourismFetchedRef.current.clear();
     sponsoredFetchedRef.current.clear();
   }, []);
 
-  return { posts, loading, hasMore, fetchMore, reset };
+  return { posts, loading, hasMore, fetchMore, reset, nearbyStartIndex };
 }

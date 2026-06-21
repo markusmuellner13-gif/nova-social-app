@@ -64,6 +64,8 @@ interface Props {
   onPostOpen?: (post: Post) => void;
   /** Optional point to spin the globe to on mount (e.g. the user's city). */
   focus?: { lat: number; lng: number } | null;
+  /** When provided, the popup's Directions button opens the in-app map/nav. */
+  onNavigate?: (post: Post) => void;
 }
 
 const BASE_SCALE = 220;       // orthographic radius at zoom = 1
@@ -71,7 +73,7 @@ const MIN_ZOOM = 1;
 const MAX_ZOOM = 6;
 const HEIGHT = 420;
 
-export default function WorldMap({ posts, onPostOpen, focus }: Props) {
+export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props) {
   const [selected, setSelected] = useState<Post | null>(null);
   const [zoom, setZoom] = useState(1.15);
   // Rotation: the visible centre of the globe sits at lon=-rotate[0], lat=-rotate[1]
@@ -172,6 +174,9 @@ export default function WorldMap({ posts, onPostOpen, focus }: Props) {
   }, [posts, centerLng, centerLat, zoom]);
 
   function openDirections(p: Post) {
+    // Prefer the in-app map + turn-by-turn navigation when available; otherwise
+    // fall back to Google Maps directions.
+    if (onNavigate) { onNavigate(p); return; }
     const url = `https://www.google.com/maps/dir/?api=1&destination=${p.location.lat},${p.location.lng}`;
     if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer');
   }

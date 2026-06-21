@@ -15,6 +15,8 @@ const WorldMap = dynamic(() => import('./WorldMap'), {
   loading: () => <div className="w-full rounded-2xl shimmer" style={{ height: 340 }} />,
 });
 
+const NavMap = dynamic(() => import('./NavMap'), { ssr: false });
+
 const CATEGORY_EMOJIS: { id: Category; emoji: string }[] = [
   { id: 'travel',    emoji: '✈️' },
   { id: 'food',      emoji: '🍕' },
@@ -45,6 +47,8 @@ export default function SearchTab() {
   const [focused, setFocused] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [mapPosts, setMapPosts] = useState<Post[]>([]);
+  const [showNav, setShowNav] = useState(false);
+  const [navTarget, setNavTarget] = useState<Post | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Real, live events worldwide for the globe — fetched from our own events DB.
@@ -169,7 +173,20 @@ export default function SearchTab() {
                     </div>
                     <h3 className="text-sm font-semibold text-white">Live Events Around the World</h3>
                   </div>
-                  <WorldMap posts={globePosts} onPostOpen={setSelectedPost} focus={globeFocus} />
+                  <WorldMap
+                    posts={globePosts}
+                    onPostOpen={setSelectedPost}
+                    focus={globeFocus}
+                    onNavigate={(p) => { setNavTarget(p); setShowNav(true); }}
+                  />
+                  <motion.button
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => { setNavTarget(null); setShowNav(true); }}
+                    className="mt-3 w-full py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold text-white"
+                    style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', boxShadow: '0 4px 16px rgba(139,92,246,0.35)' }}
+                  >
+                    🧭 Open Map &amp; Navigate
+                  </motion.button>
                 </div>
 
                 {/* Trending */}
@@ -220,6 +237,16 @@ export default function SearchTab() {
           <div style={{ height: 80 }} />
         </div>
       </div>
+
+      {/* Full-screen map + in-app navigation */}
+      {showNav && (
+        <NavMap
+          posts={globePosts}
+          userLocation={globeFocus}
+          initialTarget={navTarget}
+          onClose={() => setShowNav(false)}
+        />
+      )}
 
       {/* Post detail sheet */}
       <AnimatePresence>

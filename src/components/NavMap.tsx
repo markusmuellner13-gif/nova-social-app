@@ -1,0 +1,410 @@
+'use client';
+
+import { useEffect, useRef, useState, useCallback } from 'react';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import { X, Layers, Navigation, Volume2, VolumeX, LocateFixed, Car, Footprints, Flag } from 'lucide-react';
+import { Post, Category } from '@/types';
+
+const CATEGORY_COLOR: Record<Category, string> = {
+  travel: '#3b82f6', food: '#f97316', fashion: '#ec4899', sports: '#22c55e', art: '#a855f7',
+  tech: '#06b6d4', fitness: '#ef4444', music: '#8b5cf6', pets: '#f59e0b', lifestyle: '#10b981',
+  events: '#f43f5e', sightseeing: '#14b8a6', shops: '#d946ef', venues: '#f43f5e',
+  community: '#14b8a6', restaurants: '#fb923c', hotels: '#60a5fa', rentals: '#34d399',
+};
+const CATEGORY_EMOJI: Record<Category, string> = {
+  travel: '✈️', food: '🍕', fashion: '👗', sports: '⚽', art: '🎨', tech: '💻', fitness: '💪',
+  music: '🎵', pets: '🐾', lifestyle: '🌟', events: '🎉', sightseeing: '🏛️', shops: '🛍️',
+  venues: '🎭', community: '🤝', restaurants: '🍽️', hotels: '🏨', rentals: '🚲',
+};
+
+// Free raster basemaps (no API key). CSP allows these hosts (see next.config).
+const STREET_TILES = [
+  'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+  'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+  'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
+];
+const SATELLITE_TILES = [
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+];
+
+function baseStyle(): maplibregl.StyleSpecification {
+  return {
+    version: 8,
+    sources: {
+      streets:   { type: 'raster', tiles: STREET_TILES,    tileSize: 256, attribution: '© OpenStreetMap, © CARTO' },
+      satellite: { type: 'raster', tiles: SATELLITE_TILES, tileSize: 256, attribution: '© Esri' },
+    },
+    layers: [
+      { id: 'streets',   type: 'raster', source: 'streets',   layout: { visibility: 'visible' } },
+      { id: 'satellite', type: 'raster', source: 'satellite', layout: { visibility: 'none' } },
+    ],
+  };
+}
+
+interface RouteStep {
+  instruction: string;
+  location: [number, number]; // lng, lat
+  distance: number;           // metres to this maneuver
+  announced?: boolean;
+}
+
+interface Props {
+  posts: Post[];
+  userLocation: { lat: number; lng: number } | null;
+  initialTarget?: Post | null;
+  onClose: () => void;
+}
+
+const toRad = (d: number) => (d * Math.PI) / 180;
+function metresBetween(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371000;
+  const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+function maneuverText(type: string, modifier: string, road: string): string {
+  const onto = road ? ` onto ${road}` : '';
+  switch (type) {
+    case 'depart':   return `Head out${road ? ` on ${road}` : ''}`;
+    case 'arrive':   return 'You have arrived at your destination';
+    case 'turn':     return `Turn ${modifier || 'ahead'}${onto}`;
+    case 'roundabout':
+    case 'rotary':   return `Take the roundabout${onto}`;
+    case 'merge':    return `Merge${onto}`;
+    case 'fork':     return `Keep ${modifier || 'ahead'}${onto}`;
+    case 'end of road': return `Turn ${modifier || 'ahead'}${onto}`;
+    case 'continue': return `Continue${road ? ` on ${road}` : ' straight'}`;
+    case 'new name': return `Continue${road ? ` on ${road}` : ''}`;
+    default:         return `${modifier ? `${modifier} ` : ''}${road ? `onto ${road}` : 'continue'}`.trim();
+  }
+}
+
+export default function NavMap({ posts, userLocation, initialTarget, onClose }: Props) {
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const markersRef = useRef<maplibregl.Marker[]>([]);
+  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+  const stepsRef = useRef<RouteStep[]>([]);
+  const lastSpokenRef = useRef<string>('');
+
+  const [satellite, setSatellite] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(true);
+  const [profile, setProfile] = useState<'driving' | 'foot'>('driving');
+  const [target, setTarget] = useState<Post | null>(initialTarget ?? null);
+  const [routeInfo, setRouteInfo] = useState<{ km: number; min: number } | null>(null);
+  const [steps, setSteps] = useState<RouteStep[]>([]);
+  const [navigating, setNavigating] = useState(false);
+  const [nextStep, setNextStep] = useState<string>('');
+
+  const speak = useCallback((text: string) => {
+    if (!voiceOn || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    if (text === lastSpokenRef.current) return;
+    lastSpokenRef.current = text;
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1; u.pitch = 1; u.lang = 'en-US';
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+    } catch { /* TTS unavailable */ }
+  }, [voiceOn]);
+
+  // ── Init map once ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current) return;
+    const center: [number, number] = userLocation
+      ? [userLocation.lng, userLocation.lat]
+      : (posts[0]?.location ? [posts[0].location.lng, posts[0].location.lat] : [16.37, 48.21]);
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: baseStyle(),
+      center,
+      zoom: 12,
+      attributionControl: { compact: true },
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
+    mapRef.current = map;
+
+    map.on('load', () => {
+      // Event pins
+      for (const p of posts) {
+        if (!p.location || !Number.isFinite(p.location.lat) || !Number.isFinite(p.location.lng)) continue;
+        const el = document.createElement('button');
+        const color = CATEGORY_COLOR[p.category] ?? '#8b5cf6';
+        el.style.cssText = `width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:${color};border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.5);cursor:pointer;display:flex;align-items:center;justify-content:center;`;
+        const inner = document.createElement('span');
+        inner.textContent = CATEGORY_EMOJI[p.category] ?? '📍';
+        inner.style.cssText = 'transform:rotate(45deg);font-size:13px;line-height:1;';
+        el.appendChild(inner);
+        el.onclick = (e) => { e.stopPropagation(); setTarget(p); };
+        const m = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+          .setLngLat([p.location.lng, p.location.lat])
+          .addTo(map);
+        markersRef.current.push(m);
+      }
+      if (initialTarget) setTarget(initialTarget);
+    });
+
+    return () => {
+      if (watchIdRef.current !== null) navigator.geolocation?.clearWatch(watchIdRef.current);
+      markersRef.current.forEach(m => m.remove());
+      markersRef.current = [];
+      map.remove();
+      mapRef.current = null;
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Satellite/street toggle ──────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    map.setLayoutProperty('satellite', 'visibility', satellite ? 'visible' : 'none');
+    map.setLayoutProperty('streets',   'visibility', satellite ? 'none' : 'visible');
+  }, [satellite]);
+
+  // Place / update the user marker
+  const setUserMarker = useCallback((lat: number, lng: number) => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!userMarkerRef.current) {
+      const el = document.createElement('div');
+      el.style.cssText = 'width:18px;height:18px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,.25);';
+      userMarkerRef.current = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
+    } else {
+      userMarkerRef.current.setLngLat([lng, lat]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (userLocation) setUserMarker(userLocation.lat, userLocation.lng);
+  }, [userLocation, setUserMarker]);
+
+  // ── Fetch a route (OSRM public API) ──────────────────────────────────────────
+  const buildRoute = useCallback(async (dest: Post) => {
+    const map = mapRef.current;
+    if (!map) return;
+    // Origin: a FRESH device GPS fix (most accurate for navigation), falling
+    // back to the passed-in location hint if permission is denied.
+    let origin: { lat: number; lng: number } | null = null;
+    if (navigator.geolocation) {
+      origin = await new Promise<{ lat: number; lng: number } | null>((res) => {
+        navigator.geolocation.getCurrentPosition(
+          p => res({ lat: p.coords.latitude, lng: p.coords.longitude }),
+          () => res(null), { enableHighAccuracy: true, timeout: 8000 },
+        );
+      });
+    }
+    if (!origin) origin = userLocation;
+    if (!origin) { setNextStep('Enable location to get directions.'); return; }
+    setUserMarker(origin.lat, origin.lng);
+
+    const url = `https://router.project-osrm.org/route/v1/${profile}/${origin.lng},${origin.lat};${dest.location.lng},${dest.location.lat}?overview=full&geometries=geojson&steps=true`;
+    let data: {
+      routes?: { distance: number; duration: number; geometry: GeoJSON.LineString;
+        legs: { steps: { maneuver: { location: [number, number]; type: string; modifier?: string }; name?: string; distance: number }[] }[] }[];
+    };
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
+      data = await res.json();
+    } catch { setNextStep('Could not load directions. Try again.'); return; }
+
+    const route = data.routes?.[0];
+    if (!route) { setNextStep('No route found.'); return; }
+
+    // Draw the route line
+    const geo: GeoJSON.Feature = { type: 'Feature', properties: {}, geometry: route.geometry };
+    const src = map.getSource('route') as maplibregl.GeoJSONSource | undefined;
+    if (src) src.setData(geo);
+    else {
+      map.addSource('route', { type: 'geojson', data: geo });
+      map.addLayer({ id: 'route-line', type: 'line', source: 'route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#8b5cf6', 'line-width': 6, 'line-opacity': 0.9 } });
+      map.addLayer({ id: 'route-glow', type: 'line', source: 'route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#c4b5fd', 'line-width': 12, 'line-opacity': 0.25 } }, 'route-line');
+    }
+
+    const allSteps: RouteStep[] = [];
+    for (const leg of route.legs) {
+      for (const s of leg.steps) {
+        allSteps.push({
+          instruction: maneuverText(s.maneuver.type, s.maneuver.modifier ?? '', s.name ?? ''),
+          location: s.maneuver.location,
+          distance: s.distance,
+        });
+      }
+    }
+    stepsRef.current = allSteps;
+    setSteps(allSteps);
+    setRouteInfo({ km: Math.round(route.distance / 100) / 10, min: Math.round(route.duration / 60) });
+
+    // Fit the route in view
+    const coords = route.geometry.coordinates as [number, number][];
+    const b = coords.reduce((bb, c) => bb.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
+    map.fitBounds(b, { padding: 60, maxZoom: 15 });
+  }, [userLocation, profile, setUserMarker]);
+
+  // Build a route whenever a target is chosen
+  useEffect(() => {
+    if (target) void buildRoute(target);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, profile]);
+
+  // ── Live turn-by-turn guidance ───────────────────────────────────────────────
+  const startGuidance = useCallback(() => {
+    if (!navigator.geolocation || !target) return;
+    setNavigating(true);
+    speak(`Starting navigation to ${target.caption.split('\n')[0].slice(0, 40)}. ${stepsRef.current[0]?.instruction ?? ''}`);
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        setUserMarker(lat, lng);
+        const map = mapRef.current;
+        if (map) map.easeTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 16), duration: 800 });
+
+        // Find the next not-yet-announced step and react to proximity
+        const list = stepsRef.current;
+        for (let i = 0; i < list.length; i++) {
+          const st = list[i];
+          if (st.announced) continue;
+          const d = metresBetween(lat, lng, st.location[1], st.location[0]);
+          setNextStep(`${st.instruction} · ${Math.round(d)} m`);
+          if (d < 70) {
+            speak(d < 25 ? st.instruction : `In ${Math.round(d / 10) * 10} meters, ${st.instruction.charAt(0).toLowerCase()}${st.instruction.slice(1)}`);
+            st.announced = true;
+          }
+          break;
+        }
+        // Arrived?
+        const dest = target.location;
+        if (metresBetween(lat, lng, dest.lat, dest.lng) < 30) {
+          speak('You have arrived at your destination.');
+          stopGuidance();
+        }
+      },
+      () => { setNextStep('Location unavailable.'); },
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 12000 },
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, speak, setUserMarker]);
+
+  const stopGuidance = useCallback(() => {
+    setNavigating(false);
+    if (watchIdRef.current !== null) { navigator.geolocation?.clearWatch(watchIdRef.current); watchIdRef.current = null; }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+  }, []);
+
+  const recenter = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((p) => {
+        setUserMarker(p.coords.latitude, p.coords.longitude);
+        map.easeTo({ center: [p.coords.longitude, p.coords.latitude], zoom: 15 });
+      });
+    }
+  }, [setUserMarker]);
+
+  return (
+    <div className="fixed inset-0 z-50" style={{ background: '#0a0a0f' }}>
+      <div ref={containerRef} className="absolute inset-0" />
+
+      {/* Top bar */}
+      <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-12 pb-3 pointer-events-none">
+        <button onClick={onClose} className="pointer-events-auto w-10 h-10 rounded-full flex items-center justify-center"
+          style={{ background: 'rgba(13,18,28,0.92)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' }}>
+          <X size={18} />
+        </button>
+        <div className="flex gap-2 pointer-events-auto">
+          <button onClick={() => setSatellite(s => !s)} className="px-3 h-10 rounded-full flex items-center gap-1.5 text-xs font-bold"
+            style={{ background: satellite ? 'linear-gradient(135deg,#8b5cf6,#ec4899)' : 'rgba(13,18,28,0.92)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)' }}>
+            <Layers size={14} /> {satellite ? 'Satellite' : 'Map'}
+          </button>
+          <button onClick={recenter} className="w-10 h-10 rounded-full flex items-center justify-center"
+            style={{ background: 'rgba(13,18,28,0.92)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' }}>
+            <LocateFixed size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* Live guidance banner */}
+      {navigating && nextStep && (
+        <div className="absolute left-3 right-3 rounded-2xl px-4 py-3 flex items-center gap-3" style={{ top: 70, background: 'linear-gradient(135deg,#8b5cf6,#6d28d9)', boxShadow: '0 8px 24px rgba(139,92,246,0.4)' }}>
+          <Navigation size={20} color="#fff" />
+          <span className="text-sm font-bold text-white flex-1">{nextStep}</span>
+        </div>
+      )}
+
+      {/* Bottom route card */}
+      {target && (
+        <div className="absolute bottom-0 left-0 right-0 p-3">
+          <div className="rounded-2xl p-4" style={{ background: 'rgba(13,18,28,0.97)', border: '1px solid #2a2a38', backdropFilter: 'blur(20px)' }}>
+            <div className="flex items-start gap-3 mb-3">
+              <img src={target.image} alt="" className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-white truncate">{target.caption.split('\n')[0]}</p>
+                <p className="text-xs truncate" style={{ color: '#9aa0b5' }}>📍 {target.location.name}</p>
+                {routeInfo && (
+                  <p className="text-xs font-semibold mt-0.5" style={{ color: '#a78bfa' }}>
+                    {routeInfo.km} km · ~{routeInfo.min} min {profile === 'driving' ? '🚗' : '🚶'}
+                  </p>
+                )}
+              </div>
+              <button onClick={() => { stopGuidance(); setTarget(null); setRouteInfo(null); setSteps([]); }} style={{ color: '#555566' }}><X size={18} /></button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* profile */}
+              <button onClick={() => setProfile('driving')} className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{ background: profile === 'driving' ? '#8b5cf6' : '#1a1a24', color: '#fff', border: '1px solid #2a2a38' }}><Car size={16} /></button>
+              <button onClick={() => setProfile('foot')} className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{ background: profile === 'foot' ? '#8b5cf6' : '#1a1a24', color: '#fff', border: '1px solid #2a2a38' }}><Footprints size={16} /></button>
+              {/* voice */}
+              <button onClick={() => setVoiceOn(v => !v)} className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{ background: voiceOn ? '#8b5cf6' : '#1a1a24', color: '#fff', border: '1px solid #2a2a38' }}>
+                {voiceOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
+              </button>
+              {/* start/stop */}
+              {!navigating ? (
+                <button onClick={startGuidance} disabled={!routeInfo}
+                  className="flex-1 h-10 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-white"
+                  style={{ background: routeInfo ? 'linear-gradient(135deg,#8b5cf6,#ec4899)' : '#2a2a38', opacity: routeInfo ? 1 : 0.6 }}>
+                  <Navigation size={16} /> Start
+                </button>
+              ) : (
+                <button onClick={stopGuidance} className="flex-1 h-10 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-white" style={{ background: '#ef4444' }}>
+                  <Flag size={16} /> End
+                </button>
+              )}
+            </div>
+
+            {/* first few steps */}
+            {steps.length > 0 && !navigating && (
+              <div className="mt-3 max-h-28 overflow-y-auto flex flex-col gap-1.5">
+                {steps.slice(0, 6).map((s, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs" style={{ color: '#aab' }}>
+                    <span className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: '#1a1a24', color: '#a78bfa', fontSize: 10 }}>{i + 1}</span>
+                    {s.instruction}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Empty hint when nothing selected */}
+      {!target && (
+        <div className="absolute left-3 right-3 bottom-6 rounded-2xl px-4 py-3 text-center" style={{ background: 'rgba(13,18,28,0.92)', border: '1px solid #2a2a38' }}>
+          <p className="text-sm font-semibold text-white">Tap any pin to get directions 🧭</p>
+          <p className="text-xs mt-0.5" style={{ color: '#888899' }}>Turn-by-turn with voice · satellite view available</p>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -26,8 +26,13 @@ const securityHeaders = [
       // og:image, Google Places photos on *.googleusercontent.com, etc.), so we
       // allow any https image source. Scripts/styles/connect stay locked down.
       "img-src 'self' data: blob: https:",
-      // Connections: Supabase (REST + realtime), Vercel Analytics
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com https://*.sentry.io https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://challenges.cloudflare.com",
+      // Connections: Supabase (REST + realtime), Vercel Analytics, Sentry,
+      // Turnstile, the world-map country data (jsdelivr), map tiles
+      // (OSM streets + Esri satellite) and the OSRM routing API for in-app
+      // navigation.
+      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com https://*.sentry.io https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://challenges.cloudflare.com https://cdn.jsdelivr.net https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://router.project-osrm.org",
+      // MapLibre GL runs its tile workers from a blob: URL.
+      "worker-src 'self' blob:",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

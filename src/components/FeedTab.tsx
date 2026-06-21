@@ -102,7 +102,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
   const { preferences, aiProfile } = state;
   const location = state.location;
 
-  const { posts: aiPosts, loading: aiLoading, hasMore: aiHasMore, fetchMore, reset: resetAI } = useAIFeed(location);
+  const { posts: aiPosts, loading: aiLoading, hasMore: aiHasMore, fetchMore, reset: resetAI, nearbyStartIndex } = useAIFeed(location);
 
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('discover');
   const [activeChipCategory, setActiveChipCategory] = useState<Category | null>(null);
@@ -201,7 +201,10 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
 
   // Build merged feed depending on active tab
   const mergedFeed = useMemo(() => {
-    type FeedItem = { type: 'post'; post: Post } | { type: 'ad'; index: number };
+    type FeedItem =
+      | { type: 'post'; post: Post }
+      | { type: 'ad'; index: number }
+      | { type: 'divider'; city: string };
     const items: FeedItem[] = [];
     let adIdx = 0;
 
@@ -238,23 +241,35 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
       return items;
     }
 
-    // Events / Sightseeing / Sport: real location-based posts only
-    const aiSorted = activeMainTab === 'sightseeing'
-      ? [...aiPosts].sort((a, b) => b.timestamp - a.timestamp)
-      : sortByEventDate(aiPosts);
+    // Events / Sightseeing / Sport: real location-based posts only.
+    // Split into the user's OWN city vs. nearby towns (expanded radius) so we can
+    // show an "end of <city>" divider between them.
+    const sortOne = (arr: Post[]) => activeMainTab === 'sightseeing'
+      ? [...arr].sort((a, b) => b.timestamp - a.timestamp)
+      : sortByEventDate(arr);
+    const filterOne = (arr: Post[]) => (activeMainTab === 'events' || activeMainTab === 'sport')
+      ? applyEventFilters(arr, dateFilter, priceFilter)
+      : arr;
 
-    // Feature 3 — apply date+price filters on event tabs
-    const combined = (activeMainTab === 'events' || activeMainTab === 'sport')
-      ? applyEventFilters(aiSorted, dateFilter, priceFilter)
-      : aiSorted;
+    const hasSplit = hasCity && nearbyStartIndex != null && nearbyStartIndex > 0 && nearbyStartIndex < aiPosts.length;
+    const localSorted  = filterOne(sortOne(hasSplit ? aiPosts.slice(0, nearbyStartIndex!) : aiPosts));
+    const nearbySorted = filterOne(sortOne(hasSplit ? aiPosts.slice(nearbyStartIndex!)   : []));
 
-    combined.forEach((post, i) => {
-      if (adIndex(i)) items.push({ type: 'ad', index: adIdx++ });
+    let slot = 0;
+    const pushPosts = (arr: Post[]) => arr.forEach(post => {
+      if (adIndex(slot)) items.push({ type: 'ad', index: adIdx++ });
       items.push({ type: 'post', post });
+      slot++;
     });
 
+    pushPosts(localSorted);
+    if (hasSplit && nearbySorted.length > 0) {
+      items.push({ type: 'divider', city: location?.city ?? '' });
+    }
+    pushPosts(nearbySorted);
+
     return items;
-  }, [activeMainTab, aiPosts, injectedPosts, curatedPool, visibleCurated, dateFilter, priceFilter, partnerCatFilter]);
+  }, [activeMainTab, aiPosts, injectedPosts, curatedPool, visibleCurated, dateFilter, priceFilter, partnerCatFilter, nearbyStartIndex, hasCity, location?.city]);
 
   // Infinite scroll + scroll-position tracking
   const handleScroll = useCallback(() => {
@@ -699,6 +714,20 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer }: Pr
               {mergedFeed.map((item, i) => {
                 if (item.type === 'ad') {
                   return <AdSlot key={`ad_${item.index}`} index={item.index} />;
+                }
+                if (item.type === 'divider') {
+                  return (
+                    <div key={`divider_${i}`} className="px-4 py-6 flex flex-col items-center text-center gap-1.5"
+                      style={{ background: 'linear-gradient(180deg, rgba(139,92,246,0.10), transparent)', borderTop: '1px solid #1e1e2a', borderBottom: '1px solid #1e1e2a' }}>
+                      <div className="w-9 h-9 rounded-full flex items-center justify-center mb-0.5" style={{ background: 'rgba(139,92,246,0.15)' }}>
+                        <span style={{ fontSize: 18 }}>🎉</span>
+                      </div>
+                      <p className="text-sm font-bold text-white">That&apos;s everything on in {item.city}!</p>
+                      <p className="text-xs max-w-[260px]" style={{ color: '#888899' }}>
+                        You&apos;ve reached the end for {item.city}. Keep scrolling for events in nearby towns 👇
+                      </p>
+                    </div>
+                  );
                 }
                 const post = item.post;
                 return (
