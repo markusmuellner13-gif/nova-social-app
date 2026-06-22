@@ -229,7 +229,10 @@ export async function GET(request: NextRequest) {
 
           if (dbPosts.length >= 4 && dbIsLocalEnough) {
             const payload = {
-              posts: dbPosts,
+              // Stamp the user-relative distance so the client can split a small
+              // town's own events from a bigger neighbour's (stored distanceKm is
+              // relative to the ingest centroid, not this user).
+              posts: withDistance(dbPosts, lat, lng),
               city: searchParams.get('city') || '',
               country: searchParams.get('country') || '',
               sources: ['db'], hasMore: dbPosts.length >= count,

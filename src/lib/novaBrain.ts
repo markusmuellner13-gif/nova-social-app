@@ -12,7 +12,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { ApiPost } from '@/lib/sources/shared';
+import { haversineKm } from '@/lib/sources/shared';
 import { queryEventsNearAny } from '@/lib/eventsDb';
+
+// A result farther than this from the user is a "nearby town", not the user's
+// own city. Keeps a Baden query from being answered with Vienna events as if
+// they were local — and stops two neighbouring cities returning the same list.
+const LOCAL_RADIUS_KM = 20;
 
 // ── Intent parsing ────────────────────────────────────────────────────────────
 
@@ -116,11 +122,14 @@ function titleOf(p: ApiPost): string {
   return p.organizer || p.eventVenue || 'Event';
 }
 
-function lineFor(p: ApiPost): string {
+function lineFor(p: ApiPost, showDistance = false): string {
   const bits = [`• *${titleOf(p)}*`];
   if (p.eventDate) bits.push(`📅 ${p.eventDate.replace(/ · /, ' · ')}`);
   const venue = p.eventVenue || p.location?.name;
-  if (venue) bits.push(`📍 ${venue}`);
+  if (venue) {
+    const dist = showDistance && typeof p.distanceKm === 'number' ? ` (~${Math.round(p.distanceKm)} km)` : '';
+    bits.push(`📍 ${venue}${dist}`);
+  }
   if (p.price && p.price !== 'See website') bits.push(`🎟️ ${p.price}`);
   if (p.eventUrl && p.eventUrl !== '#') bits.push(`🔗 ${p.eventUrl}`);
   return bits.join('\n   ');
@@ -160,36 +169,59 @@ export async function answerLocally(opts: {
       lat: opts.lat, lng: opts.lng, radiusKm: 60,
       categories: intent.categories,
       afterIso: new Date(`${range.from}T00:00:00Z`).toISOString(),
-      limit: 60, offset: 0,
+      limit: 80, offset: 0,
     });
   } catch {
     return { used: false, count: 0, reply: '' };
   }
 
+  // Stamp the true distance from THIS user (the stored distanceKm is relative to
+  // the ingest centroid, so it can't be trusted for a different query point).
+  const withDist = pool.map(p => {
+    const lat = p.location?.lat, lng = p.location?.lng;
+    const d = typeof lat === 'number' && typeof lng === 'number'
+      ? haversineKm(opts.lat!, opts.lng!, lat, lng) : undefined;
+    return { ...p, distanceKm: d };
+  });
+
   // Filter to the requested window + price, dedupe by title, soonest first.
   const seen = new Set<string>();
-  const matches = pool
+  const matches = withDist
     .filter(p => inWindow(p, range))
     .filter(p => !intent.freeOnly || isFree(p))
     .filter(p => {
       const k = titleOf(p).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 30);
       if (seen.has(k)) return false; seen.add(k); return true;
     })
-    .sort((a, b) => (a.eventDateRaw ?? '9999') < (b.eventDateRaw ?? '9999') ? -1 : 1)
-    .slice(0, 6);
+    .sort((a, b) => (a.eventDateRaw ?? '9999') < (b.eventDateRaw ?? '9999') ? -1 : 1);
 
-  if (matches.length === 0) {
-    // Nothing in our DB for this slice — let the caller decide on a fallback.
-    return { used: false, count: 0, reply: '' };
-  }
+  // Split the user's OWN city from nearby towns by real distance, so two
+  // neighbouring cities never return the same answer and Vienna events are never
+  // passed off as Baden's.
+  const local  = matches.filter(p => typeof p.distanceKm !== 'number' || p.distanceKm <= LOCAL_RADIUS_KM).slice(0, 6);
+  const nearby = matches.filter(p => typeof p.distanceKm === 'number' && p.distanceKm > LOCAL_RADIUS_KM).slice(0, 6);
 
   const catLabel = intent.categories.length === 1 && intent.categories[0] !== 'events'
     ? intent.categories[0] : '';
-  const header = `Here's what's ${WINDOW_LABEL[intent.window]} ${where}${catLabel ? ` for ${catLabel}` : ''}: ✨`;
-  const body = matches.map(lineFor).join('\n\n');
-  const footer = intent.freeOnly
-    ? '\n\nAll free entry 🎉 Open the feed for even more.'
-    : '\n\nOpen the Events tab for the full list and directions! 🧭';
 
-  return { used: true, count: matches.length, reply: `${header}\n\n${body}${footer}` };
+  if (local.length > 0) {
+    const header = `Here's what's ${WINDOW_LABEL[intent.window]} ${where}${catLabel ? ` for ${catLabel}` : ''}: ✨`;
+    const body = local.map(p => lineFor(p)).join('\n\n');
+    const footer = intent.freeOnly
+      ? '\n\nAll free entry 🎉 Open the feed for even more.'
+      : '\n\nOpen the Events tab for the full list and directions! 🧭';
+    return { used: true, count: local.length, reply: `${header}\n\n${body}${footer}` };
+  }
+
+  if (nearby.length > 0) {
+    // Honest: the user's own town is quiet, so we clearly say so and label the
+    // nearby suggestions with their distance instead of pretending they're local.
+    const cityName = opts.city ? opts.city : 'your area';
+    const header = `${cityName} looks quiet ${WINDOW_LABEL[intent.window]}${catLabel ? ` for ${catLabel}` : ''} — here's what's on in nearby towns: 📍`;
+    const body = nearby.map(p => lineFor(p, /* showDistance */ true)).join('\n\n');
+    return { used: true, count: nearby.length, reply: `${header}\n\n${body}\n\nOpen the Events tab to explore more around you! 🧭` };
+  }
+
+  // Nothing in our DB for this slice — let the caller decide on a fallback.
+  return { used: false, count: 0, reply: '' };
 }

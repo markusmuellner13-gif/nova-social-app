@@ -109,10 +109,10 @@ function AppShell() {
     <div style={{
       position: 'fixed', inset: 0, background: '#0a0a0f',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      // Drop the whole app below the status bar / notch so the top bar isn't
-      // jammed against the edge on phones (a few px of breathing room + the
-      // device's own safe-area inset). The bottom nav handles its own inset.
-      paddingTop: 'calc(env(safe-area-inset-top, 0px) + 4px)',
+      // Sit the app just below the status bar / notch using only the device's
+      // own safe-area inset, so the top bar rides high without being jammed
+      // against the edge. The bottom nav handles its own inset.
+      paddingTop: 'env(safe-area-inset-top, 0px)',
     }}>
       {/* Tab content */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>

@@ -147,7 +147,7 @@ export default function ChatTab({ location }: Props) {
       )}
 
       {/* Input */}
-      <div className="flex items-center gap-3 px-4 py-3 flex-shrink-0" style={{ borderTop: '1px solid #1e1e2a', background: '#0d0d16', marginBottom: 82 }}>
+      <div className="flex items-center gap-3 px-4 py-3 flex-shrink-0" style={{ borderTop: '1px solid #1e1e2a', background: '#0d0d16', marginBottom: 'calc(env(safe-area-inset-bottom, 0px) + 60px)' }}>
         <div className="flex-1 flex items-center gap-2 rounded-2xl px-3 py-2.5" style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}>
           <input
             ref={inputRef}

@@ -52,6 +52,11 @@ const PARTNER_CHIP_CATS: { emoji: string; label: string; cat: Category | null }[
 
 const PAGE_SIZE = 10;
 
+// A post farther than this from the user is treated as a "nearby town", not part
+// of the user's own city — keeps a small town's feed from being flooded by a
+// bigger neighbour while still showing it (clearly labelled) below a divider.
+const LOCAL_RADIUS_KM = 20;
+
 type DateFilter  = 'all' | 'today' | 'weekend' | 'week' | 'month';
 type PriceFilter = 'all' | 'free' | 'u20' | 'u50';
 
@@ -103,7 +108,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   const { preferences, aiProfile } = state;
   const location = state.location;
 
-  const { posts: aiPosts, loading: aiLoading, hasMore: aiHasMore, fetchMore, reset: resetAI, nearbyStartIndex } = useAIFeed(location);
+  const { posts: aiPosts, loading: aiLoading, hasMore: aiHasMore, fetchMore, reset: resetAI } = useAIFeed(location);
 
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('discover');
   const [activeChipCategory, setActiveChipCategory] = useState<Category | null>(null);
@@ -205,7 +210,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     type FeedItem =
       | { type: 'post'; post: Post }
       | { type: 'ad'; index: number }
-      | { type: 'divider'; city: string };
+      | { type: 'divider'; city: string; localEmpty: boolean };
     const items: FeedItem[] = [];
     let adIdx = 0;
 
@@ -243,8 +248,11 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     }
 
     // Events / Sightseeing / Sport: real location-based posts only.
-    // Split into the user's OWN city vs. nearby towns (expanded radius) so we can
-    // show an "end of <city>" divider between them.
+    // Split into the user's OWN city vs. nearby towns, by the post's ACTUAL
+    // distance from the user (source-agnostic — works whether the post came from
+    // the DB, Ticketmaster's auto-expanded radius, or the live crawl). A small
+    // town (Baden) leads with its own content; a bigger neighbour (Vienna, ~24km)
+    // only appears below the "nearby towns" divider, clearly labelled.
     const sortOne = (arr: Post[]) => activeMainTab === 'sightseeing'
       ? [...arr].sort((a, b) => b.timestamp - a.timestamp)
       : sortByEventDate(arr);
@@ -252,9 +260,9 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
       ? applyEventFilters(arr, dateFilter, priceFilter)
       : arr;
 
-    const hasSplit = hasCity && nearbyStartIndex != null && nearbyStartIndex > 0 && nearbyStartIndex < aiPosts.length;
-    const localSorted  = filterOne(sortOne(hasSplit ? aiPosts.slice(0, nearbyStartIndex!) : aiPosts));
-    const nearbySorted = filterOne(sortOne(hasSplit ? aiPosts.slice(nearbyStartIndex!)   : []));
+    const isNearby = (p: Post) => typeof p.distanceKm === 'number' && p.distanceKm > LOCAL_RADIUS_KM;
+    const localSorted  = filterOne(sortOne(hasCity ? aiPosts.filter(p => !isNearby(p)) : aiPosts));
+    const nearbySorted = filterOne(sortOne(hasCity ? aiPosts.filter(isNearby) : []));
 
     let slot = 0;
     const pushPosts = (arr: Post[]) => arr.forEach(post => {
@@ -263,14 +271,21 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
       slot++;
     });
 
-    pushPosts(localSorted);
-    if (hasSplit && nearbySorted.length > 0) {
-      items.push({ type: 'divider', city: location?.city ?? '' });
+    if (localSorted.length > 0) {
+      pushPosts(localSorted);
+      if (nearbySorted.length > 0) {
+        items.push({ type: 'divider', city: location?.city ?? '', localEmpty: false });
+        pushPosts(nearbySorted);
+      }
+    } else if (nearbySorted.length > 0) {
+      // Nothing happening in the user's own town right now — be honest and lead
+      // with a "nearby" note rather than passing a neighbour off as local.
+      items.push({ type: 'divider', city: location?.city ?? '', localEmpty: true });
+      pushPosts(nearbySorted);
     }
-    pushPosts(nearbySorted);
 
     return items;
-  }, [activeMainTab, aiPosts, injectedPosts, curatedPool, visibleCurated, dateFilter, priceFilter, partnerCatFilter, nearbyStartIndex, hasCity, location?.city]);
+  }, [activeMainTab, aiPosts, injectedPosts, curatedPool, visibleCurated, dateFilter, priceFilter, partnerCatFilter, hasCity, location?.city]);
 
   // Infinite scroll + scroll-position tracking
   const handleScroll = useCallback(() => {
@@ -741,12 +756,23 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
                     <div key={`divider_${i}`} className="px-4 py-6 flex flex-col items-center text-center gap-1.5"
                       style={{ background: 'linear-gradient(180deg, rgba(139,92,246,0.10), transparent)', borderTop: '1px solid #1e1e2a', borderBottom: '1px solid #1e1e2a' }}>
                       <div className="w-9 h-9 rounded-full flex items-center justify-center mb-0.5" style={{ background: 'rgba(139,92,246,0.15)' }}>
-                        <span style={{ fontSize: 18 }}>🎉</span>
+                        <span style={{ fontSize: 18 }}>{item.localEmpty ? '📍' : '🎉'}</span>
                       </div>
-                      <p className="text-sm font-bold text-white">That&apos;s everything on in {item.city}!</p>
-                      <p className="text-xs max-w-[260px]" style={{ color: '#888899' }}>
-                        You&apos;ve reached the end for {item.city}. Keep scrolling for events in nearby towns 👇
-                      </p>
+                      {item.localEmpty ? (
+                        <>
+                          <p className="text-sm font-bold text-white">Nothing on in {item.city} right now</p>
+                          <p className="text-xs max-w-[260px]" style={{ color: '#888899' }}>
+                            {item.city} is quiet at the moment — here&apos;s what&apos;s happening in nearby towns 👇
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm font-bold text-white">That&apos;s everything on in {item.city}!</p>
+                          <p className="text-xs max-w-[260px]" style={{ color: '#888899' }}>
+                            You&apos;ve reached the end for {item.city}. Keep scrolling for events in nearby towns 👇
+                          </p>
+                        </>
+                      )}
                     </div>
                   );
                 }

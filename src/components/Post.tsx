@@ -4,10 +4,9 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Star, Bookmark, MessageCircle, Share2, BadgeCheck, MapPin,
-  Calendar, ExternalLink, Sparkles, CheckCircle2, Bell, BellOff, X,
+  Calendar, ExternalLink, Sparkles, CheckCircle2, Bell, BellOff, X, UserPlus,
 } from 'lucide-react';
 import { Post as PostType } from '@/types';
-import { buildShareUrl } from '@/lib/shareLink';
 import { ensureNotificationPermission } from '@/lib/notifications';
 import { trackEvent } from '@/lib/track';
 import { formatCount, timeAgo } from '@/data/mockData';
@@ -15,6 +14,7 @@ import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import CommentsSheet from './CommentsSheet';
 import UserProfileCard from './UserProfileCard';
+import InviteSheet from './InviteSheet';
 import Avatar from './Avatar';
 
 interface Props {
@@ -60,6 +60,7 @@ export default function Post({ post, showHint = false }: Props) {
   const [imgLoaded,    setImgLoaded]    = useState(false);
   const [hintDismissed, setHintDismissed] = useState(false);
   const [showReminderSheet, setShowReminderSheet] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
 
   // Real counts only: the post's stored count plus this user's own action
   const likeCount  = post.likes + (liked ? 1 : 0);
@@ -96,22 +97,10 @@ export default function Post({ post, showHint = false }: Props) {
     else addToast('Removed from going', 'info');
   }, [going, goPost, post, addToast, t.common.goingLabel]);
 
-  // Feature 5/6 — Share a rich, link-previewable Nova page (/e/<id>) so the link
-  // shows a proper card on WhatsApp/IG/iMessage. This is the core growth loop.
-  const handleShare = useCallback(async () => {
-    const eventTitle = post.caption.split('\n')[0].slice(0, 80);
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const shareUrl = buildShareUrl(post, origin);
-    const text = `${eventTitle}\n\nFound on Nova`;
-
-    if (navigator.share) {
-      try { await navigator.share({ title: 'Nova', text, url: shareUrl }); }
-      catch { /* cancelled */ }
-    } else {
-      await navigator.clipboard.writeText(`${text} — ${shareUrl}`);
-      addToast('Link copied!', 'info', '🔗');
-    }
-  }, [post, addToast]);
+  // Feature 5/6 — Open the invite/share sheet: a rich, link-previewable Nova page
+  // (/e/<id>) sent through WhatsApp/Telegram/X/Email/SMS or the OS share sheet.
+  // This is the core growth loop — every invite is a friend brought in.
+  const handleShare = useCallback(() => setShowInvite(true), []);
 
   const handleDoubleTap = useCallback(() => {
     if (!liked) likePost(post);
@@ -297,9 +286,11 @@ export default function Post({ post, showHint = false }: Props) {
                 )}
               </motion.button>
 
-              {/* Feature 5 — Share with deep link */}
-              <motion.button whileTap={{ scale: 0.85 }} onClick={handleShare} className="flex items-center gap-1.5">
-                <Share2 size={21} style={{ color: '#888899' }} />
+              {/* Feature 5 — Invite / share with deep link */}
+              <motion.button whileTap={{ scale: 0.85 }} onClick={handleShare} className="flex items-center gap-1.5" aria-label="Invite or share">
+                {post.isEvent && !post.isSponsored
+                  ? <UserPlus size={22} style={{ color: '#888899' }} />
+                  : <Share2 size={21} style={{ color: '#888899' }} />}
               </motion.button>
 
               {/* Feature 2 — Going (event posts only) */}
@@ -382,16 +373,27 @@ export default function Post({ post, showHint = false }: Props) {
               {post.sponsoredCta ?? 'Visit Website'}
             </a>
           )}
-          {post.isEvent && !post.isSponsored && post.eventUrl && (
-            <a href={post.eventUrl} target="_blank" rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-bold text-white mt-2 mb-3"
-              style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}
-              onClick={e => e.stopPropagation()}>
-              <ExternalLink size={14} />
-              {t.common.getTickets}
-            </a>
+          {post.isEvent && !post.isSponsored && (
+            <div className="flex items-center gap-2 mt-2 mb-3">
+              {post.eventUrl && (
+                <a href={post.eventUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 flex-1 py-2.5 rounded-xl text-sm font-bold text-white"
+                  style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}
+                  onClick={e => e.stopPropagation()}>
+                  <ExternalLink size={14} />
+                  {t.common.getTickets}
+                </a>
+              )}
+              <motion.button whileTap={{ scale: 0.96 }} onClick={() => setShowInvite(true)}
+                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold ${post.eventUrl ? 'px-4' : 'flex-1'}`}
+                style={{ background: post.eventUrl ? '#1a1a24' : 'linear-gradient(135deg, #22c55e, #10b981)',
+                  color: post.eventUrl ? '#c4b5fd' : 'white',
+                  border: post.eventUrl ? '1px solid #2a2a38' : 'none' }}>
+                <UserPlus size={15} />
+                {post.eventUrl ? 'Invite' : 'Invite friends'}
+              </motion.button>
+            </div>
           )}
-          {post.isEvent && !post.isSponsored && !post.eventUrl && <div style={{ height: 12 }} />}
           {!post.isEvent && !post.isSponsored && <div style={{ height: 12 }} />}
         </div>
       </article>
@@ -417,6 +419,11 @@ export default function Post({ post, showHint = false }: Props) {
             <UserProfileCard user={post.user} onClose={() => setShowProfile(false)} />
           </>
         )}
+      </AnimatePresence>
+
+      {/* Invite / share sheet */}
+      <AnimatePresence>
+        {showInvite && <InviteSheet post={post} onClose={() => setShowInvite(false)} />}
       </AnimatePresence>
 
       {/* Feature 1 — Reminder bottom sheet */}

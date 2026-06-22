@@ -9,8 +9,11 @@ const SIGHTSEEING_TTL  = 30 * 60 * 1000; // 30 min for sightseeing (stable)
 const CACHE_PREFIX     = 'nova_feed_v5_';
 
 // Radius tiers (km) — expand when current radius is exhausted; after the last
-// tier, widen the date window instead (next 60 days → next 180 days)
-const RADIUS_TIERS = [25, 50, 100, 200];
+// tier, widen the date window instead (next 60 days → next 180 days). The first
+// tier is deliberately city-tight (15 km) so a small town (e.g. Baden) surfaces
+// its OWN events/places first and only pulls a bigger neighbour (Vienna, ~24 km)
+// in under the "nearby towns" divider once the local tier is exhausted.
+const RADIUS_TIERS = [15, 45, 100, 200];
 const DAYS_TIERS   = [60, 180];
 
 // Blend mode (discover, no chip selected): the feed rotates through EVERY
