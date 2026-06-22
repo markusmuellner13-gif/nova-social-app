@@ -24,13 +24,13 @@ export interface OverpassElement {
 // user would expect under that chip. `["name"]` keeps out unnamed clutter.
 const OVERPASS_QUERIES: Record<string, string> = {
   // Eat & drink — the backbone of any town's feed
-  restaurants: `[out:json][timeout:14];(
+  restaurants: `[out:json][timeout:12];(
     node["amenity"~"^(restaurant|cafe|bar|pub|biergarten|fast_food|ice_cream|food_court)$"]["name"](around:RADIUS,LAT,LNG);
     way["amenity"~"^(restaurant|cafe|bar|pub|biergarten|fast_food|ice_cream|food_court)$"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
 
   // Going out — where things actually happen at night / on stage
-  venues: `[out:json][timeout:14];(
+  venues: `[out:json][timeout:12];(
     node["amenity"~"^(theatre|concert_hall|nightclub|music_venue|arts_centre|cinema|events_venue)$"]["name"](around:RADIUS,LAT,LNG);
     way["amenity"~"^(theatre|concert_hall|nightclub|music_venue|arts_centre|cinema|events_venue)$"]["name"](around:RADIUS,LAT,LNG);
     node["leisure"~"^(stadium|sports_hall|arena|dance)$"]["name"](around:RADIUS,LAT,LNG);
@@ -38,14 +38,14 @@ const OVERPASS_QUERIES: Record<string, string> = {
   );out body center;`,
 
   // Live music & nightlife specifically
-  music: `[out:json][timeout:14];(
+  music: `[out:json][timeout:12];(
     node["amenity"~"^(nightclub|music_venue|concert_hall)$"]["name"](around:RADIUS,LAT,LNG);
     way["amenity"~"^(nightclub|music_venue|concert_hall)$"]["name"](around:RADIUS,LAT,LNG);
     node["amenity"~"^(bar|pub)$"]["live_music"="yes"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
 
   // Culture — museums, galleries, art spaces
-  art: `[out:json][timeout:14];(
+  art: `[out:json][timeout:12];(
     node["tourism"~"^(museum|gallery|artwork)$"]["name"](around:RADIUS,LAT,LNG);
     way["tourism"~"^(museum|gallery|artwork)$"]["name"](around:RADIUS,LAT,LNG);
     node["amenity"="arts_centre"]["name"](around:RADIUS,LAT,LNG);
@@ -53,7 +53,7 @@ const OVERPASS_QUERIES: Record<string, string> = {
   );out body center;`,
 
   // Sightseeing — landmarks, churches, monuments, viewpoints, parks
-  sightseeing: `[out:json][timeout:16];(
+  sightseeing: `[out:json][timeout:12];(
     node["tourism"~"^(attraction|viewpoint|artwork|museum|gallery)$"]["name"](around:RADIUS,LAT,LNG);
     way["tourism"~"^(attraction|viewpoint|artwork|museum|gallery)$"]["name"](around:RADIUS,LAT,LNG);
     node["historic"~"^(monument|memorial|castle|ruins|archaeological_site|fort|city_gate|tower)$"]["name"](around:RADIUS,LAT,LNG);
@@ -63,26 +63,26 @@ const OVERPASS_QUERIES: Record<string, string> = {
   );out body center;`,
 
   // Community — the civic & social fabric (churches, libraries, markets, halls)
-  community: `[out:json][timeout:14];(
+  community: `[out:json][timeout:12];(
     node["amenity"~"^(community_centre|library|marketplace|townhall|social_centre|place_of_worship)$"]["name"](around:RADIUS,LAT,LNG);
     way["amenity"~"^(community_centre|library|marketplace|townhall|social_centre|place_of_worship)$"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
 
   // Active — gyms, pools, sports centres, courts
-  fitness: `[out:json][timeout:14];(
+  fitness: `[out:json][timeout:12];(
     node["leisure"~"^(fitness_centre|sports_centre|swimming_pool|pitch|track|climbing)$"]["name"](around:RADIUS,LAT,LNG);
     way["leisure"~"^(fitness_centre|sports_centre|swimming_pool|pitch|track|climbing)$"]["name"](around:RADIUS,LAT,LNG);
     node["amenity"="gym"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
 
   // Sport — places to play & watch
-  sports: `[out:json][timeout:14];(
+  sports: `[out:json][timeout:12];(
     node["leisure"~"^(stadium|sports_centre|pitch|track|sports_hall|swimming_pool|golf_course)$"]["name"](around:RADIUS,LAT,LNG);
     way["leisure"~"^(stadium|sports_centre|pitch|track|sports_hall|swimming_pool|golf_course)$"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
 
   // Wellbeing & green space — spas, parks, gardens, beauty
-  lifestyle: `[out:json][timeout:14];(
+  lifestyle: `[out:json][timeout:12];(
     node["leisure"~"^(park|garden|nature_reserve)$"]["name"](around:RADIUS,LAT,LNG);
     way["leisure"~"^(park|garden|nature_reserve)$"]["name"](around:RADIUS,LAT,LNG);
     node["amenity"~"^(spa|public_bath)$"]["name"](around:RADIUS,LAT,LNG);
@@ -90,13 +90,13 @@ const OVERPASS_QUERIES: Record<string, string> = {
   );out body center;`,
 
   // Stay
-  hotels: `[out:json][timeout:14];(
+  hotels: `[out:json][timeout:12];(
     node["tourism"~"^(hotel|guest_house|hostel|motel|apartment|chalet)$"]["name"](around:RADIUS,LAT,LNG);
     way["tourism"~"^(hotel|guest_house|hostel|motel|apartment|chalet)$"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
 
   // Thrift, vintage & second-hand finds
-  shops: `[out:json][timeout:14];(
+  shops: `[out:json][timeout:12];(
     node["shop"~"^(second_hand|vintage|charity|antiques|thrift)$"]["name"](around:RADIUS,LAT,LNG);
     way["shop"~"^(second_hand|vintage|charity|antiques|thrift)$"]["name"](around:RADIUS,LAT,LNG);
     node["shop"="clothes"]["second_hand"="yes"]["name"](around:RADIUS,LAT,LNG);
@@ -104,13 +104,13 @@ const OVERPASS_QUERIES: Record<string, string> = {
   );out body center;`,
 
   // Fashion & boutiques
-  fashion: `[out:json][timeout:14];(
+  fashion: `[out:json][timeout:12];(
     node["shop"~"^(clothes|boutique|shoes|jewelry|bag|fashion_accessories|tailor)$"]["name"](around:RADIUS,LAT,LNG);
     way["shop"~"^(clothes|boutique|shoes|jewelry|bag|fashion_accessories|tailor)$"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
 
   // Pets
-  pets: `[out:json][timeout:14];(
+  pets: `[out:json][timeout:12];(
     node["shop"="pet"]["name"](around:RADIUS,LAT,LNG);
     node["amenity"="veterinary"]["name"](around:RADIUS,LAT,LNG);
     node["leisure"="dog_park"]["name"](around:RADIUS,LAT,LNG);
@@ -118,14 +118,14 @@ const OVERPASS_QUERIES: Record<string, string> = {
   );out body center;`,
 
   // Rentals — get around / gear up
-  rentals: `[out:json][timeout:14];(
+  rentals: `[out:json][timeout:12];(
     node["amenity"~"^(car_rental|bicycle_rental|boat_rental|ski_rental)$"]["name"](around:RADIUS,LAT,LNG);
     way["amenity"~"^(car_rental|bicycle_rental|boat_rental|ski_rental)$"]["name"](around:RADIUS,LAT,LNG);
     node["shop"~"rental|motorcycle_rental"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
 
   // Travel — things to see + places to stay for visitors
-  travel: `[out:json][timeout:14];(
+  travel: `[out:json][timeout:12];(
     node["tourism"~"^(attraction|viewpoint|hotel|guest_house|information|gallery|museum)$"]["name"](around:RADIUS,LAT,LNG);
     way["tourism"~"^(attraction|viewpoint|hotel|guest_house|gallery|museum)$"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
@@ -159,7 +159,7 @@ export async function fetchOverpassPlaces(lat: number, lng: number, category: st
           'User-Agent': 'Nova-App/2.0 (contact@nova-app.com)',
         },
         body: `data=${encodeURIComponent(query)}`,
-        signal: AbortSignal.timeout(14000),
+        signal: AbortSignal.timeout(13000),
       });
       if (!res.ok) throw new Error(`Overpass ${res.status}`);
       const d = await res.json() as { elements?: OverpassElement[] };

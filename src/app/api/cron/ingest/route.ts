@@ -156,8 +156,10 @@ export async function GET(request: NextRequest) {
     : dayRotation;
   // Stay well under the 60s platform cap. The deadline is checked *between*
   // items, and any single item can run up to its own fetch timeout past that
-  // check — so deadline + per-item timeout must stay < 60s. 35s + 14s = 49s.
-  const deadline = Date.now() + 35_000;
+  // check — so deadline + per-item timeout must stay < 60s. A cold city's live
+  // compute (Overpass + image enrichment across a dozen places) runs 16–22s, so
+  // the per-item timeout below is 24s; 30s + 24s = 54s, safely under the cap.
+  const deadline = Date.now() + 30_000;
 
   let ingested = 0;
   let rejected = 0;
@@ -176,7 +178,7 @@ export async function GET(request: NextRequest) {
         city, country, lat: String(lat), lng: String(lng),
         page: '0', radius: '25', count: '12', category, fresh: '1',
       });
-      const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(16000) });
+      const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(24000) });
       if (!res.ok) { errors.push(`${city}/${category}:${res.status}`); processed++; continue; }
       const data = await res.json() as { posts?: ApiPost[] };
       const raw = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
