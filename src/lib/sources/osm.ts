@@ -1,6 +1,13 @@
-// Overpass (OpenStreetMap) — real shops, venues, restaurants, hotels, rentals
-// around the user. No API key. Place posts use the venue's own og:image when
-// its website provides one, so photos show the actual place, not stock.
+// Overpass (OpenStreetMap) — the app's free, worldwide, no-key engine for REAL
+// local places: restaurants, cafés, bars, pubs, clubs, theatres, cinemas,
+// museums, galleries, churches, parks, markets, libraries, gyms, hotels, thrift
+// shops and more. Every town on earth has these in OSM, so a small-town feed is
+// never empty — and it's all free (no Anthropic/LLM credits).
+//
+// Posts carry the venue's REAL data: opening hours, website, phone, cuisine, and
+// a real photo when OSM has one (image / wikimedia_commons tags) or the venue's
+// own website advertises an og:image. Descriptions are written locally from the
+// tags — no LLM in the loop.
 
 import { ApiPost, makeUser, getImage, picsumUrl, proxyImage } from './shared';
 
@@ -13,34 +20,119 @@ export interface OverpassElement {
   tags?: Record<string, string>;
 }
 
+// One Overpass query per app category. Each pulls the real-world place types a
+// user would expect under that chip. `["name"]` keeps out unnamed clutter.
 const OVERPASS_QUERIES: Record<string, string> = {
-  shops: `[out:json][timeout:12];(
-    node["shop"~"second_hand|vintage|charity|antiques|thrift"](around:RADIUS,LAT,LNG);
-    way["shop"~"second_hand|vintage|charity|antiques|thrift"](around:RADIUS,LAT,LNG);
-    node["shop"="clothes"]["second_hand"="yes"](around:RADIUS,LAT,LNG);
-    node["shop"="books"]["second_hand"="yes"](around:RADIUS,LAT,LNG);
+  // Eat & drink — the backbone of any town's feed
+  restaurants: `[out:json][timeout:14];(
+    node["amenity"~"^(restaurant|cafe|bar|pub|biergarten|fast_food|ice_cream|food_court)$"]["name"](around:RADIUS,LAT,LNG);
+    way["amenity"~"^(restaurant|cafe|bar|pub|biergarten|fast_food|ice_cream|food_court)$"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
-  venues: `[out:json][timeout:12];(
-    node["amenity"~"theatre|concert_hall|nightclub|music_venue|arts_centre|cinema|events_venue"](around:RADIUS,LAT,LNG);
-    way["amenity"~"theatre|concert_hall|nightclub|music_venue|arts_centre|cinema|events_venue"](around:RADIUS,LAT,LNG);
-    node["leisure"~"stadium|sports_hall|arena"](around:RADIUS,LAT,LNG);
-    way["leisure"~"stadium|sports_hall|arena"](around:RADIUS,LAT,LNG);
+
+  // Going out — where things actually happen at night / on stage
+  venues: `[out:json][timeout:14];(
+    node["amenity"~"^(theatre|concert_hall|nightclub|music_venue|arts_centre|cinema|events_venue)$"]["name"](around:RADIUS,LAT,LNG);
+    way["amenity"~"^(theatre|concert_hall|nightclub|music_venue|arts_centre|cinema|events_venue)$"]["name"](around:RADIUS,LAT,LNG);
+    node["leisure"~"^(stadium|sports_hall|arena|dance)$"]["name"](around:RADIUS,LAT,LNG);
+    way["leisure"~"^(stadium|sports_hall|arena|dance)$"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
-  restaurants: `[out:json][timeout:12];(
-    node["amenity"~"restaurant|cafe|bar|biergarten|pub"]["name"](around:RADIUS,LAT,LNG);
-    way["amenity"~"restaurant|cafe|bar|biergarten|pub"]["name"](around:RADIUS,LAT,LNG);
+
+  // Live music & nightlife specifically
+  music: `[out:json][timeout:14];(
+    node["amenity"~"^(nightclub|music_venue|concert_hall)$"]["name"](around:RADIUS,LAT,LNG);
+    way["amenity"~"^(nightclub|music_venue|concert_hall)$"]["name"](around:RADIUS,LAT,LNG);
+    node["amenity"~"^(bar|pub)$"]["live_music"="yes"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
-  hotels: `[out:json][timeout:12];(
-    node["tourism"~"hotel|guest_house|hostel|motel|apartment|chalet"]["name"](around:RADIUS,LAT,LNG);
-    way["tourism"~"hotel|guest_house|hostel|motel|apartment|chalet"]["name"](around:RADIUS,LAT,LNG);
+
+  // Culture — museums, galleries, art spaces
+  art: `[out:json][timeout:14];(
+    node["tourism"~"^(museum|gallery|artwork)$"]["name"](around:RADIUS,LAT,LNG);
+    way["tourism"~"^(museum|gallery|artwork)$"]["name"](around:RADIUS,LAT,LNG);
+    node["amenity"="arts_centre"]["name"](around:RADIUS,LAT,LNG);
+    way["amenity"="arts_centre"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
-  rentals: `[out:json][timeout:12];(
-    node["amenity"~"car_rental|bicycle_rental|boat_rental|ski_rental"](around:RADIUS,LAT,LNG);
-    way["amenity"~"car_rental|bicycle_rental|boat_rental|ski_rental"](around:RADIUS,LAT,LNG);
-    node["shop"~"rental|motorcycle_rental"](around:RADIUS,LAT,LNG);
-    way["shop"~"rental|motorcycle_rental"](around:RADIUS,LAT,LNG);
+
+  // Sightseeing — landmarks, churches, monuments, viewpoints, parks
+  sightseeing: `[out:json][timeout:16];(
+    node["tourism"~"^(attraction|viewpoint|artwork|museum|gallery)$"]["name"](around:RADIUS,LAT,LNG);
+    way["tourism"~"^(attraction|viewpoint|artwork|museum|gallery)$"]["name"](around:RADIUS,LAT,LNG);
+    node["historic"~"^(monument|memorial|castle|ruins|archaeological_site|fort|city_gate|tower)$"]["name"](around:RADIUS,LAT,LNG);
+    way["historic"~"^(monument|memorial|castle|ruins|archaeological_site|fort|city_gate|tower)$"]["name"](around:RADIUS,LAT,LNG);
+    node["amenity"="place_of_worship"]["name"](around:RADIUS,LAT,LNG);
+    way["amenity"="place_of_worship"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+
+  // Community — the civic & social fabric (churches, libraries, markets, halls)
+  community: `[out:json][timeout:14];(
+    node["amenity"~"^(community_centre|library|marketplace|townhall|social_centre|place_of_worship)$"]["name"](around:RADIUS,LAT,LNG);
+    way["amenity"~"^(community_centre|library|marketplace|townhall|social_centre|place_of_worship)$"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+
+  // Active — gyms, pools, sports centres, courts
+  fitness: `[out:json][timeout:14];(
+    node["leisure"~"^(fitness_centre|sports_centre|swimming_pool|pitch|track|climbing)$"]["name"](around:RADIUS,LAT,LNG);
+    way["leisure"~"^(fitness_centre|sports_centre|swimming_pool|pitch|track|climbing)$"]["name"](around:RADIUS,LAT,LNG);
+    node["amenity"="gym"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+
+  // Sport — places to play & watch
+  sports: `[out:json][timeout:14];(
+    node["leisure"~"^(stadium|sports_centre|pitch|track|sports_hall|swimming_pool|golf_course)$"]["name"](around:RADIUS,LAT,LNG);
+    way["leisure"~"^(stadium|sports_centre|pitch|track|sports_hall|swimming_pool|golf_course)$"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+
+  // Wellbeing & green space — spas, parks, gardens, beauty
+  lifestyle: `[out:json][timeout:14];(
+    node["leisure"~"^(park|garden|nature_reserve)$"]["name"](around:RADIUS,LAT,LNG);
+    way["leisure"~"^(park|garden|nature_reserve)$"]["name"](around:RADIUS,LAT,LNG);
+    node["amenity"~"^(spa|public_bath)$"]["name"](around:RADIUS,LAT,LNG);
+    node["shop"~"^(beauty|hairdresser|massage|cosmetics)$"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+
+  // Stay
+  hotels: `[out:json][timeout:14];(
+    node["tourism"~"^(hotel|guest_house|hostel|motel|apartment|chalet)$"]["name"](around:RADIUS,LAT,LNG);
+    way["tourism"~"^(hotel|guest_house|hostel|motel|apartment|chalet)$"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+
+  // Thrift, vintage & second-hand finds
+  shops: `[out:json][timeout:14];(
+    node["shop"~"^(second_hand|vintage|charity|antiques|thrift)$"]["name"](around:RADIUS,LAT,LNG);
+    way["shop"~"^(second_hand|vintage|charity|antiques|thrift)$"]["name"](around:RADIUS,LAT,LNG);
+    node["shop"="clothes"]["second_hand"="yes"]["name"](around:RADIUS,LAT,LNG);
+    node["shop"="books"]["second_hand"="yes"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+
+  // Fashion & boutiques
+  fashion: `[out:json][timeout:14];(
+    node["shop"~"^(clothes|boutique|shoes|jewelry|bag|fashion_accessories|tailor)$"]["name"](around:RADIUS,LAT,LNG);
+    way["shop"~"^(clothes|boutique|shoes|jewelry|bag|fashion_accessories|tailor)$"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+
+  // Pets
+  pets: `[out:json][timeout:14];(
+    node["shop"="pet"]["name"](around:RADIUS,LAT,LNG);
+    node["amenity"="veterinary"]["name"](around:RADIUS,LAT,LNG);
+    node["leisure"="dog_park"]["name"](around:RADIUS,LAT,LNG);
+    way["leisure"="dog_park"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+
+  // Rentals — get around / gear up
+  rentals: `[out:json][timeout:14];(
+    node["amenity"~"^(car_rental|bicycle_rental|boat_rental|ski_rental)$"]["name"](around:RADIUS,LAT,LNG);
+    way["amenity"~"^(car_rental|bicycle_rental|boat_rental|ski_rental)$"]["name"](around:RADIUS,LAT,LNG);
+    node["shop"~"rental|motorcycle_rental"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+
+  // Travel — things to see + places to stay for visitors
+  travel: `[out:json][timeout:14];(
+    node["tourism"~"^(attraction|viewpoint|hotel|guest_house|information|gallery|museum)$"]["name"](around:RADIUS,LAT,LNG);
+    way["tourism"~"^(attraction|viewpoint|hotel|guest_house|gallery|museum)$"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
 };
+
+// Categories OSM can serve directly (used by the feed route to decide routing).
+export const OSM_SUPPORTED = new Set(Object.keys(OVERPASS_QUERIES).concat(['food']));
 
 // Overpass requires a User-Agent (rejects anonymous requests with 406).
 // Kumi mirror first — overpass-api.de rate-limits per IP, which Vercel's
@@ -51,10 +143,11 @@ const OVERPASS_ENDPOINTS = [
 ];
 
 export async function fetchOverpassPlaces(lat: number, lng: number, category: string, radiusM: number): Promise<OverpassElement[]> {
-  const query = (OVERPASS_QUERIES[category] ?? OVERPASS_QUERIES.venues)
+  const cat = category === 'food' ? 'restaurants' : category;
+  const query = (OVERPASS_QUERIES[cat] ?? OVERPASS_QUERIES.venues)
     .replace(/LAT/g, String(lat))
     .replace(/LNG/g, String(lng))
-    .replace(/RADIUS/g, String(Math.min(radiusM, 10000)));
+    .replace(/RADIUS/g, String(Math.min(radiusM, 12000)));
 
   let lastErr: Error = new Error('Overpass unavailable');
   for (const endpoint of OVERPASS_ENDPOINTS) {
@@ -66,7 +159,7 @@ export async function fetchOverpassPlaces(lat: number, lng: number, category: st
           'User-Agent': 'Nova-App/2.0 (contact@nova-app.com)',
         },
         body: `data=${encodeURIComponent(query)}`,
-        signal: AbortSignal.timeout(12000),
+        signal: AbortSignal.timeout(14000),
       });
       if (!res.ok) throw new Error(`Overpass ${res.status}`);
       const d = await res.json() as { elements?: OverpassElement[] };
@@ -127,7 +220,7 @@ export async function fetchGooglePlacePhoto(name: string, lat: number, lng: numb
       const d = await findRes.json() as { candidates?: { photos?: { photo_reference?: string }[] }[] };
       const ref = d.candidates?.[0]?.photos?.[0]?.photo_reference;
       if (ref) {
-        const photoUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=600&photo_reference=${ref}&key=${key}`;
+        const photoUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${ref}&key=${key}`;
         const photoRes = await fetch(photoUrl, { redirect: 'manual', signal: AbortSignal.timeout(3000) });
         result = photoRes.headers.get('location');
       }
@@ -135,6 +228,199 @@ export async function fetchGooglePlacePhoto(name: string, lat: number, lng: numb
   } catch { /* fall through to og:image / stock */ }
   placePhotoCache.set(cacheKey, result);
   return result;
+}
+
+// ── A photo straight from OSM's own tags (free, real, no extra request) ───────
+// Many landmarks, churches, museums and parks carry an `image` URL or a
+// `wikimedia_commons` file reference right in OpenStreetMap.
+function osmTagImage(tags: Record<string, string>): string | null {
+  const direct = tags.image ?? tags['image:0'] ?? '';
+  if (/^https?:\/\/\S+\.(jpe?g|png|webp|gif)/i.test(direct)) return direct;
+  const commons = tags.wikimedia_commons ?? tags['image:wikimedia'] ?? '';
+  if (commons.startsWith('File:')) {
+    const file = commons.slice('File:'.length);
+    return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=900`;
+  }
+  return null;
+}
+
+// ── Human-readable type + a free, varied description from the OSM tags ─────────
+// No LLM: we read the place's real tags and write a natural caption ourselves.
+function placeKind(tags: Record<string, string>): { label: string; emoji: string } {
+  const a = tags.amenity ?? '', t = tags.tourism ?? '', l = tags.leisure ?? '',
+        h = tags.historic ?? '', s = tags.shop ?? '';
+  const map: Record<string, { label: string; emoji: string }> = {
+    restaurant: { label: 'restaurant', emoji: '🍽️' }, cafe: { label: 'café', emoji: '☕' },
+    bar: { label: 'bar', emoji: '🍸' }, pub: { label: 'pub', emoji: '🍺' },
+    biergarten: { label: 'beer garden', emoji: '🍺' }, fast_food: { label: 'eatery', emoji: '🍔' },
+    ice_cream: { label: 'gelateria', emoji: '🍦' }, food_court: { label: 'food court', emoji: '🍽️' },
+    theatre: { label: 'theatre', emoji: '🎭' }, concert_hall: { label: 'concert hall', emoji: '🎶' },
+    nightclub: { label: 'club', emoji: '🪩' }, music_venue: { label: 'live-music venue', emoji: '🎸' },
+    arts_centre: { label: 'arts centre', emoji: '🎨' }, cinema: { label: 'cinema', emoji: '🎬' },
+    events_venue: { label: 'events venue', emoji: '✨' }, community_centre: { label: 'community centre', emoji: '🤝' },
+    library: { label: 'library', emoji: '📚' }, marketplace: { label: 'market', emoji: '🧺' },
+    townhall: { label: 'town hall', emoji: '🏛️' }, social_centre: { label: 'social club', emoji: '🤝' },
+    place_of_worship: { label: 'church', emoji: '⛪' }, gym: { label: 'gym', emoji: '💪' },
+    spa: { label: 'spa', emoji: '💆' }, public_bath: { label: 'thermal bath', emoji: '♨️' },
+    veterinary: { label: 'vet', emoji: '🐾' },
+  };
+  if (a && map[a]) return map[a];
+  if (t === 'museum') return { label: 'museum', emoji: '🏛️' };
+  if (t === 'gallery') return { label: 'gallery', emoji: '🖼️' };
+  if (t === 'artwork') return { label: 'public artwork', emoji: '🗿' };
+  if (t === 'viewpoint') return { label: 'viewpoint', emoji: '🌅' };
+  if (t === 'attraction') return { label: 'attraction', emoji: '📸' };
+  if (t === 'hotel' || t === 'motel') return { label: 'hotel', emoji: '🏨' };
+  if (t === 'guest_house') return { label: 'guest house', emoji: '🏨' };
+  if (t === 'hostel') return { label: 'hostel', emoji: '🛏️' };
+  if (t === 'apartment' || t === 'chalet') return { label: 'stay', emoji: '🏡' };
+  if (t === 'information') return { label: 'visitor info', emoji: 'ℹ️' };
+  if (l === 'park') return { label: 'park', emoji: '🌳' };
+  if (l === 'garden') return { label: 'garden', emoji: '🌷' };
+  if (l === 'nature_reserve') return { label: 'nature reserve', emoji: '🏞️' };
+  if (l === 'dog_park') return { label: 'dog park', emoji: '🐕' };
+  if (l === 'fitness_centre') return { label: 'fitness studio', emoji: '💪' };
+  if (l === 'sports_centre' || l === 'sports_hall') return { label: 'sports centre', emoji: '🏟️' };
+  if (l === 'swimming_pool') return { label: 'pool', emoji: '🏊' };
+  if (l === 'stadium' || l === 'arena') return { label: 'stadium', emoji: '🏟️' };
+  if (l === 'pitch' || l === 'track') return { label: 'sports ground', emoji: '⚽' };
+  if (l === 'golf_course') return { label: 'golf course', emoji: '⛳' };
+  if (l === 'climbing') return { label: 'climbing gym', emoji: '🧗' };
+  if (h === 'castle' || h === 'fort') return { label: 'castle', emoji: '🏰' };
+  if (h === 'monument' || h === 'memorial') return { label: 'monument', emoji: '🗿' };
+  if (h === 'ruins' || h === 'archaeological_site') return { label: 'historic site', emoji: '🏛️' };
+  if (h === 'tower' || h === 'city_gate') return { label: 'landmark', emoji: '🗼' };
+  if (s === 'second_hand' || s === 'charity' || s === 'thrift') return { label: 'thrift shop', emoji: '🛍️' };
+  if (s === 'vintage' || s === 'antiques') return { label: 'vintage shop', emoji: '🕰️' };
+  if (s === 'books') return { label: 'bookshop', emoji: '📖' };
+  if (s === 'clothes' || s === 'boutique' || s === 'fashion_accessories') return { label: 'boutique', emoji: '👗' };
+  if (s === 'shoes') return { label: 'shoe shop', emoji: '👟' };
+  if (s === 'jewelry' || s === 'bag') return { label: 'boutique', emoji: '💍' };
+  if (s === 'beauty' || s === 'cosmetics') return { label: 'beauty studio', emoji: '💅' };
+  if (s === 'hairdresser') return { label: 'salon', emoji: '💇' };
+  if (s === 'massage') return { label: 'massage studio', emoji: '💆' };
+  if (s === 'pet') return { label: 'pet shop', emoji: '🐾' };
+  return { label: 'spot', emoji: '📍' };
+}
+
+function pick<T>(arr: T[], seed: number): T { return arr[Math.abs(seed) % arr.length]; }
+
+function describePlace(tags: Record<string, string>, city: string, seed: number): string {
+  const { label } = placeKind(tags);
+  const name = tags.name ?? 'This spot';
+  const cuisine = (tags.cuisine ?? '').split(';')[0].replace(/_/g, ' ');
+  const a = tags.amenity ?? '', t = tags.tourism ?? '', l = tags.leisure ?? '', h = tags.historic ?? '';
+
+  // Food & drink
+  if (['restaurant', 'cafe', 'bar', 'pub', 'biergarten', 'fast_food', 'ice_cream', 'food_court'].includes(a)) {
+    const food = cuisine ? `${cuisine} ` : '';
+    return pick([
+      `${name} is one of ${city}'s favourite ${food}${label}s — pull up a chair and stay a while.`,
+      `A local go-to in ${city}, ${name} serves up ${food}${label === 'café' ? 'coffee and good vibes' : 'a proper bite and a relaxed atmosphere'}.`,
+      `Looking for a ${food}${label} in ${city}? ${name} is the kind of place regulars keep coming back to.`,
+    ], seed);
+  }
+  // Going out
+  if (['theatre', 'concert_hall', 'nightclub', 'music_venue', 'arts_centre', 'cinema', 'events_venue'].includes(a)) {
+    return pick([
+      `${name} is where ${city} comes alive — check what's on at this ${label} and make a night of it.`,
+      `One of ${city}'s top spots for a night out, ${name} keeps the local ${label} scene buzzing.`,
+      `${name} — a ${label} in the heart of ${city}. See what's on the bill and grab your crew.`,
+    ], seed);
+  }
+  // Culture & sightseeing
+  if (t === 'museum' || t === 'gallery' || a === 'arts_centre' || h) {
+    return pick([
+      `${name} is one of ${city}'s cultural gems — well worth an afternoon exploring.`,
+      `Soak up some history at ${name}, a ${label} that locals are quietly proud of.`,
+      `${name} — a piece of ${city} worth seeing up close. Bring a camera.`,
+    ], seed);
+  }
+  if (a === 'place_of_worship') {
+    return pick([
+      `${name} is a beautiful ${city} landmark — striking architecture and a calm moment away from the bustle.`,
+      `Step inside ${name}, one of ${city}'s most photographed spots, and take it all in.`,
+    ], seed);
+  }
+  if (t === 'viewpoint' || t === 'attraction' || t === 'artwork') {
+    return pick([
+      `${name} is a ${city} must-see — exactly the kind of spot you'll want to share.`,
+      `Add ${name} to your ${city} list — a local highlight that never gets old.`,
+    ], seed);
+  }
+  // Green & wellbeing
+  if (l === 'park' || l === 'garden' || l === 'nature_reserve' || l === 'dog_park') {
+    return pick([
+      `${name} is ${city}'s breath of fresh air — perfect for a walk, a picnic or just slowing down.`,
+      `Escape the noise at ${name}, a green corner of ${city} the locals love.`,
+    ], seed);
+  }
+  if (a === 'spa' || a === 'public_bath' || ['beauty', 'hairdresser', 'massage', 'cosmetics'].includes(tags.shop ?? '')) {
+    return `Treat yourself at ${name} — a ${city} ${label} for a little well-earned downtime.`;
+  }
+  // Active
+  if (a === 'gym' || ['fitness_centre', 'sports_centre', 'swimming_pool', 'pitch', 'track', 'stadium', 'arena', 'climbing', 'golf_course', 'sports_hall'].includes(l)) {
+    return pick([
+      `${name} is where ${city} gets moving — drop in and break a sweat.`,
+      `Stay active in ${city} at ${name}, a local ${label} for all levels.`,
+    ], seed);
+  }
+  // Stay
+  if (['hotel', 'guest_house', 'hostel', 'motel', 'apartment', 'chalet'].includes(t)) {
+    return pick([
+      `${name} — a welcoming ${label} in ${city}, whether you're visiting or treating yourself to a staycation.`,
+      `Rest easy at ${name}, a ${city} ${label} that knows how to make guests feel at home.`,
+    ], seed);
+  }
+  // Community
+  if (['community_centre', 'library', 'marketplace', 'townhall', 'social_centre'].includes(a)) {
+    return pick([
+      `${name} is part of what makes ${city} tick — a community ${label} worth knowing about.`,
+      `${name} brings ${city} together — see what's happening at this local ${label}.`,
+    ], seed);
+  }
+  // Shops
+  if (tags.shop) {
+    return pick([
+      `${name} is a ${city} ${label} worth a rummage — you never know what you'll find.`,
+      `Discover ${name}, a ${label} that gives ${city} its character.`,
+    ], seed);
+  }
+  return `${name} is a local ${label} in ${city} worth checking out.`;
+}
+
+// ── Lightweight "open now" hint for the simplest opening_hours patterns ───────
+// opening_hours is a rich mini-language; we only confidently evaluate the common
+// "Mo-Fr 09:00-18:00" style and 24/7. Anything we can't parse → no claim (honest).
+function openNow(hours: string): boolean | null {
+  if (!hours) return null;
+  if (/24\/7/.test(hours)) return true;
+  const days = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+  const now = new Date();
+  const today = days[now.getDay()];
+  const mins = now.getHours() * 60 + now.getMinutes();
+  // Only handle simple, comma-separated "DAYS HH:MM-HH:MM" rules.
+  if (/[;[]/.test(hours) && !hours.includes(',')) { /* still try below */ }
+  let matchedAnyRule = false;
+  for (const rule of hours.split(';')) {
+    const m = rule.trim().match(/^((?:Mo|Tu|We|Th|Fr|Sa|Su)(?:\s*-\s*(?:Mo|Tu|We|Th|Fr|Sa|Su))?(?:\s*,\s*(?:Mo|Tu|We|Th|Fr|Sa|Su))*)\s+(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
+    if (!m) return null; // unknown shape → don't guess
+    matchedAnyRule = true;
+    const [, dayspec, h1, m1, h2, m2] = m;
+    const inDays = (() => {
+      if (dayspec.includes('-')) {
+        const [a, b] = dayspec.split('-').map(s => days.indexOf(s.trim()));
+        const ti = days.indexOf(today);
+        if (a <= b) return ti >= a && ti <= b;
+        return ti >= a || ti <= b; // wraps the week
+      }
+      return dayspec.split(',').map(s => s.trim()).includes(today);
+    })();
+    if (!inDays) continue;
+    const start = (+h1) * 60 + (+m1), end = (+h2) * 60 + (+m2);
+    if (end > start ? mins >= start && mins < end : mins >= start || mins < end) return true;
+  }
+  return matchedAnyRule ? false : null;
 }
 
 export async function overpassToPost(
@@ -153,21 +439,37 @@ export async function overpassToPost(
   const cuisine = (tags.cuisine ?? '').split(';')[0].replace(/_/g, ' ');
   const stars   = tags.stars ?? '';
   const phone   = tags.phone ?? tags['contact:phone'] ?? '';
+  const kind    = placeKind(tags);
+
+  // Caption: a free, tag-written description (no LLM) unless the caller supplied one.
+  const desc = description && description.trim() ? description : describePlace(tags, city, el.id);
 
   const IMG_QUERIES: Record<string, string> = {
     shops:       'vintage thrift store interior clothing racks',
+    fashion:     'boutique clothing store interior fashion',
     venues:      'concert hall theatre interior stage lights',
+    music:       'live music club stage concert crowd',
+    art:         'art museum gallery interior exhibition',
+    sightseeing: 'historic landmark architecture travel',
+    community:   'town square market community people',
     restaurants: cuisine ? `${cuisine} restaurant food dish` : 'cozy restaurant interior dinner table',
     food:        cuisine ? `${cuisine} restaurant food dish` : 'delicious food dish restaurant table',
     hotels:      'elegant hotel room interior design',
+    fitness:     'modern gym fitness studio equipment',
+    sports:      'sports stadium field game',
+    lifestyle:   'green park garden nature path',
+    pets:        'happy dog pet park',
     rentals:     'bicycle car rental shop city',
+    travel:      'travel landmark scenic viewpoint',
   };
-  const imgQ = IMG_QUERIES[category] ?? `${category} place interior`;
+  const imgQ = IMG_QUERIES[category] ?? `${kind.label} ${category}`;
 
-  // Real photo of the actual venue, best source first:
-  //   1. Google Places (gated on key) → 2. the venue's own og:image → 3. stock
-  let image: string | null = null;
-  if (tryOgImage) {
+  // Real photo of the actual place, best source first:
+  //   1. OSM's own image/wikimedia tag → 2. Google Places (gated) →
+  //   3. the venue's own og:image → 4. category stock (Unsplash/Pexels) → picsum
+  let image: string | null = osmTagImage(tags);
+  if (image && image.includes('upload.wikimedia.org')) image = proxyImage(image);
+  if (!image && tryOgImage) {
     image = await fetchGooglePlacePhoto(name, elLat, elLng);
   }
   if (!image && tryOgImage && website) {
@@ -181,13 +483,13 @@ export async function overpassToPost(
     ]);
   }
 
-  const typeLabel: Record<string, string> = { shops: '🛍️', venues: '🎭', community: '🤝', restaurants: '🍽️', food: '🍽️', hotels: '🏨', rentals: '🚲' };
   const osmUrl = `https://www.openstreetmap.org/${el.type}/${el.id}`;
-
   const isFoodCat = category === 'restaurants' || category === 'food';
+  const open = openNow(hours);
   const extras = [
     cuisine && isFoodCat ? `🍴 ${cuisine.charAt(0).toUpperCase()}${cuisine.slice(1)} cuisine` : '',
     stars && category === 'hotels' ? `⭐ ${stars}-star` : '',
+    open === true ? '🟢 Open now' : open === false ? '🔴 Closed now' : '',
     hours ? `⏰ ${hours}` : '',
     phone ? `📞 ${phone}` : '',
   ].filter(Boolean).map(l => `\n${l}`).join('');
@@ -195,8 +497,8 @@ export async function overpassToPost(
   return {
     id: `osm_${el.id}`,
     user: makeUser(name, domain || undefined),
-    image,
-    caption: `${description}\n\n${typeLabel[category] ?? '📍'} ${name}${addr ? `\n📍 ${addr}, ${city}` : `\n📍 ${city}`}${extras}${website ? `\n🔗 ${website}` : `\n🗺️ ${osmUrl}`}`,
+    image: image!,
+    caption: `${desc}\n\n${kind.emoji} ${name}${addr ? `\n📍 ${addr}, ${city}` : `\n📍 ${city}`}${extras}${website ? `\n🔗 ${website}` : `\n🗺️ ${osmUrl}`}`,
     likes: 0,
     comments: 0,
     category,

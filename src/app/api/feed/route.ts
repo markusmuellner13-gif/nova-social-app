@@ -7,7 +7,7 @@ import { fetchOverpassPlaces, overpassToPost } from '@/lib/sources/osm';
 import { fetchWikipediaNearby, fetchWikipediaSummary, wikiToPost } from '@/lib/sources/wikipedia';
 import { fetchSeatGeekEvents } from '@/lib/sources/seatgeek';
 import {
-  enrichEventDescriptions, enrichPlaceDescriptions, enrichSightseeingDescriptions,
+  enrichEventDescriptions, enrichSightseeingDescriptions,
   searchRealEventsWithClaude,
 } from '@/lib/sources/claudeAI';
 import { crawlCityEvents } from '@/lib/sources/webCrawler';
@@ -28,8 +28,15 @@ const VALID_CATEGORIES = new Set([
   'restaurants','hotels','rentals','travel','tech','pets','fashion',
 ]);
 
-// Categories served purely by OpenStreetMap places
-const OSM_CATEGORIES = new Set(['shops','venues','restaurants','hotels','rentals']);
+// Categories served purely by OpenStreetMap places (no ticketed-event side) —
+// these take the fast single-source path.
+const OSM_CATEGORIES = new Set(['shops','venues','restaurants','hotels','rentals','pets','fashion','lifestyle']);
+
+// Categories that have BOTH events (Ticketmaster/Eventbrite/SeatGeek) AND real
+// places (OSM): we blend them so the feed mixes "what's on" with "where to go",
+// and — crucially — a small town with no ticketed events still fills up with its
+// real museums, churches, clubs, gyms, markets and parks. All free, no LLM.
+const OSM_BLEND_CATEGORIES = new Set(['events','art','community','music','fitness','sports','travel','sightseeing']);
 
 // Eventbrite vertical exists for these (see EB_CATEGORY_SLUGS)
 const EB_CATEGORIES = new Set([
@@ -83,29 +90,22 @@ async function ticketmasterPosts(
 
 async function osmPosts(
   lat: number, lng: number, city: string, requestedCat: string, page: number,
-  radius: number, count: number, claudeKey?: string, unsplashKey?: string, pexelsKey?: string
+  radius: number, count: number, unsplashKey?: string, pexelsKey?: string
 ): Promise<{ posts: ApiPost[]; hasMore: boolean }> {
   // 'food' rides on the restaurants query but keeps its own category label
   const osmCat = requestedCat === 'food' ? 'restaurants' : requestedCat;
-  const radiusM = Math.min(radius * 1000, 10000);
+  const radiusM = Math.min(radius * 1000, 12000);
   const elements = await fetchOverpassPlaces(lat, lng, osmCat, radiusM);
   const pageEls = elements.slice(page * count, page * count + count);
   if (pageEls.length === 0) return { posts: [], hasMore: false };
 
-  const placeData = pageEls.map(el => ({
-    name: el.tags?.name ?? 'Unknown',
-    type: el.tags?.shop ?? el.tags?.amenity ?? el.tags?.leisure ?? osmCat,
-    address: [el.tags?.['addr:street'], el.tags?.['addr:housenumber']].filter(Boolean).join(' '),
-  }));
-  const fallbackDescs = placeData.map(p => `${p.name} is a popular ${p.type} in ${city}.`);
-  const descriptions = claudeKey
-    ? await enrichPlaceDescriptions(placeData, city, requestedCat, claudeKey).catch(() => fallbackDescs)
-    : fallbackDescs;
-
-  // Try the venue's real og:image for the first few posts per page
+  // Descriptions are written for free from each place's own OSM tags inside
+  // overpassToPost (no LLM, no credits) — we pass '' so it self-describes. The
+  // venue's real og:image is tried for the first few posts per page; OSM's own
+  // image/wikimedia tag (when present) is used for all, instantly and free.
   const posts = await Promise.all(
     pageEls.map((el, i) => overpassToPost(
-      el, city, requestedCat, descriptions[i] ?? '', unsplashKey, pexelsKey, /* tryOgImage */ i < 4
+      el, city, requestedCat, '', unsplashKey, pexelsKey, /* tryOgImage */ i < 4
     ))
   );
   return { posts, hasMore: (page + 1) * count < elements.length };
@@ -282,7 +282,7 @@ async function computeFeed(request: NextRequest) {
   // ── Pure place categories: OSM is the single source ───────────────────────
   if (OSM_CATEGORIES.has(category)) {
     try {
-      const { posts, hasMore } = await osmPosts(lat, lng, city, category, page, radius, count, claudeKey, unsplashKey, pexelsKey);
+      const { posts, hasMore } = await osmPosts(lat, lng, city, category, page, radius, count, unsplashKey, pexelsKey);
       if (posts.length > 0) {
         const final = withDistance(posts, lat, lng);
         return NextResponse.json(
@@ -338,9 +338,20 @@ async function computeFeed(request: NextRequest) {
 
   if (category === 'food') {
     tasks.push(
-      osmPosts(lat, lng, city, 'food', page, radius, count, claudeKey, unsplashKey, pexelsKey)
+      osmPosts(lat, lng, city, 'food', page, radius, count, unsplashKey, pexelsKey)
         .then(r => ({ source: 'osm', ...r }))
         .catch(err => { console.error('[feed/food-osm]', err); return { source: 'osm', posts: [], hasMore: false }; })
+    );
+  }
+
+  // Blend real OSM places into the mixed categories so they're rich and free
+  // everywhere — even a tiny town's "art" / "community" / "music" / "sport" tab
+  // fills with its actual museums, churches, clubs, gyms, pitches and markets.
+  if (OSM_BLEND_CATEGORIES.has(category)) {
+    tasks.push(
+      osmPosts(lat, lng, city, category, page, radius, count, unsplashKey, pexelsKey)
+        .then(r => ({ source: 'osm', ...r }))
+        .catch(err => { console.error('[feed/osm-blend]', err); return { source: 'osm', posts: [], hasMore: false }; })
     );
   }
 
