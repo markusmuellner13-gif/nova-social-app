@@ -47,6 +47,9 @@ const TRANSIT_NOISE = [
   'kindergarten', 'hospital', 'clinic', 'fire station', 'police station',
   'post office', 'electoral', 'constituency', 'census-designated',
   'list of', '(disambiguation)', 'roundhouse', 'marshalling yard',
+  // Administrative-area articles aren't "a sight" — drop the Bezirk/county/etc.
+  ' district', '(district)', 'municipality', 'province of', 'prefecture',
+  'metropolitan area', 'administrative', 'cadastral', 'statutory city',
 ];
 
 // A handful of stations ARE world-class sightseeing — cathedrals of transit.
@@ -61,10 +64,22 @@ const FAMOUS_STATIONS = [
   'gare du nord', 'maputo railway', 'zürich hauptbahnhof', 'zurich hauptbahnhof',
 ];
 
-export function isWorthSightseeing(title: string): boolean {
+export function isWorthSightseeing(title: string, city?: string): boolean {
   const t = title.toLowerCase();
   if (FAMOUS_STATIONS.some(f => t.includes(f))) return true;
-  return !TRANSIT_NOISE.some(n => t.includes(n));
+  if (TRANSIT_NOISE.some(n => t.includes(n))) return false;
+  // The article ABOUT the town/district itself ("Baden", "Baden bei Wien",
+  // "Baden, Lower Austria") is not a sight inside that town — drop it. We only
+  // treat the city name as the whole first token followed by a disambiguation
+  // suffix (" bei …", a comma, or a bracket), so a real venue that merely starts
+  // with the city's name ("Baden Casino") is kept.
+  if (city) {
+    const c = city.trim().toLowerCase();
+    if (c && (t === c || new RegExp(`^${c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( bei |,|\\s*\\()`).test(t))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Ring offsets (~8km per step) used when the central search is exhausted:
@@ -75,15 +90,16 @@ const RING_OFFSETS: [number, number][] = [
   [0.08, 0.11], [-0.08, 0.11], [-0.08, -0.11], [0.08, -0.11],
 ];
 
-export async function fetchWikipediaNearby(lat: number, lng: number, radiusM: number, ring = 0): Promise<WikiGeoResult[]> {
+export async function fetchWikipediaNearby(lat: number, lng: number, radiusM: number, ring = 0, city = ''): Promise<WikiGeoResult[]> {
   const [dLat, dLng] = RING_OFFSETS[Math.min(ring, RING_OFFSETS.length - 1)];
   const r = Math.min(Math.max(radiusM, 1000), 10000); // Wikipedia max: 10000m
   const url = `https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${lat + dLat}|${lng + dLng}&gsradius=${r}&gslimit=50&format=json&origin=*`;
   const res = await fetch(url, { headers: WIKI_HEADERS, signal: AbortSignal.timeout(4000) });
   if (!res.ok) throw new Error(`Wikipedia GeoSearch ${res.status}`);
   const d = await res.json() as { query?: { geosearch?: WikiGeoResult[] } };
-  // Quality gate: keep real sights, drop train stations / infrastructure noise.
-  return (d.query?.geosearch ?? []).filter(p => isWorthSightseeing(p.title));
+  // Quality gate: keep real sights, drop train stations / infrastructure noise
+  // and the article about the town/district itself.
+  return (d.query?.geosearch ?? []).filter(p => isWorthSightseeing(p.title, city));
 }
 
 export async function fetchWikipediaSummary(title: string): Promise<WikiSummary | null> {

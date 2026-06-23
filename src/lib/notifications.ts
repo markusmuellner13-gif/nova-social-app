@@ -48,11 +48,12 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   return arr;
 }
 
-interface PushLocation { city?: string; lat?: number; lng?: number }
+interface PushLocation { city?: string; lat?: number; lng?: number; categories?: string[] }
 
 // Subscribe to web push. Returns true if a subscription was created & stored.
-// Pass the user's location so the daily digest cron can send "events near you"
-// for their actual city. Safe to call repeatedly (re-registers location).
+// Pass the user's location (and learned top interests) so the daily digest cron
+// can send a personalised "events near you" for their actual city. Safe to call
+// repeatedly (re-registers location + interests).
 export async function subscribeToPush(loc?: PushLocation): Promise<boolean> {
   if (!VAPID_PUBLIC_KEY) return false; // push backend not configured yet
   const reg = await initNotifications();

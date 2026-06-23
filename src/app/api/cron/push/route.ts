@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cacheEnabled, cacheScanKeys, cacheGet, cacheDelete } from '@/lib/serverCache';
 import { webPushEnabled, sendPush, PushSub } from '@/lib/webpush';
 import { dbReadEnabled, queryTopEventsNear } from '@/lib/eventsDb';
-import { buildDigest, buildGenericNudge } from '@/lib/pushContent';
+import { buildSmartPush } from '@/lib/pushContent';
 import type { ApiPost } from '@/lib/sources/shared';
 
 export const runtime = 'nodejs';
@@ -26,6 +26,15 @@ interface Envelope {
   city?: string | null;
   lat?: number | null;
   lng?: number | null;
+  categories?: string[] | null; // the user's learned top interests
+}
+
+// Cheap deterministic hash → a stable per-user seed so two subscribers in the
+// same city don't receive the identical wording on the same day.
+function seedFromKey(key: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0) % 997;
 }
 
 export async function GET(request: NextRequest) {
@@ -61,8 +70,12 @@ export async function GET(request: NextRequest) {
       }).catch(() => [] as ApiPost[]);
     }
 
-    const msg = buildDigest({ city: env.city || 'your area', events: nearby })
-      ?? buildGenericNudge(env.city);
+    const msg = buildSmartPush({
+      city: env.city || 'your area',
+      events: nearby,
+      categories: Array.isArray(env.categories) ? env.categories : [],
+      seed: seedFromKey(key),
+    });
     const payload = { ...msg, url: '/', tag: 'nova-digest' };
 
     const res = await sendPush(env.subscription, payload);

@@ -122,7 +122,7 @@ async function wikipediaPosts(
   const offset = (page % PAGES_PER_RING) * count;
 
   const radiusM = Math.min(radius * 1000, 10000);
-  const nearby = await fetchWikipediaNearby(lat, lng, radiusM, ring);
+  const nearby = await fetchWikipediaNearby(lat, lng, radiusM, ring, city);
   const pagePOIs = nearby.slice(offset, offset + count);
   if (pagePOIs.length === 0) return { posts: [], hasMore: ring < 8 };
 
@@ -217,8 +217,9 @@ export async function GET(request: NextRequest) {
           // Sightseeing must be worth seeing — drop any train-station / infra
           // rows ingested by older sweeps so they never lead the feed again.
           if (cat === 'sightseeing') {
+            const cityName = searchParams.get('city') || '';
             dbPosts = dbPosts.filter(p => isWorthSightseeing(
-              p.organizer || p.location?.name || p.user?.name || ''
+              p.organizer || p.user?.name || p.location?.name || '', cityName
             ));
           }
           // For PLACE categories (shops/venues/restaurants/hotels/rentals/food/

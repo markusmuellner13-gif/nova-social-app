@@ -23,4 +23,21 @@ describe('isWorthSightseeing', () => {
     expect(isWorthSightseeing('Antwerpen-Centraal railway station')).toBe(true);
     expect(isWorthSightseeing('St Pancras railway station')).toBe(true);
   });
+
+  it('drops administrative-area articles', () => {
+    expect(isWorthSightseeing('Baden District, Austria')).toBe(false);
+    expect(isWorthSightseeing('Province of Milan')).toBe(false);
+    expect(isWorthSightseeing('Vienna municipality')).toBe(false);
+  });
+
+  it("drops the article about the town/district itself", () => {
+    expect(isWorthSightseeing('Baden bei Wien', 'Baden')).toBe(false);
+    expect(isWorthSightseeing('Baden, Lower Austria', 'Baden')).toBe(false);
+    expect(isWorthSightseeing('Baden', 'Baden')).toBe(false);
+  });
+
+  it('still keeps a real venue that merely starts with the city name', () => {
+    expect(isWorthSightseeing('Baden Casino', 'Baden')).toBe(true);
+    expect(isWorthSightseeing('Beethoven-Haus Baden, Baden', 'Baden')).toBe(true);
+  });
 });

@@ -8,6 +8,7 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint",
     "build:android": "next build && npx cap sync android",
     "build:ios": "next build && npx cap sync ios",

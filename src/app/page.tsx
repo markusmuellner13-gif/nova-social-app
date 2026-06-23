@@ -21,6 +21,7 @@ import { getUserInteractions } from '@/lib/supabase';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { useLocation } from '@/hooks/useLocation';
 import { initNotifications, subscribeToPush } from '@/lib/notifications';
+import { getTopCategories } from '@/lib/aiEngine';
 import { LocationState, Post } from '@/types';
 
 function AppShell() {
@@ -47,7 +48,10 @@ function AppShell() {
   useEffect(() => {
     const loc = state.location;
     if (!loc?.city) return;
-    void subscribeToPush({ city: loc.city, lat: loc.lat, lng: loc.lng });
+    // Send the user's learned top interests too, so the daily push can be
+    // personalised ("for the music lovers near you") instead of generic.
+    const categories = getTopCategories(state.preferences, state.aiProfile, 3);
+    void subscribeToPush({ city: loc.city, lat: loc.lat, lng: loc.lng, categories });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.location?.city]);
 

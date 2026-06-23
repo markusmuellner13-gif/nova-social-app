@@ -390,6 +390,16 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
 
   const isTabLoading = activeMainTab !== 'partners' && aiLoading && mergedFeed.length === 0;
 
+  // Skeleton is a FALLBACK, not a default: only reveal it if the first content
+  // hasn't arrived within a short grace period. Cached or fast responses (the
+  // common case) never trigger a skeleton flash — the feed just appears.
+  const [showSkeleton, setShowSkeleton] = useState(false);
+  useEffect(() => {
+    if (!isTabLoading) { setShowSkeleton(false); return; }
+    const t = setTimeout(() => setShowSkeleton(true), 400);
+    return () => clearTimeout(t);
+  }, [isTabLoading]);
+
   return (
     <>
       <div className="flex flex-col h-full">
@@ -743,9 +753,9 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
             </div>
           )}
 
-          {/* Initial loading state — a structured skeleton (feels instant &
-              alive) with a small "finding events near <city>" cue on top */}
-          {isTabLoading && (
+          {/* Loading fallback — only appears if content is slow to arrive
+              (delayed), so a fast/cached feed never flashes a skeleton. */}
+          {showSkeleton && (
             <>
               <div className="flex items-center justify-center gap-2 py-3">
                 <Loader2 size={13} style={{ color: '#8b5cf6' }} className="animate-spin" />

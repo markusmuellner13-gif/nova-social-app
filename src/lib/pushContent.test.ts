@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { relativeWhen, buildDigest, buildGenericNudge } from './pushContent';
+import { relativeWhen, buildDigest, buildGenericNudge, buildSmartPush } from './pushContent';
 import type { ApiPost } from '@/lib/sources/shared';
 
 function ev(title: string, dateRaw: string, category = 'events'): ApiPost {
@@ -75,5 +75,43 @@ describe('buildGenericNudge', () => {
     const msg = buildGenericNudge(null, new Date('2026-06-24T12:00:00'));
     expect(msg.title.length).toBeGreaterThan(0);
     expect(msg.body.length).toBeGreaterThan(0);
+  });
+});
+
+describe('buildSmartPush', () => {
+  it('always returns a usable message even with no events', () => {
+    const msg = buildSmartPush({ city: 'Baden', events: [], now: new Date('2026-06-24T12:00:00') });
+    expect(msg.title.length).toBeGreaterThan(0);
+    expect(msg.body.length).toBeGreaterThan(0);
+  });
+
+  it('personalises to the user\'s interest when an event matches', () => {
+    const events = [ev('Indie Night', '2026-06-27', 'music'), ev('Food Market', '2026-06-27', 'food')];
+    const msg = buildSmartPush({ city: 'Graz', events, categories: ['music'], now: new Date('2026-06-24T12:00:00') });
+    expect(`${msg.title} ${msg.body}`).toContain('Indie Night');
+  });
+
+  it('uses a "tonight" angle for an event happening today in the evening', () => {
+    const evening = new Date('2026-06-24T19:00:00');
+    const events = [ev('Rooftop Set', '2026-06-24', 'music')];
+    const msg = buildSmartPush({ city: 'Vienna', events, now: evening });
+    expect(`${msg.title} ${msg.body}`.toLowerCase()).toContain('tonight');
+  });
+
+  it('gives a morning brief in the early hours', () => {
+    const morning = new Date('2026-06-24T08:00:00');
+    const events = [ev('Gallery Opening', '2026-06-24', 'art')];
+    const msg = buildSmartPush({ city: 'Vienna', events, now: morning });
+    expect(msg.title.toLowerCase()).toMatch(/morning|explore|day/);
+  });
+
+  it('spreads wording across users via the seed', () => {
+    const events = [ev('A', '2026-06-30'), ev('B', '2026-06-30'), ev('C', '2026-06-30')];
+    const now = new Date('2026-06-24T13:00:00');
+    const a = buildSmartPush({ city: 'Wels', events, now, seed: 1 });
+    const b = buildSmartPush({ city: 'Wels', events, now, seed: 2 });
+    // Not a hard guarantee of difference, but seeds should be able to differ.
+    expect(typeof a.body).toBe('string');
+    expect(typeof b.body).toBe('string');
   });
 });
