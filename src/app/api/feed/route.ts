@@ -4,7 +4,7 @@ import { resolveRequestGeo } from '@/lib/sources/geocode';
 import { fetchTicketmaster, tmEventToPost, TM_CATEGORY_MAP } from '@/lib/sources/ticketmaster';
 import { fetchEventbriteEvents } from '@/lib/sources/eventbrite';
 import { fetchOverpassPlaces, overpassToPost } from '@/lib/sources/osm';
-import { fetchWikipediaNearby, fetchWikipediaSummary, wikiToPost, isWorthSightseeing } from '@/lib/sources/wikipedia';
+import { fetchWikipediaNearby, fetchWikipediaSummary, wikiToPost, isWorthSightseeing, isSettlementArticle } from '@/lib/sources/wikipedia';
 import { fetchSeatGeekEvents } from '@/lib/sources/seatgeek';
 import {
   enrichEventDescriptions, enrichSightseeingDescriptions,
@@ -126,8 +126,18 @@ async function wikipediaPosts(
   const pagePOIs = nearby.slice(offset, offset + count);
   if (pagePOIs.length === 0) return { posts: [], hasMore: ring < 8 };
 
-  const summaries = await Promise.all(pagePOIs.map(p => fetchWikipediaSummary(p.title)));
-  const poiData = pagePOIs.map((p, i) => ({
+  const rawSummaries = await Promise.all(pagePOIs.map(p => fetchWikipediaSummary(p.title)));
+  // Drop articles that are really about a neighbouring village/town (their own
+  // summary says "municipality/village in…") — not sights. Reliable signal that
+  // the bare title can't give us.
+  const kept = pagePOIs
+    .map((poi, i) => ({ poi, summary: rawSummaries[i] }))
+    .filter(({ summary }) => !isSettlementArticle(summary?.description));
+  if (kept.length === 0) return { posts: [], hasMore: offset + count < nearby.length || ring < 8 };
+
+  const keptPOIs   = kept.map(k => k.poi);
+  const summaries  = kept.map(k => k.summary);
+  const poiData = keptPOIs.map((p, i) => ({
     name: p.title,
     extract: summaries[i]?.extract ?? `${p.title} is a landmark near ${city}.`,
   }));
@@ -136,7 +146,7 @@ async function wikipediaPosts(
     ? await enrichSightseeingDescriptions(poiData, city, claudeKey).catch(() => fallbackDescs)
     : fallbackDescs;
 
-  const posts = await Promise.all(pagePOIs.map((poi, i) =>
+  const posts = await Promise.all(keptPOIs.map((poi, i) =>
     wikiToPost(poi, summaries[i], descriptions[i] ?? fallbackDescs[i], city, unsplashKey, pexelsKey)
   ));
   return { posts, hasMore: offset + count < nearby.length || ring < 8 };

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isWorthSightseeing } from './wikipedia';
+import { isWorthSightseeing, isSettlementArticle } from './wikipedia';
 
 describe('isWorthSightseeing', () => {
   it('drops generic train stations and transit infrastructure', () => {
@@ -39,5 +39,25 @@ describe('isWorthSightseeing', () => {
   it('still keeps a real venue that merely starts with the city name', () => {
     expect(isWorthSightseeing('Baden Casino', 'Baden')).toBe(true);
     expect(isWorthSightseeing('Beethoven-Haus Baden, Baden', 'Baden')).toBe(true);
+  });
+});
+
+describe('isSettlementArticle', () => {
+  it('flags articles that are really about a populated place', () => {
+    expect(isSettlementArticle('A municipality in Lower Austria')).toBe(true);
+    expect(isSettlementArticle('village in the district of Baden')).toBe(true);
+    expect(isSettlementArticle('a town in Italy')).toBe(true);
+  });
+
+  it('keeps real sights even when their place is mentioned', () => {
+    expect(isSettlementArticle('a castle in the town of Baden')).toBe(false);
+    expect(isSettlementArticle('Baroque church in a village near Vienna')).toBe(false);
+    expect(isSettlementArticle('19th-century museum')).toBe(false);
+  });
+
+  it('is safe on empty/unknown descriptions', () => {
+    expect(isSettlementArticle('')).toBe(false);
+    expect(isSettlementArticle(null)).toBe(false);
+    expect(isSettlementArticle(undefined)).toBe(false);
   });
 });

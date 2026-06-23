@@ -64,6 +64,21 @@ const FAMOUS_STATIONS = [
   'gare du nord', 'maputo railway', 'zürich hauptbahnhof', 'zurich hauptbahnhof',
 ];
 
+// A Wikipedia article ABOUT a populated place (a neighbouring village/town/
+// suburb) is not a sight — it's just the place. Detected from the article's own
+// one-line description ("municipality in Lower Austria", "village in…"), which is
+// a far more reliable signal than the bare title. Returns true → should be
+// dropped from the sightseeing feed.
+const SETTLEMENT_DESC = /\b(municipality|town|village|hamlet|suburb|borough|commune|locality|cadastral|civil parish|market town|populated place|settlement|district|county|province|region|state capital|metropolis)\b/i;
+// …but a description that ALSO names a real sight type should survive (e.g. a
+// "village church", a "castle in the town of…").
+const SIGHT_DESC = /\b(church|cathedral|basilica|chapel|abbey|monastery|castle|palace|fortress|ruins?|tower|gate|monument|memorial|museum|gallery|palace|theatre|opera|bridge|park|garden|square|spa|baths?|fountain|statue|landmark|viewpoint|lake|waterfall|cave|vineyard|winery|sight|attraction)\b/i;
+
+export function isSettlementArticle(description: string | null | undefined): boolean {
+  if (!description) return false;
+  return SETTLEMENT_DESC.test(description) && !SIGHT_DESC.test(description);
+}
+
 export function isWorthSightseeing(title: string, city?: string): boolean {
   const t = title.toLowerCase();
   if (FAMOUS_STATIONS.some(f => t.includes(f))) return true;
