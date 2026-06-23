@@ -19,6 +19,8 @@ interface GeocodeCity {
   lat: number;
   lng: number;
   label: string;
+  district?: string;
+  localKm?: number;
 }
 
 const POPULAR_CITIES: { name: string; country: string; lat: number; lng: number; emoji: string }[] = [
@@ -89,13 +91,16 @@ export default function CityExplorer({ currentCity, onSelectCity, onClose }: Pro
       country: r.country,
       countryCode: r.countryCode,
       enabled: true,
+      district: r.district,
+      localKm: r.localKm,
     };
     onSelectCity(loc);
     onClose();
   }
 
   function selectPopular(c: (typeof POPULAR_CITIES)[0]) {
-    onSelectCity({ lat: c.lat, lng: c.lng, city: c.name, country: c.country, countryCode: '', enabled: true });
+    // Popular list is all big metros → wider local ring.
+    onSelectCity({ lat: c.lat, lng: c.lng, city: c.name, country: c.country, countryCode: '', enabled: true, localKm: 22 });
     onClose();
   }
 

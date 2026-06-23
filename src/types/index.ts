@@ -130,6 +130,14 @@ export interface LocationState {
   country: string;
   countryCode: string;
   enabled: boolean;
+  // Administrative district the city belongs to (county / Bezirk / Landkreis /
+  // département / provincia …). Used to frame the feed by area rather than a raw
+  // radius, so e.g. Baden surfaces its whole district (Pfaffstätten, Bad Vöslau,
+  // Traiskirchen…) but not the separate big city next door (Vienna).
+  district?: string;
+  // How far (km) counts as "local" for this place — adapts to whether the
+  // resolved place is a metropolis or a small town/district. Worldwide-safe.
+  localKm?: number;
 }
 
 export interface Reminder {

@@ -1,9 +1,9 @@
 'use client';
 
 import React, { createContext, useContext, useReducer, useEffect, useRef, useCallback } from 'react';
-import { AppPersistedState, UserPreferences, NovaNotification, Post, Toast, LocationState, Reminder } from '@/types';
+import { AppPersistedState, UserPreferences, NovaNotification, Post, Toast, LocationState, Reminder, Category } from '@/types';
 import { DEFAULT_PREFERENCES, MOCK_NOTIFICATIONS, MOCK_POSTS } from '@/data/mockData';
-import { learnFromInteraction, generateAINotification, getTopCategories } from '@/lib/aiEngine';
+import { learnFromInteraction, learnFromBrowse, generateAINotification, getTopCategories } from '@/lib/aiEngine';
 import { upsertInteraction, deleteInteraction } from '@/lib/supabase';
 
 // Module-level user ID for Supabase sync — set by AppShell when auth state changes
@@ -152,6 +152,7 @@ type Action =
   | { type: 'ADD_REMINDER'; reminder: Reminder }
   | { type: 'REMOVE_REMINDER'; postId: string }
   | { type: 'SET_PREFERENCES'; prefs: UserPreferences }
+  | { type: 'LEARN_CATEGORY'; category: Category }
   | { type: 'ADD_NOTIFICATION'; notif: NovaNotification }
   | { type: 'MARK_ALL_READ' }
   | { type: 'MARK_READ'; id: string }
@@ -228,6 +229,9 @@ function reducer(state: AppPersistedState, action: Action): AppPersistedState {
     case 'SET_PREFERENCES':
       return { ...state, preferences: action.prefs };
 
+    case 'LEARN_CATEGORY':
+      return { ...state, aiProfile: learnFromBrowse(state.aiProfile, action.category) };
+
     case 'ADD_NOTIFICATION':
       return {
         ...state,
@@ -292,6 +296,7 @@ interface AppContextValue {
   addReminder: (reminder: Reminder) => void;
   removeReminder: (postId: string) => void;
   setPreferences: (prefs: UserPreferences) => void;
+  learnCategory: (category: Category) => void;
   markAllRead: () => void;
   markRead: (id: string) => void;
   completeOnboarding: (prefs: UserPreferences) => void;
@@ -477,6 +482,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addReminder: (reminder) => dispatch({ type: 'ADD_REMINDER', reminder }),
     removeReminder: (postId) => dispatch({ type: 'REMOVE_REMINDER', postId }),
     setPreferences: (prefs) => dispatch({ type: 'SET_PREFERENCES', prefs }),
+    learnCategory: (category) => dispatch({ type: 'LEARN_CATEGORY', category }),
     markAllRead: () => dispatch({ type: 'MARK_ALL_READ' }),
     markRead: (id) => dispatch({ type: 'MARK_READ', id }),
     completeOnboarding: (prefs) => dispatch({ type: 'COMPLETE_ONBOARDING', prefs }),

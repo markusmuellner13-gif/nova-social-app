@@ -16,10 +16,10 @@ function NavButton({ id, Icon, label, isActive, onClick, badge }: {
   isActive: boolean; onClick: () => void; badge?: number;
 }) {
   return (
-    <button onClick={onClick} className="flex flex-col items-center justify-center gap-1 flex-1 h-full" style={{ minWidth: 0 }}>
+    <button onClick={onClick} className="flex flex-col items-center justify-center gap-0.5 flex-1 h-full" style={{ minWidth: 0 }}>
       <motion.div whileTap={{ scale: 0.8 }} className="relative flex items-center justify-center rounded-2xl transition-all"
-        style={{ width: 44, height: 34, background: isActive ? 'rgba(139,92,246,0.15)' : 'transparent' }}>
-        <Icon size={24} strokeWidth={isActive ? 2.2 : 1.7}
+        style={{ width: 42, height: 30, background: isActive ? 'rgba(139,92,246,0.15)' : 'transparent' }}>
+        <Icon size={23} strokeWidth={isActive ? 2.2 : 1.7}
           style={{ color: isActive ? '#a78bfa' : '#55556a', transition: 'color 0.2s' }} />
         <AnimatePresence>
           {badge != null && badge > 0 && (
@@ -57,16 +57,17 @@ export default function BottomNav({ active, onChange }: Props) {
         // what box-sizing:border-box would do to a plain fixed height — squeezing
         // the icons so they appear to spill out of the bar). This way every
         // button always sits fully inside the bar's field, on any phone, and the
-        // bar still hugs the bottom edge.
-        height: 'calc(60px + env(safe-area-inset-bottom, 0px))',
+        // bar still hugs the bottom edge. Kept compact (52px) so the bar sits low
+        // and gives the feed more room.
+        height: 'calc(52px + env(safe-area-inset-bottom, 0px))',
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
       }}>
       {tabs.map(({ id, Icon, label, badge, center }) =>
         center ? (
-          <button key={id} onClick={() => onChange(id)} className="flex flex-col items-center justify-center gap-1 flex-1 h-full" style={{ minWidth: 0 }}>
+          <button key={id} onClick={() => onChange(id)} className="flex flex-col items-center justify-center gap-0.5 flex-1 h-full" style={{ minWidth: 0 }}>
             <motion.div whileTap={{ scale: 0.85 }} className="flex items-center justify-center rounded-2xl"
-              style={{ width: 46, height: 34, background: active === id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : 'linear-gradient(135deg, rgba(139,92,246,0.55), rgba(236,72,153,0.55))', boxShadow: active === id ? '0 2px 10px rgba(139,92,246,0.4)' : 'none' }}>
-              <Icon size={22} color="white" strokeWidth={active === id ? 2.5 : 1.8} />
+              style={{ width: 44, height: 30, background: active === id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : 'linear-gradient(135deg, rgba(139,92,246,0.55), rgba(236,72,153,0.55))', boxShadow: active === id ? '0 2px 10px rgba(139,92,246,0.4)' : 'none' }}>
+              <Icon size={21} color="white" strokeWidth={active === id ? 2.5 : 1.8} />
             </motion.div>
             <span className="text-xs font-semibold" style={{ color: active === id ? '#a78bfa' : '#55556a', letterSpacing: '0.01em' }}>{t.nav.groups}</span>
           </button>

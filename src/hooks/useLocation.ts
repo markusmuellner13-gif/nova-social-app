@@ -13,7 +13,15 @@ interface UseLocationReturn {
   setManualLocation: (loc: LocationState) => void;
 }
 
-interface GeoResult { city: string; country: string; countryCode: string }
+interface GeoResult { city: string; country: string; countryCode: string; district?: string; localKm?: number }
+
+// How far counts as "local". A metropolis (resolved as a proper city) spans more
+// ground, so its local ring is wider; a town/village uses a tighter, district-
+// sized ring that still pulls in its neighbouring villages but stops short of a
+// separate big city next door. Worldwide-safe — driven by the admin level the
+// geocoder resolved, not a hard-coded place list.
+const METRO_LOCAL_KM = 22;
+const TOWN_LOCAL_KM  = 16;
 
 async function geocodeNominatim(lat: number, lng: number): Promise<GeoResult | null> {
   try {
@@ -30,6 +38,9 @@ async function geocodeNominatim(lat: number, lng: number): Promise<GeoResult | n
     if (!res.ok) return null;
     const data = await res.json();
     const addr = data.address ?? {};
+    // A proper city resolves wider local ring; a town/village uses the tight
+    // district-sized ring.
+    const isMetro = Boolean(addr.city);
     const city =
       addr.city ||
       addr.town ||
@@ -39,10 +50,22 @@ async function geocodeNominatim(lat: number, lng: number): Promise<GeoResult | n
       addr.state ||
       '';
     if (!city) return null;
+    // The admin district the place sits in — universal across countries:
+    // county (UK/US/IE), Landkreis/Bezirk (DE/AT via state_district/county),
+    // arrondissement/département (FR), provincia (IT/ES) all map to these.
+    const district =
+      addr.county ||
+      addr.state_district ||
+      addr.city_district ||
+      addr.district ||
+      addr.region ||
+      '';
     return {
       city,
       country: addr.country || 'Unknown',
       countryCode: (addr.country_code ?? '').toUpperCase(),
+      district: district && district !== city ? district : undefined,
+      localKm: isMetro ? METRO_LOCAL_KM : TOWN_LOCAL_KM,
     };
   } catch { return null; }
 }
@@ -58,10 +81,19 @@ async function geocodeBigDataCloud(lat: number, lng: number): Promise<GeoResult 
     const data = await res.json();
     const city = data.city || data.locality || data.principalSubdivision || '';
     if (!city) return null;
+    const isMetro = Boolean(data.city);
+    const district =
+      data.localityInfo?.administrative?.find(
+        (a: { adminLevel?: number; name?: string }) => a.adminLevel === 6
+      )?.name ||
+      data.principalSubdivision ||
+      '';
     return {
       city,
       country: data.countryName || 'Unknown',
       countryCode: (data.countryCode ?? '').toUpperCase(),
+      district: district && district !== city ? district : undefined,
+      localKm: isMetro ? METRO_LOCAL_KM : TOWN_LOCAL_KM,
     };
   } catch { return null; }
 }

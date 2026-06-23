@@ -4,7 +4,7 @@ import { resolveRequestGeo } from '@/lib/sources/geocode';
 import { fetchTicketmaster, tmEventToPost, TM_CATEGORY_MAP } from '@/lib/sources/ticketmaster';
 import { fetchEventbriteEvents } from '@/lib/sources/eventbrite';
 import { fetchOverpassPlaces, overpassToPost } from '@/lib/sources/osm';
-import { fetchWikipediaNearby, fetchWikipediaSummary, wikiToPost } from '@/lib/sources/wikipedia';
+import { fetchWikipediaNearby, fetchWikipediaSummary, wikiToPost, isWorthSightseeing } from '@/lib/sources/wikipedia';
 import { fetchSeatGeekEvents } from '@/lib/sources/seatgeek';
 import {
   enrichEventDescriptions, enrichSightseeingDescriptions,
@@ -210,10 +210,17 @@ export async function GET(request: NextRequest) {
         const count  = Math.max(1, Math.min(20, parseInt(searchParams.get('count') || '8', 10)));
         const page   = Math.max(0, parseInt(searchParams.get('page') || '0', 10));
         if (lat || lng) {
-          const dbPosts = await queryEventsNear({
+          let dbPosts = await queryEventsNear({
             lat, lng, radiusKm: radius, category: cat,
             afterIso: new Date().toISOString(), limit: count, offset: page * count,
           });
+          // Sightseeing must be worth seeing — drop any train-station / infra
+          // rows ingested by older sweeps so they never lead the feed again.
+          if (cat === 'sightseeing') {
+            dbPosts = dbPosts.filter(p => isWorthSightseeing(
+              p.organizer || p.location?.name || p.user?.name || ''
+            ));
+          }
           // For PLACE categories (shops/venues/restaurants/hotels/rentals/food/
           // sightseeing) the live OSM/Wikipedia sources are authoritative and
           // strictly local. Only serve them from the DB when the DB actually has

@@ -23,6 +23,7 @@ interface NominatimResult {
   address?: {
     city?: string; town?: string; village?: string; municipality?: string;
     county?: string; state?: string; country?: string; country_code?: string;
+    state_district?: string; city_district?: string; region?: string;
   };
 }
 
@@ -33,7 +34,15 @@ export interface GeocodeCity {
   lat: number;
   lng: number;
   label: string;
+  district?: string;
+  localKm?: number;
 }
+
+// A proper city spans a wider "local" ring than a town/village (whose tighter,
+// district-sized ring pulls in neighbouring villages but stops short of the
+// separate big city next door). Worldwide-safe — driven by the admin level.
+const METRO_LOCAL_KM = 22;
+const TOWN_LOCAL_KM  = 16;
 
 export async function GET(request: NextRequest) {
   const raw = (new URL(request.url).searchParams.get('q') || '').trim();
@@ -80,11 +89,15 @@ export async function GET(request: NextRequest) {
     const lat = parseFloat(r.lat);
     const lng = parseFloat(r.lon);
     if (Number.isNaN(lat) || Number.isNaN(lng)) continue;
+    const isMetro = Boolean(a.city);
+    const district = a.county || a.state_district || a.city_district || a.region || '';
     results.push({
       city, country,
       countryCode: (a.country_code ?? '').toUpperCase(),
       lat, lng,
       label: r.display_name,
+      district: district && district !== city ? district : undefined,
+      localKm: isMetro ? METRO_LOCAL_KM : TOWN_LOCAL_KM,
     });
   }
 

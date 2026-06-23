@@ -16,6 +16,13 @@ const CACHE_PREFIX     = 'nova_feed_v5_';
 const RADIUS_TIERS = [15, 45, 100, 200];
 const DAYS_TIERS   = [60, 180];
 
+// The first (local) radius tier adapts to the place: a town keeps the tight
+// district ring, a metropolis gets a wider one. Falls back to RADIUS_TIERS[0].
+function localTier(loc: LocationState | null): number {
+  const km = loc?.localKm;
+  return typeof km === 'number' && km > 0 ? km : RADIUS_TIERS[0];
+}
+
 // Blend mode (discover, no chip selected): the feed rotates through EVERY
 // category as the user scrolls, so the stream never runs out and always mixes
 // events, food, music, places, sightseeing, etc. — the endless doom-scroll.
@@ -164,7 +171,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     try {
-      const params = buildParams(loc, category, 0, RADIUS_TIERS[0], DAYS_TIERS[0]);
+      const params = buildParams(loc, category, 0, localTier(loc), DAYS_TIERS[0]);
       const res = await fetch(`/api/feed?${params}`);
       if (!res.ok) return;
       const data = await res.json() as FeedResponse;
@@ -192,7 +199,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     if (!TOURISM_CATS.has(category) || tourismFetchedRef.current.has(city)) return;
     tourismFetchedRef.current.add(city);
 
-    const params = `${buildParams(loc, 'events', 0, RADIUS_TIERS[0], DAYS_TIERS[0])}&source=tourism&count=6`;
+    const params = `${buildParams(loc, 'events', 0, localTier(loc), DAYS_TIERS[0])}&source=tourism&count=6`;
     fetch(`/api/events?${params}`)
       .then(res => (res.ok ? res.json() : null))
       .then((data: { posts?: Post[] } | null) => {
@@ -288,7 +295,11 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     categoryRef.current = cat;
 
     const city   = location?.city ?? 'nearby';
-    const radius = RADIUS_TIERS[radiusTierRef.current] ?? RADIUS_TIERS[RADIUS_TIERS.length - 1];
+    // Tier 0 = the place's adaptive local ring (district for a town, metro for a
+    // city); deeper tiers expand outward to nearby towns and beyond.
+    const radius = radiusTierRef.current === 0
+      ? localTier(location)
+      : (RADIUS_TIERS[radiusTierRef.current] ?? RADIUS_TIERS[RADIUS_TIERS.length - 1]);
     const days   = DAYS_TIERS[daysTierRef.current] ?? DAYS_TIERS[DAYS_TIERS.length - 1];
 
     // ── Discover BLEND: rotate through every category for an endless mixed feed ─
@@ -301,7 +312,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
         fetchSponsored(location.city);
       }
       try {
-        const data = await fetchFeedPage(location, bcat, bpage, RADIUS_TIERS[0], DAYS_TIERS[daysTierRef.current] ?? DAYS_TIERS[0]);
+        const data = await fetchFeedPage(location, bcat, bpage, localTier(location), DAYS_TIERS[daysTierRef.current] ?? DAYS_TIERS[0]);
         const newPosts = filterExpired(data?.posts ?? []);
         if (newPosts.length > 0) {
           setPosts(prev => {
@@ -319,7 +330,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
         for (const ahead of [1, 2]) {
           const next = step + ahead;
           prefetchNextPage(location, BLEND_CATEGORIES[next % BLEND_CATEGORIES.length],
-            Math.floor(next / BLEND_CATEGORIES.length), RADIUS_TIERS[0], dTier);
+            Math.floor(next / BLEND_CATEGORIES.length), localTier(location), dTier);
         }
       } catch (err) {
         console.error('[useAIFeed/blend]', err);

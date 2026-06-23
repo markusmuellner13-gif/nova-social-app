@@ -12,6 +12,7 @@ import { useAIFeed } from '@/hooks/useAIFeed';
 import PostComponent from './Post';
 import { useLanguage } from '@/context/LanguageContext';
 import AdSlot from './AdSlot';
+import FeedSkeleton from './FeedSkeleton';
 
 // Ad placement: every AD_EVERY posts starting at AD_START
 const AD_START = 3;
@@ -88,6 +89,16 @@ function adIndex(i: number): boolean {
   return i >= AD_START && (i - AD_START) % AD_EVERY === 0;
 }
 
+// A small time-aware greeting so the feed feels live and personal — pairs with
+// the AI's time-of-day ranking (mornings lean food/active, evenings lean
+// nightlife/events).
+function greeting(hour = new Date().getHours()): { emoji: string; text: string } {
+  if (hour >= 5  && hour < 11) return { emoji: '☀️', text: 'Good morning' };
+  if (hour >= 11 && hour < 17) return { emoji: '🌤️', text: 'Good afternoon' };
+  if (hour >= 17 && hour < 22) return { emoji: '🌆', text: 'Good evening' };
+  return { emoji: '🌙', text: 'Up late' };
+}
+
 function sortByEventDate(posts: Post[]): Post[] {
   return [...posts].sort((a, b) => {
     const aDate = a.eventDateRaw ? new Date(a.eventDateRaw).getTime() : a.timestamp;
@@ -103,7 +114,7 @@ interface Props {
 }
 
 export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOpenNotifications }: Props) {
-  const { state, unreadCount } = useApp();
+  const { state, unreadCount, learnCategory } = useApp();
   const { t } = useLanguage();
   const { preferences, aiProfile } = state;
   const location = state.location;
@@ -210,7 +221,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     type FeedItem =
       | { type: 'post'; post: Post }
       | { type: 'ad'; index: number }
-      | { type: 'divider'; city: string; localEmpty: boolean };
+      | { type: 'divider'; city: string; localEmpty: boolean; district?: string };
     const items: FeedItem[] = [];
     let adIdx = 0;
 
@@ -260,7 +271,9 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
       ? applyEventFilters(arr, dateFilter, priceFilter)
       : arr;
 
-    const isNearby = (p: Post) => typeof p.distanceKm === 'number' && p.distanceKm > LOCAL_RADIUS_KM;
+    // Local ring adapts to the place (district for a town, metro for a city).
+    const localKm = location?.localKm ?? LOCAL_RADIUS_KM;
+    const isNearby = (p: Post) => typeof p.distanceKm === 'number' && p.distanceKm > localKm;
     const localSorted  = filterOne(sortOne(hasCity ? aiPosts.filter(p => !isNearby(p)) : aiPosts));
     const nearbySorted = filterOne(sortOne(hasCity ? aiPosts.filter(isNearby) : []));
 
@@ -274,13 +287,13 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     if (localSorted.length > 0) {
       pushPosts(localSorted);
       if (nearbySorted.length > 0) {
-        items.push({ type: 'divider', city: location?.city ?? '', localEmpty: false });
+        items.push({ type: 'divider', city: location?.city ?? '', localEmpty: false, district: location?.district });
         pushPosts(nearbySorted);
       }
     } else if (nearbySorted.length > 0) {
       // Nothing happening in the user's own town right now — be honest and lead
       // with a "nearby" note rather than passing a neighbour off as local.
-      items.push({ type: 'divider', city: location?.city ?? '', localEmpty: true });
+      items.push({ type: 'divider', city: location?.city ?? '', localEmpty: true, district: location?.district });
       pushPosts(nearbySorted);
     }
 
@@ -359,6 +372,10 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
 
   function handleMainTabChange(tab: MainTab) {
     if (tab === activeMainTab) return;
+    // Learn from which section the user opens (events / sights / sport).
+    if (tab === 'events') learnCategory('events');
+    else if (tab === 'sightseeing') learnCategory('sightseeing');
+    else if (tab === 'sport') learnCategory('sports');
     setActiveMainTab(tab);
     setActiveChipCategory(null);
     setVisibleCurated(PAGE_SIZE);
@@ -544,8 +561,12 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
                     key={cat}
                     whileTap={{ scale: 0.92 }}
                     onClick={() => {
-                      setActiveChipCategory(isActive ? null : cat);
+                      const next = isActive ? null : cat;
+                      setActiveChipCategory(next);
                       setVisibleCurated(PAGE_SIZE);
+                      // Opening a category is an implicit interest signal — let
+                      // Nova quietly learn from what the user actually browses.
+                      if (next) learnCategory(next);
                     }}
                     className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold"
                     style={{
@@ -709,28 +730,33 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
             </div>
           )}
 
-          {/* Location AI header — discover only */}
+          {/* Location AI header — discover only. Time-aware greeting + the
+              user's city/district makes the feed feel live and personal. */}
           {activeMainTab === 'discover' && location?.enabled && aiPosts.length > 0 && (
             <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: 'rgba(139,92,246,0.05)', borderBottom: '1px solid #1a1a24' }}>
-              <Sparkles size={13} style={{ color: '#8b5cf6' }} />
-              <span className="text-xs font-semibold" style={{ color: '#6648aa' }}>
-                {t.feed.eventsNear} {location.city}
+              <span className="text-sm leading-none">{greeting().emoji}</span>
+              <span className="text-xs font-semibold" style={{ color: '#a78bfa' }}>
+                {greeting().text} — what&apos;s on in {location.city}
               </span>
-              <div className="w-1.5 h-1.5 rounded-full ml-1" style={{ background: '#22c55e' }} />
-              <span className="text-xs" style={{ color: '#444455' }}>Live</span>
+              <div className="w-1.5 h-1.5 rounded-full ml-auto" style={{ background: '#22c55e' }} />
+              <span className="text-xs" style={{ color: '#556' }}>Live</span>
             </div>
           )}
 
-          {/* Initial loading state */}
+          {/* Initial loading state — a structured skeleton (feels instant &
+              alive) with a small "finding events near <city>" cue on top */}
           {isTabLoading && (
-            <div className="flex flex-col items-center justify-center py-20 gap-4">
-              <Loader2 size={28} style={{ color: '#8b5cf6' }} className="animate-spin" />
-              <p className="text-sm font-medium" style={{ color: '#555566' }}>
-                {location?.city
-                  ? `${t.feed.findingEvents} ${location.city}…`
-                  : t.feed.loading}
-              </p>
-            </div>
+            <>
+              <div className="flex items-center justify-center gap-2 py-3">
+                <Loader2 size={13} style={{ color: '#8b5cf6' }} className="animate-spin" />
+                <p className="text-xs font-medium" style={{ color: '#777788' }}>
+                  {location?.city
+                    ? `${t.feed.findingEvents} ${location.city}…`
+                    : t.feed.loading}
+                </p>
+              </div>
+              <FeedSkeleton count={4} />
+            </>
           )}
 
           {/* Honest empty state — no invented events when sources are empty */}
@@ -762,14 +788,14 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
                         <>
                           <p className="text-sm font-bold text-white">Nothing on in {item.city} right now</p>
                           <p className="text-xs max-w-[260px]" style={{ color: '#888899' }}>
-                            {item.city} is quiet at the moment — here&apos;s what&apos;s happening in nearby towns 👇
+                            {item.district ? `${item.city} and the ${item.district} district` : item.city} look quiet at the moment — here&apos;s what&apos;s happening in nearby towns 👇
                           </p>
                         </>
                       ) : (
                         <>
-                          <p className="text-sm font-bold text-white">That&apos;s everything on in {item.city}!</p>
+                          <p className="text-sm font-bold text-white">That&apos;s everything in {item.district ? `the ${item.district} district` : item.city}!</p>
                           <p className="text-xs max-w-[260px]" style={{ color: '#888899' }}>
-                            You&apos;ve reached the end for {item.city}. Keep scrolling for events in nearby towns 👇
+                            You&apos;ve reached the end for {item.city}{item.district ? ` & its district` : ''}. Keep scrolling for nearby towns 👇
                           </p>
                         </>
                       )}
