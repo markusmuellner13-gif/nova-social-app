@@ -36,6 +36,7 @@ const CATEGORY_EMOJI: Record<Category, string> = {
   restaurants: '🍽️',
   hotels:      '🏨',
   rentals:     '🚲',
+  outdoors:    '🏞️',
 };
 
 const CATEGORY_COLOR: Record<Category, string> = {
@@ -57,6 +58,7 @@ const CATEGORY_COLOR: Record<Category, string> = {
   restaurants: '#fb923c',
   hotels:      '#60a5fa',
   rentals:     '#34d399',
+  outdoors:    '#16a34a',
 };
 
 interface Props {

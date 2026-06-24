@@ -31,6 +31,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Refresh time-sensitive content (fast tier — every run)
+        env:
+          BASE_URL: ${{ vars.NOVA_BASE_URL || 'https://nova-phi-liart.vercel.app' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET secret is not set — add it in repo Settings → Secrets → Actions."
+            exit 1
+          fi
+          auth="Authorization: Bearer $CRON_SECRET"
+          # The fast tier (events/music/sports/art/venues/community) changes
+          # constantly, so we sweep it in FULL every 30 minutes. It's a small
+          # list, so a few slices cover the whole catalogue. Slow-moving places
+          # (museums, restaurants, hotels, trails…) ride the daily full sweep below.
+          offset=0
+          for i in $(seq 1 8); do
+            resp=$(curl -s -m 90 -H "$auth" "$BASE_URL/api/cron/ingest?tier=fast&offset=$offset" || echo '{}')
+            ing=$(echo "$resp" | grep -oE '"ingested":[0-9]+' | grep -oE '[0-9]+' || echo 0)
+            nxt=$(echo "$resp" | grep -oE '"nextOffset":[0-9]+' | grep -oE '[0-9]+' || echo "")
+            echo "fast slice $i: ingested=${ing:-0} nextOffset=${nxt:-done}"
+            if [ -z "$nxt" ]; then echo "fast tier fully refreshed"; break; fi
+            offset="$nxt"
+          done
+
       - name: Drive ingestion across several catalogue slices
         env:
           BASE_URL: ${{ vars.NOVA_BASE_URL || 'https://nova-phi-liart.vercel.app' }}

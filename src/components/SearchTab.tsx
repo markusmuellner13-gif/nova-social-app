@@ -28,6 +28,7 @@ const CATEGORY_EMOJIS: { id: Category; emoji: string }[] = [
   { id: 'music',     emoji: '🎵' },
   { id: 'pets',      emoji: '🐾' },
   { id: 'lifestyle', emoji: '🌟' },
+  { id: 'outdoors',  emoji: '🏞️' },
   { id: 'events',    emoji: '🎉' },
 ];
 

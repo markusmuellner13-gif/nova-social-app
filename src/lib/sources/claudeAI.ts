@@ -57,6 +57,7 @@ export async function enrichPlaceDescriptions(
     food:        'restaurant, café or bar',
     hotels:      'hotel or place to stay',
     rentals:     'rental service (bikes, cars, boats, equipment)',
+    outdoors:    'outdoor spot (hike, trail, lake, river, park or viewpoint)',
   };
   const catLabel = CAT_LABELS[category] ?? 'venue or entertainment space';
   const prompt = `Write a punchy 2-sentence description for each of these ${places.length} real ${catLabel}s in ${city} for a social discovery app.
@@ -112,6 +113,7 @@ const CATEGORY_GUIDANCE: Record<string, string> = {
   restaurants: 'restaurant openings, restaurant weeks, tasting menus, brunch specials, chef events, pop-up dining',
   hotels:      'hotel deals, spa weekends, rooftop bar events, special stay packages, boutique hotel openings',
   rentals:     'bike rental tours, e-scooter offers, boat rental experiences, ski equipment rental deals, car sharing offers',
+  outdoors:    'guided hikes, mountain trails, lake swimming spots, river kayaking, cycling routes, nature walks, scenic viewpoints, national park visits',
 };
 
 export async function searchRealEventsWithClaude(

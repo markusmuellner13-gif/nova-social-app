@@ -28,7 +28,8 @@ export type Category =
   | 'community'
   | 'restaurants'
   | 'hotels'
-  | 'rentals';
+  | 'rentals'
+  | 'outdoors';
 
 export interface PostLocation {
   name: string;
@@ -96,6 +97,7 @@ export interface UserPreferences {
   restaurants: number;
   hotels: number;
   rentals: number;
+  outdoors: number;
 }
 
 export interface NovaNotification {

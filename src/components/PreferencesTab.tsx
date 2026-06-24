@@ -28,6 +28,7 @@ const PREF_CONFIG: { key: Category; emoji: string; label: string; color: string;
   { key: 'restaurants', emoji: '🍽️', label: 'Restaurants & Cafés', color: '#fb923c', desc: 'Local dining, cafés & bars near you' },
   { key: 'hotels',    emoji: '🏨', label: 'Hotels & Stays',        color: '#60a5fa', desc: 'Hotels, hostels & places to stay' },
   { key: 'rentals',   emoji: '🚲', label: 'Rentals',               color: '#34d399', desc: 'Bike, car, boat & equipment rentals' },
+  { key: 'outdoors',  emoji: '🏞️', label: 'Outdoors & Nature',     color: '#16a34a', desc: 'Hikes, bike trails, lakes, rivers & peaks' },
 ];
 
 const savedPosts = MOCK_POSTS.filter((p) => p.saved);

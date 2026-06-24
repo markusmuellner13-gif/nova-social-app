@@ -125,6 +125,19 @@ const OVERPASS_QUERIES: Record<string, string> = {
     node["shop"~"rental|motorcycle_rental"]["name"](around:RADIUS,LAT,LNG);
   );out body center;`,
 
+  // Outdoors & nature — hiking, cycling, lakes, rivers, peaks, beaches, trails
+  outdoors: `[out:json][timeout:12];(
+    node["natural"~"^(peak|beach|spring|waterfall|cliff|cave_entrance|bay|volcano)$"]["name"](around:RADIUS,LAT,LNG);
+    way["natural"~"^(water|wood|beach|cliff|bay)$"]["name"](around:RADIUS,LAT,LNG);
+    way["water"~"^(lake|pond|reservoir|lagoon)$"]["name"](around:RADIUS,LAT,LNG);
+    way["waterway"~"^(river|canal|stream)$"]["name"](around:RADIUS,LAT,LNG);
+    node["tourism"~"^(viewpoint|camp_site|picnic_site|wilderness_hut|alpine_hut)$"]["name"](around:RADIUS,LAT,LNG);
+    node["leisure"~"^(nature_reserve|beach_resort|bird_hide)$"]["name"](around:RADIUS,LAT,LNG);
+    way["leisure"~"^(nature_reserve|park)$"]["name"](around:RADIUS,LAT,LNG);
+    node["information"="guidepost"]["name"](around:RADIUS,LAT,LNG);
+    relation["route"~"^(hiking|foot|bicycle|mtb)$"]["name"](around:RADIUS,LAT,LNG);
+  );out body center;`,
+
   // Travel — things to see + places to stay for visitors
   travel: `[out:json][timeout:12];(
     node["tourism"~"^(attraction|viewpoint|hotel|guest_house|information|gallery|museum)$"]["name"](around:RADIUS,LAT,LNG);
@@ -254,7 +267,8 @@ function osmTagImage(tags: Record<string, string>): string | null {
 // No LLM: we read the place's real tags and write a natural caption ourselves.
 function placeKind(tags: Record<string, string>): { label: string; emoji: string } {
   const a = tags.amenity ?? '', t = tags.tourism ?? '', l = tags.leisure ?? '',
-        h = tags.historic ?? '', s = tags.shop ?? '';
+        h = tags.historic ?? '', s = tags.shop ?? '',
+        n = tags.natural ?? '', w = tags.water ?? '', wy = tags.waterway ?? '', rt = tags.route ?? '';
   const map: Record<string, { label: string; emoji: string }> = {
     restaurant: { label: 'restaurant', emoji: '🍽️' }, cafe: { label: 'café', emoji: '☕' },
     bar: { label: 'bar', emoji: '🍸' }, pub: { label: 'pub', emoji: '🍺' },
@@ -281,9 +295,28 @@ function placeKind(tags: Record<string, string>): { label: string; emoji: string
   if (t === 'hostel') return { label: 'hostel', emoji: '🛏️' };
   if (t === 'apartment' || t === 'chalet') return { label: 'stay', emoji: '🏡' };
   if (t === 'information') return { label: 'visitor info', emoji: 'ℹ️' };
+  if (t === 'camp_site') return { label: 'campsite', emoji: '🏕️' };
+  if (t === 'picnic_site') return { label: 'picnic spot', emoji: '🧺' };
+  if (t === 'alpine_hut' || t === 'wilderness_hut') return { label: 'mountain hut', emoji: '🏔️' };
+  // Outdoors & nature
+  if (rt === 'hiking' || rt === 'foot') return { label: 'hiking trail', emoji: '🥾' };
+  if (rt === 'bicycle' || rt === 'mtb') return { label: 'cycling route', emoji: '🚴' };
+  if (n === 'peak' || n === 'volcano') return { label: 'summit', emoji: '⛰️' };
+  if (n === 'beach' || l === 'beach_resort') return { label: 'beach', emoji: '🏖️' };
+  if (n === 'waterfall') return { label: 'waterfall', emoji: '💦' };
+  if (n === 'spring') return { label: 'spring', emoji: '⛲' };
+  if (n === 'cliff') return { label: 'cliff', emoji: '🧗' };
+  if (n === 'cave_entrance') return { label: 'cave', emoji: '🕳️' };
+  if (n === 'bay') return { label: 'bay', emoji: '🌊' };
+  if (n === 'wood') return { label: 'woodland', emoji: '🌲' };
+  if (w === 'lake' || w === 'pond' || w === 'reservoir' || w === 'lagoon' || n === 'water') return { label: 'lake', emoji: '🏞️' };
+  if (wy === 'river' || wy === 'canal' || wy === 'stream') return { label: 'river', emoji: '🏞️' };
+  if (tags.information === 'guidepost') return { label: 'trailhead', emoji: '🪧' };
   if (l === 'park') return { label: 'park', emoji: '🌳' };
   if (l === 'garden') return { label: 'garden', emoji: '🌷' };
   if (l === 'nature_reserve') return { label: 'nature reserve', emoji: '🏞️' };
+  if (l === 'beach_resort') return { label: 'beach', emoji: '🏖️' };
+  if (l === 'bird_hide') return { label: 'birdwatching spot', emoji: '🦅' };
   if (l === 'dog_park') return { label: 'dog park', emoji: '🐕' };
   if (l === 'fitness_centre') return { label: 'fitness studio', emoji: '💪' };
   if (l === 'sports_centre' || l === 'sports_hall') return { label: 'sports centre', emoji: '🏟️' };
@@ -316,6 +349,26 @@ function describePlace(tags: Record<string, string>, city: string, seed: number)
   const name = tags.name ?? 'This spot';
   const cuisine = (tags.cuisine ?? '').split(';')[0].replace(/_/g, ' ');
   const a = tags.amenity ?? '', t = tags.tourism ?? '', l = tags.leisure ?? '', h = tags.historic ?? '';
+  const n = tags.natural ?? '', wy = tags.waterway ?? '', rt = tags.route ?? '', w = tags.water ?? '';
+
+  // Outdoors & nature — hikes, water, peaks, trails
+  if (rt === 'hiking' || rt === 'foot' || rt === 'bicycle' || rt === 'mtb') {
+    const kind = (rt === 'bicycle' || rt === 'mtb') ? 'ride' : 'hike';
+    return pick([
+      `Lace up for ${name} — a ${label} near ${city} that's worth the effort for the views alone.`,
+      `${name} is one of the ${city} area's favourite routes. Pack water, bring a friend, and enjoy the ${kind}.`,
+    ], seed);
+  }
+  if (n === 'peak' || n === 'volcano') return `${name} towers over ${city} — a summit worth the climb for the panorama at the top.`;
+  if (w === 'lake' || w === 'pond' || w === 'reservoir' || w === 'lagoon' || n === 'water' || wy || n === 'beach' || n === 'bay' || n === 'waterfall') {
+    return pick([
+      `${name} is the ${city} area's spot to cool off, paddle, or just sit by the water and unwind.`,
+      `Head to ${name} for a breath of fresh air near ${city} — bring a towel and make a day of it.`,
+    ], seed);
+  }
+  if (n || t === 'camp_site' || t === 'picnic_site' || t === 'alpine_hut' || t === 'wilderness_hut' || tags.information === 'guidepost') {
+    return `${name} is a slice of the great outdoors near ${city} — fresh air, nature and a change of pace.`;
+  }
 
   // Food & drink
   if (['restaurant', 'cafe', 'bar', 'pub', 'biergarten', 'fast_food', 'ice_cream', 'food_court'].includes(a)) {
@@ -466,6 +519,7 @@ export async function overpassToPost(
     lifestyle:   'green park garden nature path',
     pets:        'happy dog pet park',
     rentals:     'bicycle car rental shop city',
+    outdoors:    'mountain lake hiking trail forest nature landscape',
     travel:      'travel landmark scenic viewpoint',
   };
   const imgQ = IMG_QUERIES[category] ?? `${kind.label} ${category}`;

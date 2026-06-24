@@ -25,12 +25,12 @@ const PLACE_CACHE = { 'Cache-Control': 'public, max-age=3600, s-maxage=86400, st
 const VALID_CATEGORIES = new Set([
   'events','music','sports','art','fitness','food',
   'sightseeing','lifestyle','discover','shops','venues','community',
-  'restaurants','hotels','rentals','travel','tech','pets','fashion',
+  'restaurants','hotels','rentals','travel','tech','pets','fashion','outdoors',
 ]);
 
 // Categories served purely by OpenStreetMap places (no ticketed-event side) —
 // these take the fast single-source path.
-const OSM_CATEGORIES = new Set(['shops','venues','restaurants','hotels','rentals','pets','fashion','lifestyle']);
+const OSM_CATEGORIES = new Set(['shops','venues','restaurants','hotels','rentals','pets','fashion','lifestyle','outdoors']);
 
 // Categories that have BOTH events (Ticketmaster/Eventbrite/SeatGeek) AND real
 // places (OSM): we blend them so the feed mixes "what's on" with "where to go",

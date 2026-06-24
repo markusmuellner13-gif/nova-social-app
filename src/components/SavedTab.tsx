@@ -20,6 +20,7 @@ const CATEGORY_LABELS: Partial<Record<Category, { emoji: string; label: string }
   pets:      { emoji: '🐾', label: 'Pets' },
   lifestyle: { emoji: '🌟', label: 'Lifestyle' },
   events:    { emoji: '🎉', label: 'Events' },
+  outdoors:  { emoji: '🏞️', label: 'Outdoors' },
 };
 
 export default function SavedTab() {

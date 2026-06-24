@@ -19,7 +19,7 @@ const CAT_EMOJI: Record<string, string> = {
   events: '🎉', music: '🎵', sports: '⚽', art: '🎨', community: '🤝',
   venues: '🎭', restaurants: '🍽️', food: '🍕', hotels: '🏨', rentals: '🚲',
   sightseeing: '🏛️', shops: '🛍️', fitness: '💪', lifestyle: '🌟',
-  tech: '💻', fashion: '👗', travel: '✈️', pets: '🐾',
+  tech: '💻', fashion: '👗', travel: '✈️', pets: '🐾', outdoors: '🏞️',
 };
 
 function emojiFor(cat?: string): string { return CAT_EMOJI[cat ?? ''] ?? '🎉'; }
