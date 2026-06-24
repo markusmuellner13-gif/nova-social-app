@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Star, Bookmark, MessageCircle, Share2, BadgeCheck, MapPin,
@@ -9,6 +9,7 @@ import {
 import { Post as PostType } from '@/types';
 import { ensureNotificationPermission } from '@/lib/notifications';
 import { trackEvent } from '@/lib/track';
+import { fetchGoingCount, invalidateGoingCount } from '@/lib/goingCounts';
 import { formatCount, timeAgo } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -64,7 +65,29 @@ export default function Post({ post, showHint = false }: Props) {
 
   // Real counts only: the post's stored count plus this user's own action
   const likeCount  = post.likes + (liked ? 1 : 0);
-  const goingCount = going ? 1 : 0;
+
+  // ── Real RSVP count ─────────────────────────────────────────────────────────
+  // The aggregate number of people who marked "I'm going" for this event, pulled
+  // from the backend (going_counts RPC — counts only, never who). null until it
+  // loads / when sync is off, in which case we fall back to the user's own state.
+  // We optimistically reflect the user's own toggle against the fetched snapshot
+  // so the number moves the instant they tap — without ever inventing a number.
+  const [dbGoing, setDbGoing] = useState<number | null>(null);
+  const dbIncludedMeRef = useRef(false);
+  const isEventPost = post.isEvent && !post.isSponsored;
+  useEffect(() => {
+    if (!isEventPost) return;
+    let active = true;
+    dbIncludedMeRef.current = going; // best proxy for whether the snapshot counts me
+    fetchGoingCount(post.id).then(n => { if (active) setDbGoing(n); }).catch(() => {});
+    return () => { active = false; };
+    // Fetch once per post on mount; `going` is intentionally read at mount time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post.id, isEventPost]);
+
+  const goingCount = dbGoing === null
+    ? (going ? 1 : 0)
+    : Math.max(0, dbGoing + (going === dbIncludedMeRef.current ? 0 : going ? 1 : -1));
 
   // ── Advertiser impression tracking (#9) — count once per sponsored render ──
   useEffect(() => {
@@ -93,6 +116,8 @@ export default function Post({ post, showHint = false }: Props) {
 
   const handleGoing = useCallback(() => {
     goPost(post);
+    // Drop the cached aggregate so any other instance refetches the fresh count.
+    invalidateGoingCount(post.id);
     if (!going) addToast(t.common.goingLabel, 'success');
     else addToast('Removed from going', 'info');
   }, [going, goPost, post, addToast, t.common.goingLabel]);

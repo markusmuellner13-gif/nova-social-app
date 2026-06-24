@@ -482,6 +482,37 @@ function openNow(hours: string): boolean | null {
   return matchedAnyRule ? false : null;
 }
 
+// ── Outdoor detail lines — only what OSM actually tags (honest, no guessing) ──
+// Hiking/cycling routes carry distance/difficulty; peaks & huts carry elevation.
+const SAC_SCALE: Record<string, string> = {
+  hiking: 'Easy', mountain_hiking: 'Moderate', demanding_mountain_hiking: 'Challenging',
+  alpine_hiking: 'Difficult', demanding_alpine_hiking: 'Very difficult', difficult_alpine_hiking: 'Expert',
+};
+const MTB_SCALE = ['Easy', 'Easy+', 'Moderate', 'Challenging', 'Difficult', 'Very difficult', 'Expert'];
+
+function outdoorExtras(tags: Record<string, string>): string[] {
+  const out: string[] = [];
+  // Distance (routes) — OSM stores km, sometimes with a unit suffix.
+  const distRaw = tags.distance ?? '';
+  const distNum = parseFloat(distRaw.replace(',', '.'));
+  if (Number.isFinite(distNum) && distNum > 0) out.push(`📏 ${distNum % 1 ? distNum.toFixed(1) : distNum} km`);
+  // Difficulty — hiking (sac_scale) or mountain-biking (mtb:scale 0–6).
+  const sac = tags.sac_scale ?? '';
+  const mtb = tags['mtb:scale'] ?? '';
+  const diff = SAC_SCALE[sac]
+    ?? (mtb !== '' && Number.isFinite(+mtb) ? MTB_SCALE[Math.min(+mtb, 6)] : '')
+    ?? '';
+  if (diff) out.push(`🥾 ${diff}`);
+  // Elevation (peaks, mountain huts).
+  const ele = parseFloat(tags.ele ?? '');
+  if (Number.isFinite(ele) && ele > 0 && (tags.natural === 'peak' || tags.natural === 'volcano' || tags.tourism === 'alpine_hut'))
+    out.push(`⛰️ ${Math.round(ele)} m elevation`);
+  // Ascent/descent if present (routes).
+  const asc = parseFloat(tags.ascent ?? '');
+  if (Number.isFinite(asc) && asc > 0) out.push(`📈 ${Math.round(asc)} m ascent`);
+  return out;
+}
+
 export async function overpassToPost(
   el: OverpassElement, city: string, category: string, description: string,
   unsplashKey?: string, pexelsKey?: string, tryOgImage = false
@@ -549,6 +580,7 @@ export async function overpassToPost(
   const extras = [
     cuisine && isFoodCat ? `🍴 ${cuisine.charAt(0).toUpperCase()}${cuisine.slice(1)} cuisine` : '',
     stars && category === 'hotels' ? `⭐ ${stars}-star` : '',
+    ...(category === 'outdoors' ? outdoorExtras(tags) : []),
     open === true ? '🟢 Open now' : open === false ? '🔴 Closed now' : '',
     hours ? `⏰ ${hours}` : '',
     phone ? `📞 ${phone}` : '',
