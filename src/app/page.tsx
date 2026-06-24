@@ -18,6 +18,7 @@ import { useApp, setSupabaseUser } from '@/context/AppContext';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { LanguageProvider } from '@/context/LanguageContext';
 import { getUserInteractions } from '@/lib/supabase';
+import { setFriendsGoingUser } from '@/lib/friendsGoing';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { useLocation } from '@/hooks/useLocation';
 import { initNotifications, subscribeToPush, setAppBadge, clearAppBadge } from '@/lib/notifications';
@@ -67,6 +68,7 @@ function AppShell() {
   // Sync Supabase user ID and load remote interactions when auth state changes
   useEffect(() => {
     setSupabaseUser(user?.id ?? null);
+    setFriendsGoingUser(user?.id ?? null);
     if (user) {
       getUserInteractions(user.id).then(data => {
         if (data) syncInteractions({ ...data, posts: data.posts as unknown as Post[] });
