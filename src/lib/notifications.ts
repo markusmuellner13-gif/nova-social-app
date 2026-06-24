@@ -80,6 +80,30 @@ export async function subscribeToPush(loc?: PushLocation): Promise<boolean> {
   }
 }
 
+// ── App-icon badge (the number on the app icon, like every other app) ─────────
+// Uses the Badging API (navigator.setAppBadge / clearAppBadge). It only renders
+// on platforms where the badge surface exists — an installed PWA or the native
+// Capacitor shell on supporting OSes — and is a clean no-op everywhere else
+// (e.g. a normal browser tab), so it's always safe to call.
+export function setAppBadge(count: number): void {
+  if (typeof navigator === 'undefined') return;
+  const nav = navigator as Navigator & {
+    setAppBadge?: (n?: number) => Promise<void>;
+    clearAppBadge?: () => Promise<void>;
+  };
+  try {
+    if (count > 0 && typeof nav.setAppBadge === 'function') {
+      void nav.setAppBadge(count).catch(() => {});
+    } else if (typeof nav.clearAppBadge === 'function') {
+      void nav.clearAppBadge().catch(() => {});
+    }
+  } catch { /* Badging API unavailable */ }
+}
+
+export function clearAppBadge(): void {
+  setAppBadge(0);
+}
+
 // Show a notification immediately via the SW (preferred) or the page API.
 export async function showLocalNotification(title: string, body: string, url = '/'): Promise<void> {
   const granted = await ensureNotificationPermission();

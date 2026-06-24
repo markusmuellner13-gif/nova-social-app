@@ -20,12 +20,12 @@ import { LanguageProvider } from '@/context/LanguageContext';
 import { getUserInteractions } from '@/lib/supabase';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { useLocation } from '@/hooks/useLocation';
-import { initNotifications, subscribeToPush } from '@/lib/notifications';
+import { initNotifications, subscribeToPush, setAppBadge, clearAppBadge } from '@/lib/notifications';
 import { getTopCategories } from '@/lib/aiEngine';
 import { LocationState, Post } from '@/types';
 
 function AppShell() {
-  const { state, setLocation, markSeenLocationPrompt, syncInteractions } = useApp();
+  const { state, unreadCount, setLocation, markSeenLocationPrompt, syncInteractions } = useApp();
   const { user } = useAuth();
   const [splashDone,         setSplashDone]         = useState(false);
   const [activeTab,          setActiveTab]           = useState<Tab>('feed');
@@ -54,6 +54,15 @@ function AppShell() {
     void subscribeToPush({ city: loc.city, lat: loc.lat, lng: loc.lng, categories });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.location?.city]);
+
+  // Keep the app-icon badge in sync with unread notifications — like any other
+  // app. While the notifications panel is open the user is actively reading them,
+  // so we clear the icon badge immediately (the in-app unread dots stay until a
+  // notification is actually read). No-op on platforms without the Badging API.
+  useEffect(() => {
+    if (showNotifications) clearAppBadge();
+    else setAppBadge(unreadCount);
+  }, [unreadCount, showNotifications]);
 
   // Sync Supabase user ID and load remote interactions when auth state changes
   useEffect(() => {

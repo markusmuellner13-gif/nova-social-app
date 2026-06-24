@@ -3,8 +3,37 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { X, Layers, Navigation, Volume2, VolumeX, LocateFixed, Car, Footprints, Flag } from 'lucide-react';
+import { X, Layers, Navigation, Volume2, VolumeX, LocateFixed, Car, Footprints, Flag, Palette } from 'lucide-react';
 import { Post, Category } from '@/types';
+
+// ── Navigation themes (the "skin" of the directions) ──────────────────────────
+// Each theme restyles the route line, the user marker, the on-map treatment and
+// the UI accent so navigating feels alive — and is a fun, shareable moment. A
+// full voxel re-render of the world isn't feasible in-browser, so a theme is a
+// cohesive visual skin (colours, route style, map filter) rather than a new 3D
+// engine — honest about what it is, while still looking distinct per theme.
+interface NavTheme {
+  id: string;
+  label: string;
+  emoji: string;
+  accent: string;            // primary UI accent
+  gradient: string;          // CSS gradient for active buttons / banners
+  route: string;             // route line colour
+  routeGlow: string;         // route halo colour
+  routeWidth: number;
+  square: boolean;           // blocky line caps/joins (Minecraft)
+  user: string;              // user-location marker colour
+  mapFilter: string;         // CSS filter applied to the map canvas
+  pixelated: boolean;        // chunky pixel look (image-rendering)
+}
+
+const NAV_THEMES: NavTheme[] = [
+  { id: 'nova',      label: 'Nova',      emoji: '🟣', accent: '#8b5cf6', gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)', route: '#8b5cf6', routeGlow: '#c4b5fd', routeWidth: 6, square: false, user: '#3b82f6', mapFilter: 'none', pixelated: false },
+  { id: 'minecraft', label: 'Minecraft', emoji: '🟩', accent: '#5ab552', gradient: 'linear-gradient(135deg,#5ab552,#3b7a36)', route: '#7ed957', routeGlow: '#b6f09c', routeWidth: 8, square: true,  user: '#8b5a2b', mapFilter: 'contrast(1.15) saturate(1.35) brightness(1.02)', pixelated: true },
+  { id: 'neon',      label: 'Cyberpunk', emoji: '🟦', accent: '#22d3ee', gradient: 'linear-gradient(135deg,#22d3ee,#d946ef)', route: '#22d3ee', routeGlow: '#f0abfc', routeWidth: 6, square: false, user: '#f0abfc', mapFilter: 'hue-rotate(150deg) saturate(1.7) contrast(1.2) brightness(0.92)', pixelated: false },
+  { id: 'candy',     label: 'Candy',     emoji: '🍬', accent: '#fb7185', gradient: 'linear-gradient(135deg,#fb7185,#f472b6)', route: '#fb7185', routeGlow: '#fbcfe8', routeWidth: 7, square: false, user: '#f472b6', mapFilter: 'saturate(1.4) brightness(1.06) hue-rotate(-12deg)', pixelated: false },
+];
+const DEFAULT_THEME = NAV_THEMES[0];
 
 const CATEGORY_COLOR: Record<Category, string> = {
   travel: '#3b82f6', food: '#f97316', fashion: '#ec4899', sports: '#22c55e', art: '#a855f7',
@@ -91,7 +120,23 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const lastSpokenRef = useRef<string>('');
 
   const [satellite, setSatellite] = useState(false);
+  const [theme, setTheme] = useState<NavTheme>(DEFAULT_THEME);
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
   const [voiceOn, setVoiceOn] = useState(true);
+
+  // Restore the user's last-picked nav theme.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = window.localStorage.getItem('nova_nav_theme');
+    const found = NAV_THEMES.find(t => t.id === saved);
+    if (found) setTheme(found);
+  }, []);
+
+  const pickTheme = useCallback((t: NavTheme) => {
+    setTheme(t);
+    setThemePickerOpen(false);
+    try { window.localStorage.setItem('nova_nav_theme', t.id); } catch { /* private mode */ }
+  }, []);
   const [profile, setProfile] = useState<'driving' | 'foot'>('driving');
   const [target, setTarget] = useState<Post | null>(initialTarget ?? null);
   const [routeInfo, setRouteInfo] = useState<{ km: number; min: number } | null>(null);
@@ -179,18 +224,45 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     map.setLayoutProperty('streets',   'visibility', satellite ? 'none' : 'visible');
   }, [satellite]);
 
+  // ── Apply the active nav theme: map treatment + route + user marker ──────────
+  useEffect(() => {
+    const container = containerRef.current;
+    if (container) {
+      const canvas = container.querySelector('canvas');
+      if (canvas) {
+        canvas.style.filter = theme.mapFilter;
+        canvas.style.imageRendering = theme.pixelated ? 'pixelated' : 'auto';
+        canvas.style.transition = 'filter 0.3s ease';
+      }
+    }
+    const map = mapRef.current;
+    if (map && map.isStyleLoaded() && map.getLayer('route-line')) {
+      map.setPaintProperty('route-line', 'line-color', theme.route);
+      map.setPaintProperty('route-line', 'line-width', theme.routeWidth);
+      map.setPaintProperty('route-glow', 'line-color', theme.routeGlow);
+      map.setLayoutProperty('route-line', 'line-cap', theme.square ? 'square' : 'round');
+      map.setLayoutProperty('route-line', 'line-join', theme.square ? 'miter' : 'round');
+    }
+    if (userMarkerRef.current) {
+      const el = userMarkerRef.current.getElement();
+      el.style.background = theme.user;
+      el.style.boxShadow = `0 0 0 6px ${theme.user}40`;
+      el.style.borderRadius = theme.square ? '3px' : '50%';
+    }
+  }, [theme, satellite]);
+
   // Place / update the user marker
   const setUserMarker = useCallback((lat: number, lng: number) => {
     const map = mapRef.current;
     if (!map) return;
     if (!userMarkerRef.current) {
       const el = document.createElement('div');
-      el.style.cssText = 'width:18px;height:18px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,.25);';
+      el.style.cssText = `width:18px;height:18px;border-radius:${theme.square ? '3px' : '50%'};background:${theme.user};border:3px solid #fff;box-shadow:0 0 0 6px ${theme.user}40;`;
       userMarkerRef.current = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
     } else {
       userMarkerRef.current.setLngLat([lng, lat]);
     }
-  }, []);
+  }, [theme]);
 
   useEffect(() => {
     if (userLocation) setUserMarker(userLocation.lat, userLocation.lng);
@@ -221,11 +293,11 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     else {
       map.addSource('route', { type: 'geojson', data: geo });
       map.addLayer({ id: 'route-line', type: 'line', source: 'route',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#8b5cf6', 'line-width': 6, 'line-opacity': 0.9 } });
+        layout: { 'line-join': theme.square ? 'miter' : 'round', 'line-cap': theme.square ? 'square' : 'round' },
+        paint: { 'line-color': theme.route, 'line-width': theme.routeWidth, 'line-opacity': 0.9 } });
       map.addLayer({ id: 'route-glow', type: 'line', source: 'route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#c4b5fd', 'line-width': 12, 'line-opacity': 0.25 } }, 'route-line');
+        paint: { 'line-color': theme.routeGlow, 'line-width': theme.routeWidth * 2, 'line-opacity': 0.25 } }, 'route-line');
     }
 
     const allSteps: RouteStep[] = [];
@@ -247,7 +319,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     const b = coords.reduce((bb, c) => bb.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
     map.fitBounds(b, { padding: 60, maxZoom: 15 });
     return true;
-  }, [profile]);
+  }, [profile, theme]);
 
   // ── Fetch a route (OSRM public API) ──────────────────────────────────────────
   // Speed is everything when you tap "Directions": we route IMMEDIATELY from the
@@ -362,8 +434,12 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
         </button>
         <div className="flex gap-2 pointer-events-auto">
           <button onClick={() => setSatellite(s => !s)} className="px-3 h-10 rounded-full flex items-center gap-1.5 text-xs font-bold"
-            style={{ background: satellite ? 'linear-gradient(135deg,#8b5cf6,#ec4899)' : 'rgba(13,18,28,0.92)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)' }}>
+            style={{ background: satellite ? theme.gradient : 'rgba(13,18,28,0.92)', color: '#fff', border: '1px solid rgba(255,255,255,0.12)' }}>
             <Layers size={14} /> {satellite ? 'Satellite' : 'Map'}
+          </button>
+          <button onClick={() => setThemePickerOpen(o => !o)} aria-label="Navigation theme" className="w-10 h-10 rounded-full flex items-center justify-center"
+            style={{ background: themePickerOpen ? theme.gradient : 'rgba(13,18,28,0.92)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' }}>
+            <Palette size={16} />
           </button>
           <button onClick={recenter} className="w-10 h-10 rounded-full flex items-center justify-center"
             style={{ background: 'rgba(13,18,28,0.92)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' }}>
@@ -372,9 +448,24 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
         </div>
       </div>
 
+      {/* Theme picker */}
+      {themePickerOpen && (
+        <div className="absolute right-3 z-10 pointer-events-auto rounded-2xl p-2 flex flex-col gap-1" style={{ top: 96, background: 'rgba(13,18,28,0.97)', border: '1px solid #2a2a38', backdropFilter: 'blur(20px)', minWidth: 170 }}>
+          <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest" style={{ color: '#888899' }}>Navigation theme</p>
+          {NAV_THEMES.map(t => (
+            <button key={t.id} onClick={() => pickTheme(t)} className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-sm font-semibold text-left"
+              style={{ background: t.id === theme.id ? t.gradient : 'transparent', color: '#fff' }}>
+              <span className="text-base">{t.emoji}</span>
+              <span className="flex-1">{t.label}</span>
+              {t.id === theme.id && <span className="text-xs">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Live guidance banner */}
       {navigating && nextStep && (
-        <div className="absolute left-3 right-3 rounded-2xl px-4 py-3 flex items-center gap-3" style={{ top: 70, background: 'linear-gradient(135deg,#8b5cf6,#6d28d9)', boxShadow: '0 8px 24px rgba(139,92,246,0.4)' }}>
+        <div className="absolute left-3 right-3 rounded-2xl px-4 py-3 flex items-center gap-3" style={{ top: 70, background: theme.gradient, boxShadow: `0 8px 24px ${theme.accent}66` }}>
           <Navigation size={20} color="#fff" />
           <span className="text-sm font-bold text-white flex-1">{nextStep}</span>
         </div>
@@ -390,7 +481,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
                 <p className="text-sm font-bold text-white truncate">{target.caption.split('\n')[0]}</p>
                 <p className="text-xs truncate" style={{ color: '#9aa0b5' }}>📍 {target.location.name}</p>
                 {routeInfo && (
-                  <p className="text-xs font-semibold mt-0.5" style={{ color: '#a78bfa' }}>
+                  <p className="text-xs font-semibold mt-0.5" style={{ color: theme.accent }}>
                     {routeInfo.km} km · ~{routeInfo.min} min {profile === 'driving' ? '🚗' : '🚶'}
                   </p>
                 )}
@@ -401,19 +492,19 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
             <div className="flex items-center gap-2">
               {/* profile */}
               <button onClick={() => setProfile('driving')} className="w-10 h-10 rounded-xl flex items-center justify-center"
-                style={{ background: profile === 'driving' ? '#8b5cf6' : '#1a1a24', color: '#fff', border: '1px solid #2a2a38' }}><Car size={16} /></button>
+                style={{ background: profile === 'driving' ? theme.accent : '#1a1a24', color: '#fff', border: '1px solid #2a2a38' }}><Car size={16} /></button>
               <button onClick={() => setProfile('foot')} className="w-10 h-10 rounded-xl flex items-center justify-center"
-                style={{ background: profile === 'foot' ? '#8b5cf6' : '#1a1a24', color: '#fff', border: '1px solid #2a2a38' }}><Footprints size={16} /></button>
+                style={{ background: profile === 'foot' ? theme.accent : '#1a1a24', color: '#fff', border: '1px solid #2a2a38' }}><Footprints size={16} /></button>
               {/* voice */}
               <button onClick={() => setVoiceOn(v => !v)} className="w-10 h-10 rounded-xl flex items-center justify-center"
-                style={{ background: voiceOn ? '#8b5cf6' : '#1a1a24', color: '#fff', border: '1px solid #2a2a38' }}>
+                style={{ background: voiceOn ? theme.accent : '#1a1a24', color: '#fff', border: '1px solid #2a2a38' }}>
                 {voiceOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
               </button>
               {/* start/stop */}
               {!navigating ? (
                 <button onClick={startGuidance} disabled={!routeInfo}
                   className="flex-1 h-10 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-white"
-                  style={{ background: routeInfo ? 'linear-gradient(135deg,#8b5cf6,#ec4899)' : '#2a2a38', opacity: routeInfo ? 1 : 0.6 }}>
+                  style={{ background: routeInfo ? theme.gradient : '#2a2a38', opacity: routeInfo ? 1 : 0.6 }}>
                   <Navigation size={16} /> Start
                 </button>
               ) : (
