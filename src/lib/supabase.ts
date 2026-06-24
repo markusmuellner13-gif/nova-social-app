@@ -252,6 +252,42 @@ export async function getGoingCounts(postIds: string[]): Promise<Record<string, 
   return out;
 }
 
+export interface FriendGoing { id: string; name: string; avatar: string }
+
+// Which of the people the user FOLLOWS are going to each of these posts. RLS
+// only exposes followed-users' "going" rows (see the view_followed_users_going
+// policy), so this is privacy-safe by construction. Returns up to a handful of
+// friends per post (the caller shows a few + a count). No Supabase / not signed
+// in → empty (the UI falls back to the plain aggregate count).
+export async function getFriendsGoing(userId: string, postIds: string[]): Promise<Record<string, FriendGoing[]>> {
+  if (!supabase || postIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('post_interactions')
+    .select('post_id, user_id')
+    .eq('interaction_type', 'going')
+    .in('post_id', postIds)
+    .neq('user_id', userId); // RLS already limits to followed users; drop self
+  if (error || !data) return {};
+  const rows = data as { post_id: string; user_id: string }[];
+  const friendIds = [...new Set(rows.map(r => r.user_id))];
+  if (friendIds.length === 0) return {};
+
+  const { data: profs } = await supabase
+    .from('profiles')
+    .select('id, display_name, avatar_url')
+    .in('id', friendIds);
+  const profMap = new Map<string, FriendGoing>();
+  for (const p of (profs ?? []) as { id: string; display_name: string | null; avatar_url: string | null }[]) {
+    profMap.set(p.id, { id: p.id, name: p.display_name ?? 'A friend', avatar: p.avatar_url ?? '' });
+  }
+  const out: Record<string, FriendGoing[]> = {};
+  for (const r of rows) {
+    const f = profMap.get(r.user_id);
+    if (f) (out[r.post_id] ??= []).push(f);
+  }
+  return out;
+}
+
 // ── GDPR: data access & erasure (Art. 15, 17, 20) ─────────────────────────────
 
 // Right of access / portability: assemble everything we hold about the user into

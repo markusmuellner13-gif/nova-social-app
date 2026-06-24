@@ -10,6 +10,9 @@ import { Post as PostType } from '@/types';
 import { ensureNotificationPermission } from '@/lib/notifications';
 import { trackEvent } from '@/lib/track';
 import { fetchGoingCount, invalidateGoingCount } from '@/lib/goingCounts';
+import { fetchFriendsGoing } from '@/lib/friendsGoing';
+import type { FriendGoing } from '@/lib/supabase';
+import { useAuth } from '@/context/AuthContext';
 import { formatCount, timeAgo } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -42,6 +45,15 @@ function parseMinPrice(priceStr: string): number {
 }
 
 export { parseMinPrice };
+
+// "Anna is going" / "Anna and Ben are going" / "Anna and 4 friends are going"
+function friendsGoingText(friends: FriendGoing[]): string {
+  const n = friends.length;
+  const first = friends[0]?.name ?? 'A friend';
+  if (n === 1) return `${first} is going`;
+  if (n === 2) return `${first} and ${friends[1].name} are going`;
+  return `${first} and ${n - 1} friends are going`;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -88,6 +100,18 @@ export default function Post({ post, showHint = false }: Props) {
   const goingCount = dbGoing === null
     ? (going ? 1 : 0)
     : Math.max(0, dbGoing + (going === dbIncludedMeRef.current ? 0 : going ? 1 : -1));
+
+  // ── Friends going (social proof) ────────────────────────────────────────────
+  // Which of the people you follow are going to this event. RLS guarantees we
+  // only ever see followed-users' RSVPs. Far more compelling than a raw total.
+  const { user } = useAuth();
+  const [friends, setFriends] = useState<FriendGoing[]>([]);
+  useEffect(() => {
+    if (!isEventPost || !user) { setFriends([]); return; }
+    let active = true;
+    fetchFriendsGoing(post.id).then(f => { if (active) setFriends(f); }).catch(() => {});
+    return () => { active = false; };
+  }, [post.id, isEventPost, user?.id]);
 
   // ── Advertiser impression tracking (#9) — count once per sponsored render ──
   useEffect(() => {
@@ -355,6 +379,23 @@ export default function Post({ post, showHint = false }: Props) {
               </motion.button>
             </div>
           </div>
+
+          {/* Friends going — social proof from the people you follow */}
+          {isEventPost && friends.length > 0 && (
+            <div className="flex items-center gap-2 mb-2">
+              <div className="flex -space-x-2">
+                {friends.slice(0, 3).map(f => (
+                  <div key={f.id} className="w-6 h-6 rounded-full overflow-hidden flex-shrink-0"
+                    style={{ border: '2px solid #0a0a0f' }}>
+                    <Avatar src={f.avatar} name={f.name} size={24} className="w-full h-full rounded-full" />
+                  </div>
+                ))}
+              </div>
+              <span className="text-xs font-semibold" style={{ color: '#22c55e' }}>
+                {friendsGoingText(friends)}
+              </span>
+            </div>
+          )}
 
           {/* Caption */}
           <p className="text-sm leading-relaxed" style={{ color: '#d0d0e8' }}>
