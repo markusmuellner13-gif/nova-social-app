@@ -13,6 +13,7 @@ import PostComponent from './Post';
 import { useLanguage } from '@/context/LanguageContext';
 import AdSlot from './AdSlot';
 import FeedSkeleton from './FeedSkeleton';
+import TrendingRail from './TrendingRail';
 
 // Ad placement: every AD_EVERY posts starting at AD_START
 const AD_START = 3;
@@ -388,6 +389,30 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     scrollRef.current?.scrollTo({ top: 0 });
   }
 
+  // ── "Trending near you" rail (discover) ───────────────────────────────────
+  // A curated top-of-feed strip: real-photo posts scored by how soon (events) and
+  // how near they are. Tapping one jumps the feed to it.
+  const trendingPosts = useMemo(() => {
+    if (activeMainTab !== 'discover' || !hasCity) return [];
+    const score = (p: Post) => {
+      let s = 0;
+      if (p.isEvent && p.eventDateRaw) {
+        const days = Math.max(0, (new Date(p.eventDateRaw).getTime() - Date.now()) / 86_400_000);
+        s += Math.max(0, 30 - days) + 6; // upcoming events lead
+      }
+      if (typeof p.distanceKm === 'number') s += Math.max(0, 25 - p.distanceKm);
+      return s;
+    };
+    const realPhoto = aiPosts.filter(p => p.image && !p.image.includes('picsum'));
+    const pool = realPhoto.length >= 3 ? realPhoto : aiPosts;
+    return [...pool].sort((a, b) => score(b) - score(a)).slice(0, 8);
+  }, [activeMainTab, hasCity, aiPosts]);
+
+  const handleSelectTrending = useCallback((postId: string) => {
+    const el = scrollRef.current?.querySelector(`[data-post-id="${CSS.escape(postId)}"]`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
   const isTabLoading = activeMainTab !== 'partners' && aiLoading && mergedFeed.length === 0;
 
   // Skeleton is a FALLBACK, not a default: only reveal it if the first content
@@ -753,6 +778,11 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
             </div>
           )}
 
+          {/* Trending-near-you rail — discover only, a curated lead-in */}
+          {activeMainTab === 'discover' && trendingPosts.length >= 3 && (
+            <TrendingRail posts={trendingPosts} onSelect={handleSelectTrending} />
+          )}
+
           {/* Loading fallback — only appears if content is slow to arrive
               (delayed), so a fast/cached feed never flashes a skeleton. */}
           {showSkeleton && (
@@ -814,7 +844,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
                 }
                 const post = item.post;
                 return (
-                  <div key={post.id}>
+                  <div key={post.id} data-post-id={post.id}>
                     {activeMainTab === 'discover' && i > 0 && i % 6 === 0 && (
                       <div className="flex items-center gap-2 px-4 py-2" style={{ background: 'rgba(139,92,246,0.04)', borderBottom: '1px solid #1a1a24' }}>
                         <Sparkles size={12} style={{ color: '#8b5cf6' }} />

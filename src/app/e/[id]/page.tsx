@@ -68,7 +68,6 @@ export default async function EventSharePage({ searchParams }: { params: PP; sea
 
         {/* Image */}
         {data.i && (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={data.i} alt={data.t} style={{ width: '100%', aspectRatio: '4/5', objectFit: 'cover', background: '#13131a' }} />
         )}
 

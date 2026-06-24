@@ -14,16 +14,23 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
   ]),
   {
-    // The React Compiler lint family (new in eslint-plugin-react-hooks v6) emits
-    // ADVISORY diagnostics about render purity, refs-in-render, set-state-in-
-    // effect and manual-memoization. They flag optimisation opportunities, not
-    // correctness bugs — the app runs correctly — and rewriting ~15 working hook
-    // call-sites in one go is exactly the kind of risky churn we want to avoid.
-    // Kept as WARNINGS so they stay visible in CI without blocking the gate; the
-    // gate still HARD-fails on genuinely broken code (unescaped JSX, bad <a> page
-    // links, unused vars, etc.) plus typecheck, tests and the build.
-    // TODO: burn these down incrementally, then promote back to "error".
     rules: {
+      // Nova deliberately renders images with a plain <img> routed through its own
+      // CDN-cached /api/image-proxy (and ships inside a Capacitor native shell),
+      // so next/image's server optimiser is the wrong tool here — it would double-
+      // process proxied URLs and doesn't run in the static/native build. This is a
+      // reviewed architecture decision, so the rule is off rather than ignored.
+      "@next/next/no-img-element": "off",
+
+      // The React Compiler lint family (new in eslint-plugin-react-hooks v6) emits
+      // ADVISORY diagnostics about render purity, refs-in-render, set-state-in-
+      // effect and manual-memoization. They flag optimisation opportunities, not
+      // correctness bugs — the app runs correctly. Several flag SSR-safe patterns
+      // (reading localStorage in an effect, not in lazy initial state) where the
+      // "fix" would actually break server rendering, so blindly rewriting them is
+      // the risky churn we avoid. Kept as visible WARNINGS; the gate still HARD-
+      // fails on real errors (unescaped JSX, bad <a> page links, unused vars, type
+      // errors, failing tests, broken build). TODO: burn down case-by-case.
       "react-hooks/set-state-in-effect": "warn",
       "react-hooks/immutability": "warn",
       "react-hooks/refs": "warn",

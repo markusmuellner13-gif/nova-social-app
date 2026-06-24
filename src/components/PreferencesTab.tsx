@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sliders, Bookmark, ChevronDown, ChevronUp, MapPin, Compass, RotateCcw } from 'lucide-react';
+import { Sliders, Bookmark, MapPin, Compass, RotateCcw } from 'lucide-react';
 import { MOCK_POSTS } from '@/data/mockData';
 import { UserPreferences, Category } from '@/types';
 
@@ -33,7 +33,6 @@ const PREF_CONFIG: { key: Category; emoji: string; label: string; color: string;
 const savedPosts = MOCK_POSTS.filter((p) => p.saved);
 
 export default function PreferencesTab({ preferences, onPreferencesChange }: Props) {
-  const [showPrefs, setShowPrefs] = useState(true);
   const [activeSection, setActiveSection] = useState<'prefs' | 'saved'>('prefs');
 
   function handlePrefChange(key: Category, value: number) {

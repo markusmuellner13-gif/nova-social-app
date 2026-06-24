@@ -1,8 +1,7 @@
 'use client';
 
-import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, BadgeCheck, Grid3X3, MapPin } from 'lucide-react';
+import { X, BadgeCheck, Grid3X3 } from 'lucide-react';
 import { User, Post } from '@/types';
 import { MOCK_POSTS, formatCount } from '@/data/mockData';
 import { useApp } from '@/context/AppContext';

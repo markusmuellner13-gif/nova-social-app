@@ -182,7 +182,6 @@ export function useLocation(): UseLocationReturn {
     } else {
       setPermission('prompt');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function requestLocationSilent() {

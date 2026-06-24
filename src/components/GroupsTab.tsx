@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Users, Plus, Hash, X, Copy, Calendar, MapPin, ExternalLink, Loader2, LogIn } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -18,7 +18,7 @@ interface Props {
 type Screen = 'list' | 'create' | 'join' | 'detail';
 
 export default function GroupsTab({ onOpenAuth }: Props) {
-  const { user, profile, isSupabaseEnabled } = useAuth();
+  const { user, isSupabaseEnabled } = useAuth();
 
   const [screen, setScreen]       = useState<Screen>('list');
   const [groups, setGroups]       = useState<SupabaseGroup[]>([]);

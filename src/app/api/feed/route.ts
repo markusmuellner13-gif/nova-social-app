@@ -100,12 +100,13 @@ async function osmPosts(
   if (pageEls.length === 0) return { posts: [], hasMore: false };
 
   // Descriptions are written for free from each place's own OSM tags inside
-  // overpassToPost (no LLM, no credits) — we pass '' so it self-describes. The
-  // venue's real og:image is tried for the first few posts per page; OSM's own
-  // image/wikimedia tag (when present) is used for all, instantly and free.
+  // overpassToPost (no LLM, no credits) — we pass '' so it self-describes. We try
+  // the venue's REAL photo (og:image, free; Google Places, budget-capped) for
+  // most of the page now — OSM's own image/wikimedia tag is used for all,
+  // instantly and free. More real venue photos, cost still bounded.
   const posts = await Promise.all(
     pageEls.map((el, i) => overpassToPost(
-      el, city, requestedCat, '', unsplashKey, pexelsKey, /* tryOgImage */ i < 4
+      el, city, requestedCat, '', unsplashKey, pexelsKey, /* tryRealPhoto */ i < 10
     ))
   );
   return { posts, hasMore: (page + 1) * count < elements.length };

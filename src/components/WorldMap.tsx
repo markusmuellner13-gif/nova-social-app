@@ -90,7 +90,6 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props
   const draggingRef = useRef(false);
   const lastPosRef  = useRef<{ x: number; y: number } | null>(null);
   const movedRef    = useRef(false);
-  const rafRef      = useRef<number | null>(null);
 
   // Spin to a focus point if it arrives after mount
   useEffect(() => {

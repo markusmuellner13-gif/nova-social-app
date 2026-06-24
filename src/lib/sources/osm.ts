@@ -10,6 +10,7 @@
 // tags — no LLM in the loop.
 
 import { ApiPost, makeUser, getImage, picsumUrl, proxyImage } from './shared';
+import { placesBudgetExceeded, notePlacesCall } from '@/lib/placesBudget';
 
 export interface OverpassElement {
   type: 'node' | 'way' | 'relation';
@@ -209,8 +210,13 @@ export async function fetchGooglePlacePhoto(name: string, lat: number, lng: numb
   const cacheKey = `${name}|${lat.toFixed(3)}|${lng.toFixed(3)}`;
   if (placePhotoCache.has(cacheKey)) return placePhotoCache.get(cacheKey) ?? null;
 
+  // Respect the soft daily spend cap (PLACES_DAILY_BUDGET). Once hit, we stop
+  // calling Places and fall back to the free photo sources — cost stays bounded.
+  if (await placesBudgetExceeded()) return null;
+
   let result: string | null = null;
   try {
+    await notePlacesCall();
     const findUrl =
       `https://maps.googleapis.com/maps/api/place/findplacefromtext/json` +
       `?input=${encodeURIComponent(name)}&inputtype=textquery` +

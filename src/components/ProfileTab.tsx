@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Settings, Grid3X3, BookmarkIcon, ChevronDown, ChevronUp,
+  Settings, BookmarkIcon, ChevronDown, ChevronUp,
   BadgeCheck, Camera, Sliders, LogOut, Shield, Bell, Trash2,
   MapPin, MapPinOff, Calendar, Users, Star, Trophy, Search,
   UserPlus, UserCheck, X, LogIn, Globe, Heart, Check,
