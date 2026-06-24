@@ -40,11 +40,13 @@ const CATEGORY_COLOR: Record<Category, string> = {
   tech: '#06b6d4', fitness: '#ef4444', music: '#8b5cf6', pets: '#f59e0b', lifestyle: '#10b981',
   events: '#f43f5e', sightseeing: '#14b8a6', shops: '#d946ef', venues: '#f43f5e',
   community: '#14b8a6', restaurants: '#fb923c', hotels: '#60a5fa', rentals: '#34d399',
+  outdoors: '#16a34a',
 };
 const CATEGORY_EMOJI: Record<Category, string> = {
   travel: '✈️', food: '🍕', fashion: '👗', sports: '⚽', art: '🎨', tech: '💻', fitness: '💪',
   music: '🎵', pets: '🐾', lifestyle: '🌟', events: '🎉', sightseeing: '🏛️', shops: '🛍️',
   venues: '🎭', community: '🤝', restaurants: '🍽️', hotels: '🏨', rentals: '🚲',
+  outdoors: '🏞️',
 };
 
 // Free raster basemaps (no API key). CSP allows these hosts (see next.config).

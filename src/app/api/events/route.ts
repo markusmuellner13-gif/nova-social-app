@@ -22,11 +22,11 @@ const WIKI_CACHE  = { 'Cache-Control': 'public, max-age=3600, s-maxage=3600' };
 const VALID_CATEGORIES = new Set([
   'events','music','sports','art','fitness','food',
   'sightseeing','lifestyle','discover','shops','venues','community',
-  'restaurants','hotels','rentals','travel','tech','pets','fashion',
+  'restaurants','hotels','rentals','travel','tech','pets','fashion','outdoors',
 ]);
 
 // Categories served by OpenStreetMap Overpass (real local places)
-const OSM_CATEGORIES = new Set(['shops','venues','restaurants','hotels','rentals']);
+const OSM_CATEGORIES = new Set(['shops','venues','restaurants','hotels','rentals','outdoors']);
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);

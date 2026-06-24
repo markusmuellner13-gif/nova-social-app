@@ -115,11 +115,27 @@ const CITIES: [string, string, number, number][] = [
 // long-tail (food/fitness/lifestyle/community/tech/fashion/travel/pets) is
 // filled by Eventbrite + the AI web-search fallback when the fast sources are
 // sparse — exactly mirroring the live /api/feed behaviour.
-const CATEGORIES = [
-  'events', 'music', 'sports', 'art', 'sightseeing',
-  'restaurants', 'hotels', 'rentals', 'venues', 'shops',
-  'food', 'fitness', 'lifestyle', 'community', 'tech', 'fashion', 'travel', 'pets',
+// ── Freshness tiers ───────────────────────────────────────────────────────────
+// Not all content ages at the same rate. "What's on" (concerts, club nights,
+// matches, exhibitions) changes constantly and must be refreshed often; a museum,
+// a restaurant, a hiking trail or a hotel barely changes week-to-week, so
+// refreshing those daily-ish is plenty and saves compute.
+//
+//   ?tier=fast → only the time-sensitive categories (refresh every ~30 min)
+//   ?tier=slow → only the slow-moving places (refresh ~daily)
+//   (no tier)  → the full catalogue, fast categories first
+const FAST_CATEGORIES = ['events', 'music', 'sports', 'art', 'venues', 'community'];
+const SLOW_CATEGORIES = [
+  'sightseeing', 'restaurants', 'hotels', 'rentals', 'shops',
+  'food', 'fitness', 'lifestyle', 'tech', 'fashion', 'travel', 'pets', 'outdoors',
 ];
+const CATEGORIES = [...FAST_CATEGORIES, ...SLOW_CATEGORIES];
+
+function categoriesForTier(tier: string | null): string[] {
+  if (tier === 'fast') return FAST_CATEGORIES;
+  if (tier === 'slow') return SLOW_CATEGORIES;
+  return CATEGORIES;
+}
 
 function sourceOf(id: string): string {
   return (id.split('_')[0] || 'feed').slice(0, 12);
@@ -138,16 +154,20 @@ export async function GET(request: NextRequest) {
   }
 
   const origin = new URL(request.url).origin;
+  const sp = new URL(request.url).searchParams;
+
+  // Which freshness tier to refresh this call (see FAST/SLOW_CATEGORIES above).
+  const tier = sp.get('tier');
+  const cats = categoriesForTier(tier);
 
   // Flatten to (city × category) work items so we can resume across invocations —
   // the Hobby plan caps functions at ~60s, so each call processes a time-bounded
-  // slice and returns nextOffset. Call repeatedly until done=true.
+  // slice and returns nextOffset. Call repeatedly until done=true. Offsets are
+  // relative to the selected tier's work list.
   const work: { city: string; country: string; lat: number; lng: number; category: string }[] = [];
   for (const [city, country, lat, lng] of CITIES) {
-    for (const category of CATEGORIES) work.push({ city, country, lat, lng, category });
+    for (const category of cats) work.push({ city, country, lat, lng, category });
   }
-
-  const sp = new URL(request.url).searchParams;
   // When invoked by the daily cron (no offset), rotate the starting point each
   // day so every city gets refreshed over a few days despite the 60s cap.
   const dayRotation = (Math.floor(Date.now() / 86_400_000) * 21) % work.length;
@@ -217,7 +237,7 @@ export async function GET(request: NextRequest) {
   ));
 
   return NextResponse.json({
-    ok: true, ingested, rejected, processed, offset, nextOffset: done ? null : i,
+    ok: true, tier: tier ?? 'all', ingested, rejected, processed, offset, nextOffset: done ? null : i,
     total: work.length, done, errors: errors.slice(0, 8),
   });
 }

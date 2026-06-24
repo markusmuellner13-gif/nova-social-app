@@ -65,7 +65,7 @@ export interface AppTranslations {
     tech: string; fitness: string; music: string; pets: string; lifestyle: string;
     events: string; sightseeing: string;
     shops: string; venues: string; community: string;
-    restaurants: string; hotels: string; rentals: string;
+    restaurants: string; hotels: string; rentals: string; outdoors: string;
   };
 }
 
@@ -138,7 +138,7 @@ const en: AppTranslations = {
     tech: 'Tech', fitness: 'Fitness', music: 'Music', pets: 'Pets', lifestyle: 'Lifestyle',
     events: 'Events', sightseeing: 'Sightseeing',
     shops: 'Shops', venues: 'Venues', community: 'Community',
-    restaurants: 'Restaurants', hotels: 'Hotels', rentals: 'Rentals',
+    restaurants: 'Restaurants', hotels: 'Hotels', rentals: 'Rentals', outdoors: 'Outdoors',
   },
 };
 
@@ -211,7 +211,7 @@ const de: AppTranslations = {
     tech: 'Tech', fitness: 'Fitness', music: 'Musik', pets: 'Haustiere', lifestyle: 'Lifestyle',
     events: 'Events', sightseeing: 'Sehenswürdigkeiten',
     shops: 'Läden', venues: 'Veranstaltungsorte', community: 'Community',
-    restaurants: 'Restaurants', hotels: 'Hotels', rentals: 'Verleih',
+    restaurants: 'Restaurants', hotels: 'Hotels', rentals: 'Verleih', outdoors: 'Natur',
   },
 };
 
@@ -284,7 +284,7 @@ const es: AppTranslations = {
     tech: 'Tecnología', fitness: 'Fitness', music: 'Música', pets: 'Mascotas', lifestyle: 'Estilo de vida',
     events: 'Eventos', sightseeing: 'Turismo',
     shops: 'Tiendas', venues: 'Locales', community: 'Comunidad',
-    restaurants: 'Restaurantes', hotels: 'Hoteles', rentals: 'Alquileres',
+    restaurants: 'Restaurantes', hotels: 'Hoteles', rentals: 'Alquileres', outdoors: 'Naturaleza',
   },
 };
 
@@ -357,7 +357,7 @@ const fr: AppTranslations = {
     tech: 'Tech', fitness: 'Fitness', music: 'Musique', pets: 'Animaux', lifestyle: 'Lifestyle',
     events: 'Événements', sightseeing: 'Tourisme',
     shops: 'Boutiques', venues: 'Salles', community: 'Communauté',
-    restaurants: 'Restaurants', hotels: 'Hôtels', rentals: 'Locations',
+    restaurants: 'Restaurants', hotels: 'Hôtels', rentals: 'Locations', outdoors: 'Plein air',
   },
 };
 
@@ -430,7 +430,7 @@ const it: AppTranslations = {
     tech: 'Tecnologia', fitness: 'Fitness', music: 'Musica', pets: 'Animali', lifestyle: 'Lifestyle',
     events: 'Eventi', sightseeing: 'Turismo',
     shops: 'Negozi', venues: 'Location', community: 'Comunità',
-    restaurants: 'Ristoranti', hotels: 'Hotel', rentals: 'Noleggi',
+    restaurants: 'Ristoranti', hotels: 'Hotel', rentals: 'Noleggi', outdoors: 'Natura',
   },
 };
 
@@ -503,7 +503,7 @@ const pt: AppTranslations = {
     tech: 'Tecnologia', fitness: 'Fitness', music: 'Música', pets: 'Pets', lifestyle: 'Estilo de vida',
     events: 'Eventos', sightseeing: 'Turismo',
     shops: 'Lojas', venues: 'Locais', community: 'Comunidade',
-    restaurants: 'Restaurantes', hotels: 'Hotéis', rentals: 'Aluguéis',
+    restaurants: 'Restaurantes', hotels: 'Hotéis', rentals: 'Aluguéis', outdoors: 'Natureza',
   },
 };
 
@@ -576,7 +576,7 @@ const nl: AppTranslations = {
     tech: 'Tech', fitness: 'Fitness', music: 'Muziek', pets: 'Huisdieren', lifestyle: 'Lifestyle',
     events: 'Evenementen', sightseeing: 'Bezienswaardigheden',
     shops: 'Winkels', venues: 'Locaties', community: 'Gemeenschap',
-    restaurants: 'Restaurants', hotels: 'Hotels', rentals: 'Verhuur',
+    restaurants: 'Restaurants', hotels: 'Hotels', rentals: 'Verhuur', outdoors: 'Natuur',
   },
 };
 
@@ -649,7 +649,7 @@ const ja: AppTranslations = {
     tech: 'テック', fitness: 'フィットネス', music: '音楽', pets: 'ペット', lifestyle: 'ライフスタイル',
     events: 'イベント', sightseeing: '観光',
     shops: 'ショップ', venues: '会場', community: 'コミュニティ',
-    restaurants: 'レストラン', hotels: 'ホテル', rentals: 'レンタル',
+    restaurants: 'レストラン', hotels: 'ホテル', rentals: 'レンタル', outdoors: 'アウトドア',
   },
 };
 

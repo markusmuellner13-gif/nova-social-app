@@ -32,6 +32,7 @@ const DISCOVER_CHIP_CATS: { emoji: string; catKey: string; cat: Category }[] = [
   { emoji: '🎨',  catKey: 'art',         cat: 'art'       },
   { emoji: '💪',  catKey: 'fitness',     cat: 'fitness'   },
   { emoji: '🌿',  catKey: 'lifestyle',   cat: 'lifestyle' },
+  { emoji: '🏞️', catKey: 'outdoors',    cat: 'outdoors'  },
   { emoji: '🎵',  catKey: 'music',       cat: 'music'     },
   { emoji: '🛍️', catKey: 'shops',       cat: 'shops'     },
   { emoji: '🎭',  catKey: 'venues',      cat: 'venues'    },

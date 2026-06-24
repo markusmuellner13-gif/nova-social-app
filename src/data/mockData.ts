@@ -314,7 +314,7 @@ export const DEFAULT_PREFERENCES = {
   travel: 80, food: 60, fashion: 40, sports: 50, art: 70,
   tech: 65, fitness: 55, music: 75, pets: 85, lifestyle: 60,
   events: 90, sightseeing: 65, shops: 50, venues: 60, community: 55,
-  restaurants: 70, hotels: 50, rentals: 45,
+  restaurants: 70, hotels: 50, rentals: 45, outdoors: 70,
 };
 
 // ── Partner / Sponsored Posts ────────────────────────────────────────────────
