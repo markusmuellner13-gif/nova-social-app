@@ -235,6 +235,23 @@ export async function deleteInteraction(userId: string, postId: string, type: In
     .eq('user_id', userId).eq('post_id', postId).eq('interaction_type', type);
 }
 
+// Real aggregate "I'm going" counts for a set of posts. Reads the public,
+// trigger-maintained post_going_counts table — anonymous counts only, never who.
+// No Supabase configured → empty map (the UI falls back to the user's own state).
+export async function getGoingCounts(postIds: string[]): Promise<Record<string, number>> {
+  if (!supabase || postIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('post_going_counts')
+    .select('post_id, count')
+    .in('post_id', postIds);
+  if (error || !data) return {};
+  const out: Record<string, number> = {};
+  for (const r of data as { post_id: string; count: number }[]) {
+    out[r.post_id] = Number(r.count) || 0;
+  }
+  return out;
+}
+
 // ── GDPR: data access & erasure (Art. 15, 17, 20) ─────────────────────────────
 
 // Right of access / portability: assemble everything we hold about the user into
