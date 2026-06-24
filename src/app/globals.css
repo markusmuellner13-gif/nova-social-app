@@ -133,6 +133,27 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
+/* ── Responsive app frame ─────────────────────────────────────────────────────
+   On phones the app is edge-to-edge (unchanged). On laptops/desktops a full-
+   width feed stretches the 4:5 images into a blurry mess, so we centre the whole
+   app in a crisp phone-width column with a soft surround — the images render at
+   ~1:2 device pixels and look sharp, and it reads like a real app, not a
+   stretched website. The `transform` makes the column a containing block so
+   every inner position:fixed element (bottom nav, modals, sheets) stays neatly
+   inside the frame too — no extra per-component work. Mobile is untouched. */
+@media (min-width: 900px) {
+  body {
+    background: radial-gradient(circle at 50% -10%, #16161f 0%, #07070b 60%);
+  }
+  .app-frame {
+    max-width: 460px;
+    margin-inline: auto;
+    transform: translateZ(0);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 30px 90px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+  }
+}
+
 /* Shimmer skeleton */
 @keyframes shimmer {
   0%   { background-position: -200% 0; }

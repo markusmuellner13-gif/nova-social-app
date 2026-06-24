@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export const metadata = {
   title: 'Privacy Policy — Nova',
   description: 'Privacy Policy for Nova, the AI-powered event and place discovery app.',
@@ -109,14 +111,14 @@ export default function PrivacyPage() {
         <p style={S}>
           Questions or requests? Email{' '}
           <a href="mailto:privacy@nova-app.com" style={{ color: '#a78bfa' }}>privacy@nova-app.com</a>. See also our{' '}
-          <a href="/cookie" style={{ color: '#a78bfa' }}>Cookie Policy</a> and{' '}
-          <a href="/terms" style={{ color: '#a78bfa' }}>Terms of Service</a>.
+          <Link href="/cookie" style={{ color: '#a78bfa' }}>Cookie Policy</Link> and{' '}
+          <Link href="/terms" style={{ color: '#a78bfa' }}>Terms of Service</Link>.
         </p>
       </section>
 
-      <a href="/" style={{ display: 'inline-block', marginTop: 16, color: '#a78bfa', fontSize: 13, textDecoration: 'none' }}>
+      <Link href="/" style={{ display: 'inline-block', marginTop: 16, color: '#a78bfa', fontSize: 13, textDecoration: 'none' }}>
         ← Back to Nova
-      </a>
+      </Link>
     </div>
   );
 }

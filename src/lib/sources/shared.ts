@@ -184,16 +184,29 @@ async function fetchUnsplashImage(query: string, key: string): Promise<string | 
   } catch { return null; }
 }
 
-async function fetchPexelsImage(query: string, key: string): Promise<string | null> {
+// Small deterministic hash so a given post always maps to the SAME photo in a
+// result set (stable across reloads) while DIFFERENT posts pick different ones —
+// this is what stops twenty restaurants all sharing the one top stock photo.
+function hashSeed(seed: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+async function fetchPexelsImage(query: string, key: string, seed?: string): Promise<string | null> {
   try {
+    // Pull a page of candidates (not just the first) so different posts on the
+    // same query can each take a different, relevant photo.
     const res = await fetch(
-      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=3&orientation=portrait`,
+      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=20&orientation=portrait`,
       { headers: { Authorization: key }, signal: AbortSignal.timeout(3500) }
     );
     if (!res.ok) return null;
     const d = await res.json() as { photos?: { src?: { large2x?: string; large?: string } }[] };
-    // Use large2x if available, then append crop params for perfect 4:5 framing
-    const src = d.photos?.[0]?.src;
+    const photos = d.photos ?? [];
+    if (photos.length === 0) return null;
+    const idx = seed ? hashSeed(seed) % photos.length : 0;
+    const src = photos[idx]?.src ?? photos[0]?.src;
     const base = src?.large2x ?? src?.large;
     if (!base) return null;
     // Pexels supports ?w=&h=&fit=crop via their CDN
@@ -204,6 +217,23 @@ async function fetchPexelsImage(query: string, key: string): Promise<string | nu
 
 export async function getImage(query: string, unsplashKey?: string, pexelsKey?: string, seed?: string): Promise<string> {
   if (unsplashKey) { const u = await fetchUnsplashImage(query, unsplashKey); if (u) return proxyImage(u); }
-  if (pexelsKey)   { const u = await fetchPexelsImage(query, pexelsKey);     if (u) return proxyImage(u); }
+  if (pexelsKey)   { const u = await fetchPexelsImage(query, pexelsKey, seed); if (u) return proxyImage(u); }
   return picsumUrl(seed ?? query);
+}
+
+// Final safety net so NO two posts in a single feed response share an image. Real
+// venue photos (OSM/Places/og:image) are kept as-is; only a genuine collision
+// (usually a repeated stock fallback) is broken by re-seeding that post to a
+// unique deterministic image. Keeps the feed feeling curated, never copy-pasted.
+export function ensureUniqueImages<T extends { id: string; image: string }>(posts: T[]): T[] {
+  const seen = new Set<string>();
+  return posts.map(p => {
+    const img = p.image ?? '';
+    if (img && !seen.has(img)) { seen.add(img); return p; }
+    let next = picsumUrl(p.id);
+    let n = 0;
+    while (seen.has(next) && n < 5) { next = picsumUrl(`${p.id}_${n++}`); }
+    seen.add(next);
+    return { ...p, image: next };
+  });
 }

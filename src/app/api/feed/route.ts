@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ApiPost, dedupePosts, dropExpired, withDistance, todayStr, haversineKm } from '@/lib/sources/shared';
+import { ApiPost, dedupePosts, dropExpired, withDistance, todayStr, haversineKm, ensureUniqueImages } from '@/lib/sources/shared';
 import { resolveRequestGeo } from '@/lib/sources/geocode';
 import { fetchTicketmaster, tmEventToPost, TM_CATEGORY_MAP } from '@/lib/sources/ticketmaster';
 import { fetchEventbriteEvents } from '@/lib/sources/eventbrite';
@@ -249,8 +249,9 @@ export async function GET(request: NextRequest) {
             const payload = {
               // Stamp the user-relative distance so the client can split a small
               // town's own events from a bigger neighbour's (stored distanceKm is
-              // relative to the ingest centroid, not this user).
-              posts: withDistance(dbPosts, lat, lng),
+              // relative to the ingest centroid, not this user). ensureUniqueImages
+              // guarantees no two cards share a photo.
+              posts: ensureUniqueImages(withDistance(dbPosts, lat, lng)),
               city: searchParams.get('city') || '',
               country: searchParams.get('country') || '',
               sources: ['db'], hasMore: dbPosts.length >= count,
@@ -302,7 +303,7 @@ async function computeFeed(request: NextRequest) {
     try {
       const { posts, hasMore } = await osmPosts(lat, lng, city, category, page, radius, count, unsplashKey, pexelsKey);
       if (posts.length > 0) {
-        const final = withDistance(posts, lat, lng);
+        const final = ensureUniqueImages(withDistance(posts, lat, lng));
         return NextResponse.json(
           { posts: final, city, country, sources: ['osm'], hasMore },
           { headers: PLACE_CACHE }
@@ -438,7 +439,7 @@ async function computeFeed(request: NextRequest) {
 
   return NextResponse.json(
     {
-      posts: final,
+      posts: ensureUniqueImages(final),
       city, country, sources,
       hasMore: anyMore || final.length >= count,
       page,

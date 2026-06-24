@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Morning + evening push digests — runs in GitHub's cloud, free, NO Vercel Pro.
+#
+# Why: the Vercel Hobby plan allows only ONE cron/day, so the daily warm cron can
+# fire at most one push. To give users a morning "plan your day" nudge AND an
+# evening "what's on tonight" nudge, this scheduled GitHub Action pings the push
+# endpoint twice a day with a slot hint. /api/cron/push only sends to users who
+# are actually in that LOCAL window (derived from their longitude) and enforces a
+# 10-hour cooldown, so nobody is spammed.
+#
+# Times are UTC. 06:00 UTC ≈ 07–08:00 in Central Europe (morning); 17:00 UTC ≈
+# 18–19:00 (evening) — tuned for the app's home market. Users elsewhere still get
+# served whenever a trigger lands inside their own morning/evening window.
+#
+# SETUP (one-time): repo → Settings → Secrets and variables → Actions → add the
+# CRON_SECRET secret (same value as in Vercel). Optional var NOVA_BASE_URL.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Push digests (morning + evening)
+
+on:
+  schedule:
+    - cron: '0 6 * * *'    # morning slot
+    - cron: '0 17 * * *'   # evening slot
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: 'Which slot to send (morning/evening/auto)'
+        required: false
+        default: 'auto'
+
+concurrency:
+  group: nova-push
+  cancel-in-progress: false
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send the digest for this slot
+        env:
+          BASE_URL: ${{ vars.NOVA_BASE_URL || 'https://nova-phi-liart.vercel.app' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET secret is not set — add it in repo Settings → Secrets → Actions."
+            exit 1
+          fi
+          # Decide the slot from the schedule that triggered us (or the manual input).
+          slot="${{ github.event.inputs.slot }}"
+          if [ -z "$slot" ] || [ "$slot" = "auto" ]; then
+            if [ "${{ github.event.schedule }}" = "0 6 * * *" ]; then slot="morning";
+            elif [ "${{ github.event.schedule }}" = "0 17 * * *" ]; then slot="evening";
+            else slot="auto"; fi
+          fi
+          echo "Sending push slot=$slot"
+          curl -s -m 60 -H "Authorization: Bearer $CRON_SECRET" \
+            "$BASE_URL/api/cron/push?slot=$slot" | head -c 500 || true
+          echo ""

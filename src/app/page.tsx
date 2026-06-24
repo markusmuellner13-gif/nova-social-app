@@ -110,7 +110,7 @@ function AppShell() {
   if (!splashDone) return <SplashScreen onComplete={handleSplashComplete} />;
 
   return (
-    <div style={{
+    <div className="app-frame" style={{
       position: 'fixed', inset: 0, background: '#0a0a0f',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
       // Sit the app just below the status bar / notch using only the device's

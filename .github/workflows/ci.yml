@@ -36,11 +36,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Non-blocking for now: the repo has a pre-existing lint backlog. Surfaces
-      # issues without failing the gate. Flip to blocking once the backlog is cleared.
-      - name: Lint (informational)
+      # Blocking: the lint backlog of real errors is cleared. Genuinely broken
+      # code (unescaped JSX, raw <a> page links, unused vars, etc.) now fails the
+      # gate. Advisory React-Compiler diagnostics remain warnings (see
+      # eslint.config.mjs) so they don't block, but stay visible.
+      - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       # Blocking: the whole codebase must type-check. Catches the class of bug a
       # build alone can miss and is the real safety net for refactors.

@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export const metadata = {
   title: 'Terms of Service — Nova',
   description: 'Terms of Service for Nova, the AI-powered event and place discovery app.',
@@ -12,7 +14,7 @@ export default function TermsPage() {
       <section style={{ marginBottom: 28 }}>
         <h2 style={{ color: '#a78bfa', fontSize: 16, fontWeight: 600, marginBottom: 8 }}>1. Acceptance</h2>
         <p style={{ fontSize: 14, lineHeight: 1.7, color: '#888899' }}>
-          By using Nova ("the app"), you agree to these Terms of Service. If you do not agree, please stop using the app.
+          By using Nova (&quot;the app&quot;), you agree to these Terms of Service. If you do not agree, please stop using the app.
         </p>
       </section>
 
@@ -22,7 +24,7 @@ export default function TermsPage() {
           Nova is a discovery tool. You may browse events, sightseeing, shops, venues and community content.
           You agree not to: (a) attempt to scrape or bulk-download content from Nova; (b) use the app to
           harass, harm, or deceive other users; (c) interfere with or overload our servers; (d) reverse-engineer
-          or copy Nova's proprietary AI algorithms.
+          or copy Nova&apos;s proprietary AI algorithms.
         </p>
       </section>
 
@@ -38,7 +40,7 @@ export default function TermsPage() {
       <section style={{ marginBottom: 28 }}>
         <h2 style={{ color: '#a78bfa', fontSize: 16, fontWeight: 600, marginBottom: 8 }}>4. Intellectual Property</h2>
         <p style={{ fontSize: 14, lineHeight: 1.7, color: '#888899' }}>
-          Nova's design, branding, and original code are the property of Nova. Event images and descriptions
+          Nova&apos;s design, branding, and original code are the property of Nova. Event images and descriptions
           are sourced from third parties under their respective licenses (Ticketmaster, Wikipedia CC, Unsplash/Pexels).
         </p>
       </section>
@@ -46,7 +48,7 @@ export default function TermsPage() {
       <section style={{ marginBottom: 28 }}>
         <h2 style={{ color: '#a78bfa', fontSize: 16, fontWeight: 600, marginBottom: 8 }}>5. Limitation of Liability</h2>
         <p style={{ fontSize: 14, lineHeight: 1.7, color: '#888899' }}>
-          Nova is provided "as is" without warranties of any kind. We are not liable for any loss or damage
+          Nova is provided &quot;as is&quot; without warranties of any kind. We are not liable for any loss or damage
           arising from your use of the app, reliance on event information, or inability to access the service.
         </p>
       </section>
@@ -67,9 +69,9 @@ export default function TermsPage() {
         </p>
       </section>
 
-      <a href="/" style={{ display: 'inline-block', marginTop: 16, color: '#a78bfa', fontSize: 13, textDecoration: 'none' }}>
+      <Link href="/" style={{ display: 'inline-block', marginTop: 16, color: '#a78bfa', fontSize: 13, textDecoration: 'none' }}>
         ← Back to Nova
-      </a>
+      </Link>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import TurnstileWidget from '@/components/TurnstileWidget';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,7 +139,7 @@ export default function BusinessPage() {
         <div style={{ fontSize: 48 }}>{copy.icon}</div>
         <h1 style={{ fontSize: 24, fontWeight: 800 }}>{copy.title}</h1>
         <p style={{ color: '#9aa', maxWidth: 380 }}>{copy.body}</p>
-        <a href="/" style={{ marginTop: 8, padding: '12px 22px', borderRadius: 14, background: 'linear-gradient(135deg,#8b5cf6,#ec4899)', color: '#fff', fontWeight: 700, textDecoration: 'none' }}>Open Nova</a>
+        <Link href="/" style={{ marginTop: 8, padding: '12px 22px', borderRadius: 14, background: 'linear-gradient(135deg,#8b5cf6,#ec4899)', color: '#fff', fontWeight: 700, textDecoration: 'none' }}>Open Nova</Link>
       </main>
     );
   }

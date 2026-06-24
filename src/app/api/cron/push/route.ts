@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cacheEnabled, cacheScanKeys, cacheGet, cacheDelete } from '@/lib/serverCache';
+import { cacheEnabled, cacheScanKeys, cacheGet, cacheSet, cacheDelete } from '@/lib/serverCache';
 import { webPushEnabled, sendPush, PushSub } from '@/lib/webpush';
 import { dbReadEnabled, queryTopEventsNear } from '@/lib/eventsDb';
 import { buildSmartPush } from '@/lib/pushContent';
@@ -27,6 +27,8 @@ interface Envelope {
   lat?: number | null;
   lng?: number | null;
   categories?: string[] | null; // the user's learned top interests
+  ts?: number;
+  lastPush?: number;            // when we last pushed to this user (cooldown)
 }
 
 // Cheap deterministic hash → a stable per-user seed so two subscribers in the
@@ -35,6 +37,22 @@ function seedFromKey(key: string): number {
   let h = 2166136261;
   for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619); }
   return (h >>> 0) % 997;
+}
+
+// Approximate the user's LOCAL time from their longitude (15° ≈ 1 hour). Good
+// enough to tell morning from evening worldwide without storing a timezone, so
+// "Good morning" actually lands in the morning and "tonight" in the evening.
+function localNowFromLng(lng: number | null | undefined): Date {
+  const offsetH = Number.isFinite(lng) ? (lng as number) / 15 : 0;
+  return new Date(Date.now() + offsetH * 3_600_000);
+}
+
+const MORNING = [6, 11];   // 06:00–10:59 local
+const EVENING = [16, 22];  // 16:00–21:59 local
+const COOLDOWN_MS = 10 * 60 * 60 * 1000; // never push the same user twice in 10h
+
+function inWindow(hour: number, [start, end]: number[]): boolean {
+  return hour >= start && hour < end;
 }
 
 export async function GET(request: NextRequest) {
@@ -52,9 +70,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, sent: 0, note: 'no subscription store (set Redis/Upstash)' });
   }
 
+  // slot=morning | evening targets users currently in that LOCAL window. No slot
+  // → send to anyone in either window (a daily catch-all). The 10h cooldown means
+  // a user gets at most a morning AND an evening push per day, never a barrage.
+  const slot = (new URL(request.url).searchParams.get('slot') || '').toLowerCase();
+
   const keys = await cacheScanKeys('nova:push:sub:', 5000);
   const deadline = Date.now() + 45_000;
-  let sent = 0, removed = 0, processed = 0;
+  const nowMs = Date.now();
+  let sent = 0, removed = 0, processed = 0, skipped = 0;
 
   for (const key of keys) {
     if (Date.now() > deadline) break;
@@ -62,7 +86,22 @@ export async function GET(request: NextRequest) {
     if (!env?.subscription?.endpoint) continue;
     processed++;
 
-    // Pull a rich, multi-category set of nearby events, then craft the copy.
+    // Cooldown — don't re-push a user we already reached recently.
+    if (env.lastPush && nowMs - env.lastPush < COOLDOWN_MS) { skipped++; continue; }
+
+    // Only push during a sensible LOCAL window (their morning or evening).
+    const local = localNowFromLng(env.lng);
+    const hour = local.getHours();
+    const isMorning = inWindow(hour, MORNING);
+    const isEvening = inWindow(hour, EVENING);
+    const wantSlot =
+      slot === 'morning' ? isMorning :
+      slot === 'evening' ? isEvening :
+      (isMorning || isEvening);
+    if (!wantSlot) { skipped++; continue; }
+
+    // Pull a rich, multi-category set of nearby events, then craft the copy
+    // using the user's LOCAL time so "morning"/"tonight" framing is accurate.
     let nearby: ApiPost[] = [];
     if (dbReadEnabled && Number.isFinite(env.lat) && Number.isFinite(env.lng)) {
       nearby = await queryTopEventsNear({
@@ -74,14 +113,19 @@ export async function GET(request: NextRequest) {
       city: env.city || 'your area',
       events: nearby,
       categories: Array.isArray(env.categories) ? env.categories : [],
+      now: local,
       seed: seedFromKey(key),
     });
     const payload = { ...msg, url: '/', tag: 'nova-digest' };
 
     const res = await sendPush(env.subscription, payload);
-    if (res.ok) sent++;
-    else if (res.gone) { await cacheDelete(key); removed++; }
+    if (res.ok) {
+      sent++;
+      // Record the send so the cooldown holds across the day's triggers.
+      const ttl = Math.max(60, Math.floor(((env.ts ?? nowMs) + 60 * 24 * 3600_000 - nowMs) / 1000));
+      await cacheSet(key, { ...env, lastPush: nowMs }, ttl).catch(() => {});
+    } else if (res.gone) { await cacheDelete(key); removed++; }
   }
 
-  return NextResponse.json({ ok: true, sent, removed, processed, total: keys.length });
+  return NextResponse.json({ ok: true, slot: slot || 'auto', sent, removed, skipped, processed, total: keys.length });
 }

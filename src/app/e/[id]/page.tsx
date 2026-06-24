@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { decodeSharePayload } from '@/lib/shareLink';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://nova-phi-liart.vercel.app';
@@ -49,9 +50,9 @@ export default async function EventSharePage({ searchParams }: { params: PP; sea
     return (
       <main style={{ minHeight: '100vh', background: '#0a0a0f', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24, textAlign: 'center' }}>
         <h1 style={{ fontSize: 22, fontWeight: 800 }}>This event link looks incomplete</h1>
-        <a href="/" style={{ padding: '12px 22px', borderRadius: 14, background: 'linear-gradient(135deg,#8b5cf6,#ec4899)', color: '#fff', fontWeight: 700, textDecoration: 'none' }}>
+        <Link href="/" style={{ padding: '12px 22px', borderRadius: 14, background: 'linear-gradient(135deg,#8b5cf6,#ec4899)', color: '#fff', fontWeight: 700, textDecoration: 'none' }}>
           Open Nova
-        </a>
+        </Link>
       </main>
     );
   }
@@ -93,10 +94,10 @@ export default async function EventSharePage({ searchParams }: { params: PP; sea
             </a>
           )}
 
-          <a href="/"
+          <Link href="/"
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', padding: '13px', borderRadius: 14, background: '#1a1a24', border: '1px solid #2a2a38', color: '#fff', fontWeight: 700, textDecoration: 'none', marginTop: 10 }}>
             ✨ Discover more near you on Nova
-          </a>
+          </Link>
         </div>
       </div>
     </main>
