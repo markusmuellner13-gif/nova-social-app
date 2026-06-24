@@ -9,7 +9,7 @@
  * registration.showNotification (see src/lib/notifications.ts).
  */
 
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
@@ -19,7 +19,7 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('push', (event) => {
   let data = {};
-  try { data = event.data ? event.data.json() : {}; } catch (e) { data = {}; }
+  try { data = event.data ? event.data.json() : {}; } catch { data = {}; }
   const title = data.title || 'Nova';
   const options = {
     body: data.body || 'Something is happening near you 🎉',

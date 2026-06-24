@@ -180,7 +180,6 @@ export default function BusinessPage() {
             {verif?.verified && (
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 10, borderRadius: 12, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.35)' }}>
                 {verif.photo
-                  // eslint-disable-next-line @next/next/no-img-element
                   ? <img src={verif.photo} alt={verif.name} style={{ width: 54, height: 54, borderRadius: 10, objectFit: 'cover', flexShrink: 0 }} />
                   : <div style={{ width: 54, height: 54, borderRadius: 10, background: '#1a1a24', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>🏪</div>}
                 <div style={{ minWidth: 0 }}>

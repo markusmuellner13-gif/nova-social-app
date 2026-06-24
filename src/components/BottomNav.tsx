@@ -11,8 +11,8 @@ interface Props {
   onChange: (tab: Tab) => void;
 }
 
-function NavButton({ id, Icon, label, isActive, onClick, badge }: {
-  id: Tab; Icon: React.ElementType; label: string;
+function NavButton({ Icon, label, isActive, onClick, badge }: {
+  Icon: React.ElementType; label: string;
   isActive: boolean; onClick: () => void; badge?: number;
 }) {
   return (
@@ -72,7 +72,7 @@ export default function BottomNav({ active, onChange }: Props) {
             <span className="text-xs font-semibold" style={{ color: active === id ? '#a78bfa' : '#55556a', letterSpacing: '0.01em' }}>{t.nav.groups}</span>
           </button>
         ) : (
-          <NavButton key={id} id={id} Icon={Icon} label={label} isActive={active === id} onClick={() => onChange(id)} badge={badge} />
+          <NavButton key={id} Icon={Icon} label={label} isActive={active === id} onClick={() => onChange(id)} badge={badge} />
         )
       )}
     </nav>

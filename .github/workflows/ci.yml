@@ -19,8 +19,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Job display name is "verify" so the status-check context matches the branch
+  # ruleset's required check named "verify" (Settings → Rules). Renaming this
+  # would silently un-gate master, so keep them in sync.
   verify:
-    name: Typecheck · Test · Build
+    name: verify
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
