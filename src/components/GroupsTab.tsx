@@ -2,14 +2,16 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Users, Plus, Hash, X, Copy, Calendar, MapPin, ExternalLink, Loader2, LogIn } from 'lucide-react';
+import { Users, Plus, Hash, X, Copy, Calendar, MapPin, ExternalLink, Loader2, LogIn, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { useApp } from '@/context/AppContext';
 import {
-  SupabaseGroup, SupabaseGroupEvent,
-  createGroup, joinGroup, getUserGroups, getGroupEvents, removeEventFromGroup,
+  SupabaseGroup, SupabaseGroupEvent, FriendGoing,
+  createGroup, joinGroup, getUserGroups, getGroupEvents, removeEventFromGroup, getGroupGoing,
 } from '@/lib/supabase';
 import { Post } from '@/types';
 import { timeAgo } from '@/data/mockData';
+import Avatar from './Avatar';
 
 interface Props {
   onOpenAuth: () => void;
@@ -19,11 +21,13 @@ type Screen = 'list' | 'create' | 'join' | 'detail';
 
 export default function GroupsTab({ onOpenAuth }: Props) {
   const { user, isSupabaseEnabled } = useAuth();
+  const { isGoing, goPost } = useApp();
 
   const [screen, setScreen]       = useState<Screen>('list');
   const [groups, setGroups]       = useState<SupabaseGroup[]>([]);
   const [activeGroup, setActiveGroup] = useState<SupabaseGroup | null>(null);
   const [groupEvents, setGroupEvents] = useState<SupabaseGroupEvent[]>([]);
+  const [groupGoing, setGroupGoing] = useState<Record<string, FriendGoing[]>>({});
   const [loading, setLoading]     = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDesc, setNewGroupDesc] = useState('');
@@ -43,11 +47,29 @@ export default function GroupsTab({ onOpenAuth }: Props) {
     if (user) loadGroups();
   }, [user, loadGroups]);
 
+  const loadGroupGoing = useCallback(async (groupId: string, events: SupabaseGroupEvent[]) => {
+    const ids = events.map(e => e.post_id);
+    if (ids.length === 0) { setGroupGoing({}); return; }
+    setGroupGoing(await getGroupGoing(groupId, ids));
+  }, []);
+
   async function loadGroupEvents(group: SupabaseGroup) {
     setActiveGroup(group);
     setScreen('detail');
     const events = await getGroupEvents(group.id);
     setGroupEvents(events);
+    void loadGroupGoing(group.id, events);
+  }
+
+  // Toggle the current user's RSVP for a group event, then refresh who's going so
+  // the whole group sees the update.
+  async function handleGroupGoing(ge: SupabaseGroupEvent) {
+    const post = { ...(ge.post_data as unknown as Post), id: ge.post_id };
+    goPost(post);
+    if (activeGroup) {
+      // Optimistic: re-pull shortly after the write lands.
+      setTimeout(() => { if (activeGroup) void loadGroupGoing(activeGroup.id, groupEvents); }, 400);
+    }
   }
 
   async function handleCreateGroup() {
@@ -312,6 +334,38 @@ export default function GroupsTab({ onOpenAuth }: Props) {
                             <span className="text-xs" style={{ color: '#888899' }}>{post.eventVenue as string}</span>
                           </div>
                         )}
+                        {/* Group RSVP — who's in, and a toggle to join them */}
+                        {(() => {
+                          const going = groupGoing[ge.post_id] ?? [];
+                          const meGoing = isGoing(ge.post_id);
+                          return (
+                            <div className="flex items-center justify-between mb-2 mt-1">
+                              <div className="flex items-center gap-2 min-w-0">
+                                {going.length > 0 && (
+                                  <div className="flex -space-x-2 flex-shrink-0">
+                                    {going.slice(0, 4).map(m => (
+                                      <div key={m.id} className="w-6 h-6 rounded-full overflow-hidden flex-shrink-0" style={{ border: '2px solid #13131a' }}>
+                                        <Avatar src={m.avatar} name={m.name} size={24} className="w-full h-full rounded-full" />
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                <span className="text-xs font-semibold truncate" style={{ color: going.length ? '#22c55e' : '#555566' }}>
+                                  {going.length === 0 ? 'Be the first to RSVP' : `${going.length} going`}
+                                </span>
+                              </div>
+                              <motion.button whileTap={{ scale: 0.92 }} onClick={() => handleGroupGoing(ge)}
+                                className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold flex-shrink-0"
+                                style={{ background: meGoing ? 'rgba(34,197,94,0.15)' : '#1a1a24',
+                                  border: `1px solid ${meGoing ? 'rgba(34,197,94,0.4)' : '#2a2a38'}`,
+                                  color: meGoing ? '#22c55e' : '#a78bfa' }}>
+                                <CheckCircle2 size={12} fill={meGoing ? '#22c55e' : 'none'} />
+                                {meGoing ? "I'm in" : "I'm going"}
+                              </motion.button>
+                            </div>
+                          );
+                        })()}
+
                         <div className="flex items-center justify-between">
                           <span className="text-xs" style={{ color: '#444455' }}>{timeAgo(new Date(ge.created_at).getTime())}</span>
                           <div className="flex gap-2">
