@@ -30,7 +30,7 @@ const securityHeaders = [
       // Turnstile, the world-map country data (jsdelivr), map tiles
       // (OSM streets + Esri satellite) and the OSRM routing API for in-app
       // navigation.
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com https://*.sentry.io https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://challenges.cloudflare.com https://cdn.jsdelivr.net https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://router.project-osrm.org",
+      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com https://*.sentry.io https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://challenges.cloudflare.com https://cdn.jsdelivr.net https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://router.project-osrm.org https://tiles.openfreemap.org https://*.openfreemap.org",
       // MapLibre GL runs its tile workers from a blob: URL.
       "worker-src 'self' blob:",
       "frame-ancestors 'none'",

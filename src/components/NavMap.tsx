@@ -49,29 +49,12 @@ const CATEGORY_EMOJI: Record<Category, string> = {
   outdoors: '🏞️',
 };
 
-// Free raster basemaps (no API key). CSP allows these hosts (see next.config).
-const STREET_TILES = [
-  'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-  'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-  'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-];
+// Free vector tile basemap via OpenFreeMap (no API key). CSP allows this host (see next.config).
+const DARK_STYLE_URL = 'https://tiles.openfreemap.org/styles/dark-matter';
+// Satellite overlay — raster tiles drawn below vector labels in hybrid mode.
 const SATELLITE_TILES = [
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
 ];
-
-function baseStyle(): maplibregl.StyleSpecification {
-  return {
-    version: 8,
-    sources: {
-      streets:   { type: 'raster', tiles: STREET_TILES,    tileSize: 256, attribution: '© OpenStreetMap, © CARTO' },
-      satellite: { type: 'raster', tiles: SATELLITE_TILES, tileSize: 256, attribution: '© Esri' },
-    },
-    layers: [
-      { id: 'streets',   type: 'raster', source: 'streets',   layout: { visibility: 'visible' } },
-      { id: 'satellite', type: 'raster', source: 'satellite', layout: { visibility: 'none' } },
-    ],
-  };
-}
 
 interface RouteStep {
   instruction: string;
@@ -120,8 +103,10 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const watchIdRef = useRef<number | null>(null);
   const stepsRef = useRef<RouteStep[]>([]);
   const lastSpokenRef = useRef<string>('');
+  const satelliteRef = useRef(false);
 
   const [satellite, setSatellite] = useState(false);
+  useEffect(() => { satelliteRef.current = satellite; }, [satellite]);
   const [theme, setTheme] = useState<NavTheme>(DEFAULT_THEME);
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const [voiceOn, setVoiceOn] = useState(true);
@@ -171,7 +156,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
       : (posts[0]?.location ? [posts[0].location.lng, posts[0].location.lat] : [16.37, 48.21]);
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: baseStyle(),
+      style: DARK_STYLE_URL,
       center,
       zoom: 12,
       attributionControl: { compact: true },
@@ -180,6 +165,14 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     mapRef.current = map;
 
     map.on('load', () => {
+      // Add satellite raster overlay below all vector layers so labels stay on top.
+      const firstLayerId = map.getStyle().layers[0]?.id;
+      map.addSource('satellite-src', { type: 'raster', tiles: SATELLITE_TILES, tileSize: 256, attribution: '© Esri' });
+      map.addLayer(
+        { id: 'satellite', type: 'raster', source: 'satellite-src', layout: { visibility: satelliteRef.current ? 'visible' : 'none' } },
+        firstLayerId,
+      );
+
       // Event pins. Building a DOM marker per post is expensive, so when the set
       // is large we only show the ones nearest the map centre (the user / the
       // target) — that's all that's relevant for navigation anyway, and it keeps
@@ -223,12 +216,11 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Satellite/street toggle ──────────────────────────────────────────────────
+  // ── Satellite overlay toggle ─────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map || !map.isStyleLoaded() || !map.getLayer('satellite')) return;
     map.setLayoutProperty('satellite', 'visibility', satellite ? 'visible' : 'none');
-    map.setLayoutProperty('streets',   'visibility', satellite ? 'none' : 'visible');
   }, [satellite]);
 
   // ── Apply the active nav theme: map treatment + route + user marker ──────────
@@ -293,18 +285,22 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     const route = data.routes?.[0];
     if (!route) return false;
 
-    // Draw the route line
+    // Draw the route line — insert below the first symbol (label) layer so text stays readable.
     const geo: GeoJSON.Feature = { type: 'Feature', properties: {}, geometry: route.geometry };
     const src = map.getSource('route') as maplibregl.GeoJSONSource | undefined;
-    if (src) src.setData(geo);
-    else {
+    if (src) {
+      src.setData(geo);
+    } else {
+      const firstSymbolId = map.getStyle().layers.find(l => l.type === 'symbol')?.id;
       map.addSource('route', { type: 'geojson', data: geo });
-      map.addLayer({ id: 'route-line', type: 'line', source: 'route',
-        layout: { 'line-join': theme.square ? 'miter' : 'round', 'line-cap': theme.square ? 'square' : 'round' },
-        paint: { 'line-color': theme.route, 'line-width': theme.routeWidth, 'line-opacity': 0.9 } });
       map.addLayer({ id: 'route-glow', type: 'line', source: 'route',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': theme.routeGlow, 'line-width': theme.routeWidth * 2, 'line-opacity': 0.25 } }, 'route-line');
+        paint: { 'line-color': theme.routeGlow, 'line-width': theme.routeWidth * 2, 'line-opacity': 0.25 } },
+        firstSymbolId);
+      map.addLayer({ id: 'route-line', type: 'line', source: 'route',
+        layout: { 'line-join': theme.square ? 'miter' : 'round', 'line-cap': theme.square ? 'square' : 'round' },
+        paint: { 'line-color': theme.route, 'line-width': theme.routeWidth, 'line-opacity': 0.9 } },
+        firstSymbolId);
     }
 
     const allSteps: RouteStep[] = [];
