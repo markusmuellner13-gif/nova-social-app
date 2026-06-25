@@ -167,6 +167,65 @@ export async function fetchWikipediaImages(title: string, max = 6): Promise<stri
   }
 }
 
+// ── Real photos for an OSM place that carries a `wikidata` tag ─────────────────
+// Thousands of churches, castles, museums, parks, peaks and natural landmarks in
+// OpenStreetMap are linked to a Wikidata entity (a Q-id). We read that entity's
+// designated image (P18) and, when it has an English Wikipedia article, pull
+// that article's full photo set too — giving outdoors & OSM places the same
+// swipeable Wikimedia gallery the sightseeing tab already enjoys. Free, no key.
+export async function fetchCommonsImagesByWikidata(qid: string, max = 6): Promise<string[]> {
+  if (!/^Q\d+$/.test(qid)) return [];
+  try {
+    const res = await fetch(
+      `https://www.wikidata.org/wiki/Special:EntityData/${qid}.json`,
+      { headers: WIKI_HEADERS, signal: AbortSignal.timeout(3500) }
+    );
+    if (!res.ok) return [];
+    const data = await res.json() as {
+      entities?: Record<string, {
+        claims?: { P18?: { mainsnak?: { datavalue?: { value?: string } } }[] };
+        sitelinks?: Record<string, { title?: string }>;
+      }>;
+    };
+    const entity = data.entities?.[qid];
+    if (!entity) return [];
+
+    const urls: string[] = [];
+    const seen = new Set<string>();
+    const skip = /\.svg|icon|logo|symbol|flag|map|locator|seal|coat[_ ]of[_ ]arms/i;
+    const pushFile = (file: string) => {
+      const key = file.toLowerCase();
+      if (!file || seen.has(key) || skip.test(key)) return;
+      seen.add(key);
+      // Special:FilePath redirects to upload.wikimedia.org and is served fine as
+      // a plain <img> src (CSP allows https: images); consistent with osmTagImage.
+      urls.push(`https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=900`);
+    };
+
+    // P18 — the entity's designated image(s).
+    for (const c of entity.claims?.P18 ?? []) {
+      const file = c.mainsnak?.datavalue?.value;
+      if (typeof file === 'string') pushFile(file);
+    }
+
+    // Merge in the English Wikipedia article's photo set for a fuller gallery.
+    const enTitle = entity.sitelinks?.enwiki?.title;
+    if (enTitle && urls.length < max) {
+      const wikiImgs = await fetchWikipediaImages(enTitle, max).catch(() => []);
+      for (const u of wikiImgs) {
+        const key = (u.split('/').pop() ?? u).toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        urls.push(u);
+        if (urls.length >= max) break;
+      }
+    }
+    return urls.slice(0, max);
+  } catch {
+    return [];
+  }
+}
+
 export async function wikiToPost(
   poi: WikiGeoResult, summary: WikiSummary | null, desc: string, city: string,
   unsplashKey?: string, pexelsKey?: string

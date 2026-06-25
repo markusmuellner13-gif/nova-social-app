@@ -324,6 +324,71 @@ export async function getGroupGoing(groupId: string, postIds: string[]): Promise
   return out;
 }
 
+// ── Group event discussion (chat/comments on a shared group event) ────────────
+
+export interface GroupEventComment {
+  id: string;
+  group_id: string;
+  post_id: string;
+  user_id: string;
+  author_name?: string;
+  author_avatar?: string;
+  body: string;
+  created_at: string;
+}
+
+// Fetch a group event's discussion thread, oldest → newest. RLS limits reads to
+// members of the group. Empty when Supabase / the migration isn't set up.
+export async function getGroupEventComments(groupId: string, postId: string): Promise<GroupEventComment[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('group_event_comments')
+    .select('*')
+    .eq('group_id', groupId)
+    .eq('post_id', postId)
+    .order('created_at', { ascending: true });
+  if (error || !data) return [];
+  return data as GroupEventComment[];
+}
+
+// Post a message to a group event's thread. Returns the inserted row (so the UI
+// can append it optimistically) or null if it failed / sync is disabled.
+export async function addGroupEventComment(
+  groupId: string, postId: string, userId: string,
+  body: string, authorName?: string, authorAvatar?: string,
+): Promise<GroupEventComment | null> {
+  if (!supabase) return null;
+  const trimmed = body.trim().slice(0, 1000);
+  if (!trimmed) return null;
+  const { data, error } = await supabase
+    .from('group_event_comments')
+    .insert({ group_id: groupId, post_id: postId, user_id: userId, body: trimmed, author_name: authorName, author_avatar: authorAvatar })
+    .select()
+    .single();
+  if (error) { console.error('[supabase/addGroupEventComment]', error); return null; }
+  return data as GroupEventComment;
+}
+
+export async function deleteGroupEventComment(commentId: string): Promise<void> {
+  if (!supabase) return;
+  await supabase.from('group_event_comments').delete().eq('id', commentId);
+}
+
+// Unread-ish helper: how many messages each event thread has, so the group list
+// can show a 💬 count. One round-trip for all of a group's events.
+export async function getGroupEventCommentCounts(groupId: string, postIds: string[]): Promise<Record<string, number>> {
+  if (!supabase || postIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('group_event_comments')
+    .select('post_id')
+    .eq('group_id', groupId)
+    .in('post_id', postIds);
+  if (error || !data) return {};
+  const out: Record<string, number> = {};
+  for (const r of data as { post_id: string }[]) out[r.post_id] = (out[r.post_id] ?? 0) + 1;
+  return out;
+}
+
 // ── GDPR: data access & erasure (Art. 15, 17, 20) ─────────────────────────────
 
 // Right of access / portability: assemble everything we hold about the user into
@@ -360,6 +425,7 @@ export async function deleteMyAppData(userId: string): Promise<boolean> {
     supabase.from('follows').delete().eq('following_id', userId),
     supabase.from('group_members').delete().eq('user_id', userId),
     supabase.from('group_events').delete().eq('added_by', userId),
+    supabase.from('group_event_comments').delete().eq('user_id', userId),
     supabase.from('profiles').delete().eq('id', userId),
   ]);
   return true;

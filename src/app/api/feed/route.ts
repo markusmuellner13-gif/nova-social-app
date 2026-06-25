@@ -420,14 +420,27 @@ async function computeFeed(request: NextRequest) {
     }
   }
 
+  // ── Strict locality ───────────────────────────────────────────────────────
+  // Never show content from outside the radius the client asked for. The client
+  // widens the radius in tiers (15→45→100→200 km) and labels anything beyond the
+  // home city under a "nearby towns" divider — so a Baden user only sees Vienna
+  // once they explicitly scroll into the wider tier, never on the local view.
+  // Some upstream sources (e.g. Ticketmaster's sparse-area auto-expansion) reach
+  // farther than asked; we drop those here. Posts without coordinates are kept
+  // (they were generated for the requested city and can't be range-checked).
+  const located = withDistance(pool, lat, lng);
+  const local = located.filter(p => p.distanceKm == null || p.distanceKm <= radius);
+
   // No invented events: if every real source is empty, return an honest empty
   // page — the client shows a clear "no events found" state instead
-  let final = rankAndMix(withDistance(pool, lat, lng), count * 2);
+  let final = rankAndMix(local, count * 2);
 
   // Cold-start cushion: tiny towns can have nothing within radius even after
   // expansion. Rather than a dead feed, fall back to upcoming events anywhere in
   // the same country (from our DB). Honest — still real events, just farther out.
-  if (final.length === 0 && dbReadEnabled && country) {
+  // Only at the WIDER tiers (radius ≥ 100 km): on the tight local view we keep
+  // the promise that nothing far away leaks in, and let the client expand first.
+  if (final.length === 0 && radius >= 100 && dbReadEnabled && country) {
     try {
       const countryPosts = await queryEventsByCountry({ country, category, limit: count, offset: page * count });
       if (countryPosts.length > 0) {

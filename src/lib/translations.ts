@@ -30,6 +30,7 @@ export interface AppTranslations {
     calendar: string; badges: string; editProfile: string; findFriends: string;
     signInSync: string; feedPreferences: string; feedPreferencesDesc: string;
     noLikedPosts: string; noLikedHint: string; noSavedPosts: string; noSavedHint: string;
+    noGoingPosts: string; noGoingHint: string;
     noUpcomingEvents: string; saveEventsHint: string;
     badgesEarned: string; nextBadge: string; seeAll: string;
     dataOnDevice: string; dataSyncHint: string;
@@ -95,6 +96,7 @@ const en: AppTranslations = {
     feedPreferences: 'Feed Preferences', feedPreferencesDesc: 'Tune your AI algorithm',
     noLikedPosts: 'No liked posts yet', noLikedHint: 'Tap ⭐ on any post to like it',
     noSavedPosts: 'Nothing saved yet', noSavedHint: 'Tap 🔖 on any post to save it',
+    noGoingPosts: 'Not going to anything yet', noGoingHint: 'Tap “I’m going” on any event to see it here',
     noUpcomingEvents: 'No upcoming events', saveEventsHint: 'Save events or mark "Going" to see them here',
     badgesEarned: 'EARNED', nextBadge: 'Next:', seeAll: 'See all →',
     dataOnDevice: 'Your data is only on this device',
@@ -168,6 +170,7 @@ const de: AppTranslations = {
     feedPreferences: 'Feed-Einstellungen', feedPreferencesDesc: 'KI-Algorithmus anpassen',
     noLikedPosts: 'Noch keine gelikten Beiträge', noLikedHint: 'Tippe ⭐ auf einen Beitrag',
     noSavedPosts: 'Noch nichts gespeichert', noSavedHint: 'Tippe 🔖 auf einen Beitrag',
+    noGoingPosts: 'Du gehst noch nirgendwo hin', noGoingHint: 'Tippe bei einem Event auf „Ich gehe hin“',
     noUpcomingEvents: 'Keine bevorstehenden Events', saveEventsHint: 'Speichere Events oder markiere "Ich gehe hin"',
     badgesEarned: 'ERHALTEN', nextBadge: 'Nächstes:', seeAll: 'Alle anzeigen →',
     dataOnDevice: 'Deine Daten sind nur auf diesem Gerät',
@@ -241,6 +244,7 @@ const es: AppTranslations = {
     feedPreferences: 'Preferencias de feed', feedPreferencesDesc: 'Ajusta tu algoritmo de IA',
     noLikedPosts: 'Sin publicaciones con me gusta', noLikedHint: 'Toca ⭐ en cualquier publicación',
     noSavedPosts: 'Nada guardado aún', noSavedHint: 'Toca 🔖 en cualquier publicación',
+    noGoingPosts: 'Aún no vas a nada', noGoingHint: 'Toca “Voy” en cualquier evento',
     noUpcomingEvents: 'Sin eventos próximos', saveEventsHint: 'Guarda eventos o marca "Voy"',
     badgesEarned: 'OBTENIDAS', nextBadge: 'Siguiente:', seeAll: 'Ver todas →',
     dataOnDevice: 'Tus datos solo están en este dispositivo',
@@ -314,6 +318,7 @@ const fr: AppTranslations = {
     feedPreferences: 'Préférences du fil', feedPreferencesDesc: "Ajuste ton algorithme IA",
     noLikedPosts: 'Aucun post aimé', noLikedHint: 'Appuie ⭐ sur un post',
     noSavedPosts: 'Rien enregistré', noSavedHint: 'Appuie 🔖 sur un post',
+    noGoingPosts: "Tu n'as rien de prévu", noGoingHint: "Appuie sur « J'y vais » sur un événement",
     noUpcomingEvents: 'Aucun événement à venir', saveEventsHint: 'Enregistre des événements ou marque "J\'y vais"',
     badgesEarned: 'OBTENUS', nextBadge: 'Prochain :', seeAll: 'Tout voir →',
     dataOnDevice: 'Tes données sont uniquement sur cet appareil',
@@ -387,6 +392,7 @@ const it: AppTranslations = {
     feedPreferences: 'Preferenze feed', feedPreferencesDesc: "Regola l'algoritmo IA",
     noLikedPosts: 'Nessun post piaciuto', noLikedHint: 'Tocca ⭐ su un post',
     noSavedPosts: 'Niente salvato', noSavedHint: 'Tocca 🔖 su un post',
+    noGoingPosts: 'Non parteciperai a nulla', noGoingHint: 'Tocca “Vado” su un evento',
     noUpcomingEvents: 'Nessun evento imminente', saveEventsHint: 'Salva eventi o segna "Ci vado"',
     badgesEarned: 'OTTENUTI', nextBadge: 'Prossimo:', seeAll: 'Vedi tutti →',
     dataOnDevice: 'I tuoi dati sono solo su questo dispositivo',
@@ -460,6 +466,7 @@ const pt: AppTranslations = {
     feedPreferences: 'Preferências do feed', feedPreferencesDesc: 'Ajuste seu algoritmo de IA',
     noLikedPosts: 'Sem posts curtidos ainda', noLikedHint: 'Toque ⭐ em qualquer post',
     noSavedPosts: 'Nada salvo ainda', noSavedHint: 'Toque 🔖 em qualquer post',
+    noGoingPosts: 'Você ainda não vai a nada', noGoingHint: 'Toque em “Vou” em qualquer evento',
     noUpcomingEvents: 'Sem eventos próximos', saveEventsHint: 'Salve eventos ou marque "Vou"',
     badgesEarned: 'CONQUISTADAS', nextBadge: 'Próxima:', seeAll: 'Ver todas →',
     dataOnDevice: 'Seus dados estão só neste dispositivo',
@@ -533,6 +540,7 @@ const nl: AppTranslations = {
     feedPreferences: 'Feedvoorkeuren', feedPreferencesDesc: 'Stel je AI-algoritme in',
     noLikedPosts: 'Nog geen gelikte berichten', noLikedHint: 'Tik ⭐ op een bericht',
     noSavedPosts: 'Nog niets opgeslagen', noSavedHint: 'Tik 🔖 op een bericht',
+    noGoingPosts: 'Je gaat nog nergens heen', noGoingHint: 'Tik op “Ik ga” bij een evenement',
     noUpcomingEvents: 'Geen aankomende evenementen', saveEventsHint: 'Sla evenementen op of markeer "Ga ik"',
     badgesEarned: 'VERDIEND', nextBadge: 'Volgende:', seeAll: 'Alles zien →',
     dataOnDevice: 'Je gegevens staan alleen op dit apparaat',
@@ -606,6 +614,7 @@ const ja: AppTranslations = {
     feedPreferences: 'フィード設定', feedPreferencesDesc: 'AIアルゴリズムを調整',
     noLikedPosts: 'いいねしたものはありません', noLikedHint: '⭐ をタップしていいねしよう',
     noSavedPosts: '保存済みなし', noSavedHint: '🔖 をタップして保存しよう',
+    noGoingPosts: '参加予定はまだありません', noGoingHint: 'イベントで「参加する」をタップ',
     noUpcomingEvents: '予定イベントなし', saveEventsHint: 'イベントを保存または「参加予定」にしよう',
     badgesEarned: '獲得済み', nextBadge: '次:', seeAll: 'すべて見る →',
     dataOnDevice: 'データはこのデバイスのみ',

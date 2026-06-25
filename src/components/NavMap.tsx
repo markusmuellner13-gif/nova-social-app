@@ -145,6 +145,11 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const [steps, setSteps] = useState<RouteStep[]>([]);
   const [navigating, setNavigating] = useState(false);
   const [nextStep, setNextStep] = useState<string>('');
+  // Routing status so the user is never left staring at a frozen card: the
+  // public OSRM endpoint can be slow or briefly down, so we show "Finding
+  // route…" while it works and an explicit retry if it fails/times out.
+  const [routing, setRouting] = useState(false);
+  const [routeError, setRouteError] = useState(false);
 
   const speak = useCallback((text: string) => {
     if (!voiceOn || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
@@ -334,16 +339,20 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     if (!map) return;
 
     const hint = userLocation;
+    setRouteError(false);
+    setRouteInfo(null);
+    setSteps([]);
     if (hint) {
       setUserMarker(hint.lat, hint.lng);
       setNextStep('');
-      void drawRoute(hint, dest);
+      setRouting(true);
+      drawRoute(hint, dest).then(ok => { setRouting(false); if (!ok) setRouteError(true); });
     } else {
       setNextStep('Locating you…');
     }
 
     if (!navigator.geolocation) {
-      if (!hint) setNextStep('Enable location to get directions.');
+      if (!hint) { setNextStep('Enable location to get directions.'); setRouteError(true); }
       return;
     }
 
@@ -356,9 +365,12 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
         // Only re-route if we have no route yet, or the fresh fix is >150m from
         // the hint we already routed from.
         const moved = !hint || metresBetween(hint.lat, hint.lng, fresh.lat, fresh.lng) > 150;
-        if (moved) void drawRoute(fresh, dest);
+        if (moved) {
+          if (!hint) setRouting(true);
+          drawRoute(fresh, dest).then(ok => { setRouting(false); if (!ok && !hint) setRouteError(true); });
+        }
       },
-      () => { if (!hint) setNextStep('Enable location to get directions.'); },
+      () => { if (!hint) { setNextStep('Enable location to get directions.'); setRouting(false); } },
       { enableHighAccuracy: true, maximumAge: 30000, timeout: 6000 },
     );
   }, [userLocation, setUserMarker, drawRoute]);
@@ -487,6 +499,15 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
                     {routeInfo.km} km · ~{routeInfo.min} min {profile === 'driving' ? '🚗' : '🚶'}
                   </p>
                 )}
+                {!routeInfo && routing && (
+                  <p className="text-xs font-semibold mt-0.5 flex items-center gap-1.5" style={{ color: '#9aa0b5' }}>
+                    <span className="inline-block w-3 h-3 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: `${theme.accent} transparent ${theme.accent} ${theme.accent}` }} />
+                    Finding route…
+                  </p>
+                )}
+                {!routeInfo && !routing && routeError && (
+                  <p className="text-xs font-semibold mt-0.5" style={{ color: '#f87171' }}>Route unavailable — tap retry</p>
+                )}
               </div>
               <button onClick={() => { stopGuidance(); setTarget(null); setRouteInfo(null); setSteps([]); }} style={{ color: '#555566' }}><X size={18} /></button>
             </div>
@@ -502,13 +523,21 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
                 style={{ background: voiceOn ? theme.accent : '#1a1a24', color: '#fff', border: '1px solid #2a2a38' }}>
                 {voiceOn ? <Volume2 size={16} /> : <VolumeX size={16} />}
               </button>
-              {/* start/stop */}
+              {/* start/stop / retry */}
               {!navigating ? (
-                <button onClick={startGuidance} disabled={!routeInfo}
-                  className="flex-1 h-10 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-white"
-                  style={{ background: routeInfo ? theme.gradient : '#2a2a38', opacity: routeInfo ? 1 : 0.6 }}>
-                  <Navigation size={16} /> Start
-                </button>
+                routeError && !routeInfo ? (
+                  <button onClick={() => target && void buildRoute(target)}
+                    className="flex-1 h-10 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-white"
+                    style={{ background: theme.gradient }}>
+                    <Navigation size={16} /> Retry route
+                  </button>
+                ) : (
+                  <button onClick={startGuidance} disabled={!routeInfo}
+                    className="flex-1 h-10 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-white"
+                    style={{ background: routeInfo ? theme.gradient : '#2a2a38', opacity: routeInfo ? 1 : 0.6 }}>
+                    <Navigation size={16} /> {routing ? 'Finding route…' : 'Start'}
+                  </button>
+                )
               ) : (
                 <button onClick={stopGuidance} className="flex-1 h-10 rounded-xl flex items-center justify-center gap-2 text-sm font-bold text-white" style={{ background: '#ef4444' }}>
                   <Flag size={16} /> End
