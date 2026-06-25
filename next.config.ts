@@ -42,6 +42,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Native build only (NATIVE_EXPORT=1, via `npm run build:native`): emit a
+  // static front-end bundle (`out/`) that Capacitor ships inside the iOS/Android
+  // app. Never set on Vercel, so the web app keeps its server rendering, API
+  // routes and middleware untouched.
+  ...(process.env.NATIVE_EXPORT === '1' ? { output: 'export' as const, trailingSlash: true } : {}),
   async headers() {
     return [
       {

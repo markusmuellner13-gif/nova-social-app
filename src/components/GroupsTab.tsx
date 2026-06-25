@@ -1,17 +1,20 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
-import { Users, Plus, Hash, X, Copy, Calendar, MapPin, ExternalLink, Loader2, LogIn, CheckCircle2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Users, Plus, Hash, X, Copy, Calendar, MapPin, ExternalLink, Loader2, LogIn, CheckCircle2, MessageCircle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useApp } from '@/context/AppContext';
 import {
   SupabaseGroup, SupabaseGroupEvent, FriendGoing,
   createGroup, joinGroup, getUserGroups, getGroupEvents, removeEventFromGroup, getGroupGoing,
+  getGroupEventCommentCounts,
 } from '@/lib/supabase';
 import { Post } from '@/types';
 import { timeAgo } from '@/data/mockData';
 import Avatar from './Avatar';
+import GroupEventChat from './GroupEventChat';
+import GroupChat from './GroupChat';
 
 interface Props {
   onOpenAuth: () => void;
@@ -20,7 +23,7 @@ interface Props {
 type Screen = 'list' | 'create' | 'join' | 'detail';
 
 export default function GroupsTab({ onOpenAuth }: Props) {
-  const { user, isSupabaseEnabled } = useAuth();
+  const { user, profile, isSupabaseEnabled } = useAuth();
   const { isGoing, goPost } = useApp();
 
   const [screen, setScreen]       = useState<Screen>('list');
@@ -28,6 +31,9 @@ export default function GroupsTab({ onOpenAuth }: Props) {
   const [activeGroup, setActiveGroup] = useState<SupabaseGroup | null>(null);
   const [groupEvents, setGroupEvents] = useState<SupabaseGroupEvent[]>([]);
   const [groupGoing, setGroupGoing] = useState<Record<string, FriendGoing[]>>({});
+  const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
+  const [chatEvent, setChatEvent] = useState<SupabaseGroupEvent | null>(null);
+  const [detailTab, setDetailTab] = useState<'events' | 'chat'>('events');
   const [loading, setLoading]     = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDesc, setNewGroupDesc] = useState('');
@@ -49,13 +55,19 @@ export default function GroupsTab({ onOpenAuth }: Props) {
 
   const loadGroupGoing = useCallback(async (groupId: string, events: SupabaseGroupEvent[]) => {
     const ids = events.map(e => e.post_id);
-    if (ids.length === 0) { setGroupGoing({}); return; }
-    setGroupGoing(await getGroupGoing(groupId, ids));
+    if (ids.length === 0) { setGroupGoing({}); setCommentCounts({}); return; }
+    const [going, counts] = await Promise.all([
+      getGroupGoing(groupId, ids),
+      getGroupEventCommentCounts(groupId, ids),
+    ]);
+    setGroupGoing(going);
+    setCommentCounts(counts);
   }, []);
 
   async function loadGroupEvents(group: SupabaseGroup) {
     setActiveGroup(group);
     setScreen('detail');
+    setDetailTab('events');
     const events = await getGroupEvents(group.id);
     setGroupEvents(events);
     void loadGroupGoing(group.id, events);
@@ -179,6 +191,28 @@ export default function GroupsTab({ onOpenAuth }: Props) {
         )}
       </div>
 
+      {/* Detail sub-tabs: shared events list vs. live group chat */}
+      {screen === 'detail' && activeGroup && (
+        <div className="flex flex-shrink-0" style={{ borderBottom: '1px solid #1e1e2a' }}>
+          {(['events', 'chat'] as const).map(tab => (
+            <button key={tab} onClick={() => setDetailTab(tab)}
+              className="flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5"
+              style={{ color: detailTab === tab ? '#a78bfa' : '#666677', borderBottom: detailTab === tab ? '2px solid #8b5cf6' : '2px solid transparent' }}>
+              {tab === 'events' ? <Calendar size={14} /> : <MessageCircle size={14} />}
+              {tab === 'events' ? 'Events' : 'Chat'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {screen === 'detail' && detailTab === 'chat' && activeGroup && user ? (
+        <GroupChat
+          groupId={activeGroup.id}
+          userId={user.id}
+          authorName={profile?.display_name ?? profile?.username ?? 'You'}
+          authorAvatar={profile?.avatar_url ?? ''}
+        />
+      ) : (
       <div className="flex-1 overflow-y-auto">
 
         {/* Group list */}
@@ -366,6 +400,16 @@ export default function GroupsTab({ onOpenAuth }: Props) {
                           );
                         })()}
 
+                        {/* Discussion — plan the night together, not just RSVP */}
+                        <motion.button whileTap={{ scale: 0.97 }} onClick={() => setChatEvent(ge)}
+                          className="flex items-center justify-center gap-1.5 w-full py-2 rounded-xl text-xs font-bold mb-2"
+                          style={{ background: '#1a1a24', border: '1px solid #2a2a38', color: '#a78bfa' }}>
+                          <MessageCircle size={13} />
+                          {commentCounts[ge.post_id]
+                            ? `Discussion · ${commentCounts[ge.post_id]} message${commentCounts[ge.post_id] === 1 ? '' : 's'}`
+                            : 'Start a discussion'}
+                        </motion.button>
+
                         <div className="flex items-center justify-between">
                           <span className="text-xs" style={{ color: '#444455' }}>{timeAgo(new Date(ge.created_at).getTime())}</span>
                           <div className="flex gap-2">
@@ -396,6 +440,28 @@ export default function GroupsTab({ onOpenAuth }: Props) {
 
         <div style={{ height: 100 }} />
       </div>
+      )}
+
+      {/* Group event discussion sheet */}
+      <AnimatePresence>
+        {chatEvent && activeGroup && user && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40" style={{ background: 'rgba(0,0,0,0.55)' }} onClick={() => setChatEvent(null)} />
+            <GroupEventChat
+              groupId={activeGroup.id}
+              postId={chatEvent.post_id}
+              eventTitle={(((chatEvent.post_data as Partial<Post>).caption as string) ?? 'Event').split('\n')[0].slice(0, 60)}
+              eventImage={(chatEvent.post_data as Partial<Post>).image as string | undefined}
+              userId={user.id}
+              authorName={profile?.display_name ?? profile?.username ?? 'You'}
+              authorAvatar={profile?.avatar_url ?? ''}
+              onClose={() => setChatEvent(null)}
+              onPosted={() => setCommentCounts(prev => ({ ...prev, [chatEvent.post_id]: (prev[chatEvent.post_id] ?? 0) + 1 }))}
+            />
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

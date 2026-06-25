@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Post, LocationState } from '@/types';
+import { apiUrl } from '@/lib/apiBase';
 
 // Cache settings — localStorage so reopening the app shows content instantly
 const EVENTS_TTL_MS    = 5  * 60 * 1000; // 5 min for events (change often)
@@ -39,6 +40,24 @@ const BLEND_MAX_ROUNDS = 22;
 // Posts requested per page. The feed route caps at 20; 16 gives big batches so
 // the user scrolls a long way between network round-trips.
 const PAGE_COUNT = 16;
+
+// Hard ceiling on any single feed request. The server allows up to 60s, but a
+// stalled upstream (a hung Ticketmaster/Overpass socket, flaky mobile network)
+// must never leave the user staring at an infinite spinner — we abort and treat
+// it as an empty page, which makes the feed expand its radius or show its
+// honest end-state instead of hanging forever.
+const FETCH_TIMEOUT_MS = 22_000;
+
+// fetch() that always rejects after FETCH_TIMEOUT_MS. AbortSignal.timeout is
+// widely supported; the manual fallback covers any runtime that lacks it.
+function fetchWithTimeout(url: string): Promise<Response> {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
 
 interface CacheEntry { posts: Post[]; timestamp: number; page: number; radiusTier: number }
 
@@ -172,7 +191,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     inFlightRef.current = true;
     try {
       const params = buildParams(loc, category, 0, localTier(loc), DAYS_TIERS[0]);
-      const res = await fetch(`/api/feed?${params}`);
+      const res = await fetchWithTimeout(apiUrl(`/api/feed?${params}`));
       if (!res.ok) return;
       const data = await res.json() as FeedResponse;
       const fresh = filterExpired(data.posts ?? []);
@@ -200,7 +219,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     tourismFetchedRef.current.add(city);
 
     const params = `${buildParams(loc, 'events', 0, localTier(loc), DAYS_TIERS[0])}&source=tourism&count=6`;
-    fetch(`/api/events?${params}`)
+    fetchWithTimeout(apiUrl(`/api/events?${params}`))
       .then(res => (res.ok ? res.json() : null))
       .then((data: { posts?: Post[] } | null) => {
         const tourismPosts = filterExpired(data?.posts ?? []);
@@ -223,7 +242,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
   function fetchSponsored(city: string) {
     if (!city || sponsoredFetchedRef.current.has(city)) return;
     sponsoredFetchedRef.current.add(city);
-    fetch(`/api/sponsored?city=${encodeURIComponent(city)}`)
+    fetchWithTimeout(apiUrl(`/api/sponsored?city=${encodeURIComponent(city)}`))
       .then(res => (res.ok ? res.json() : null))
       .then((data: { posts?: Post[] } | null) => {
         const sp = data?.posts ?? [];
@@ -268,7 +287,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       prefetchRef.current.delete(params);
       return buffered;
     }
-    return fetch(`/api/feed?${params}`)
+    return fetchWithTimeout(apiUrl(`/api/feed?${params}`))
       .then(res => (res.ok ? (res.json() as Promise<FeedResponse>) : null))
       .catch(() => null);
   }
@@ -279,7 +298,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     if (prefetchRef.current.size > 16) prefetchRef.current.clear();
     prefetchRef.current.set(
       params,
-      fetch(`/api/feed?${params}`)
+      fetchWithTimeout(apiUrl(`/api/feed?${params}`))
         .then(res => (res.ok ? (res.json() as Promise<FeedResponse>) : null))
         .catch(() => null)
     );

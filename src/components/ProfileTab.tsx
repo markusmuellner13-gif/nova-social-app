@@ -21,6 +21,7 @@ import {
   getFollowers, getFollowingProfiles, getFollowerProfiles,
   exportMyData, deleteMyAppData, getSession,
 } from '@/lib/supabase';
+import { apiUrl } from '@/lib/apiBase';
 
 const ALL_LOCALES = Object.keys(LOCALE_NAMES) as Locale[];
 
@@ -54,7 +55,7 @@ const BADGES: BadgeDef[] = [
   { id: 'connector',   emoji: '🤝', nameKey: 'Connector',     color: '#06b6d4', desc: 'Following 5 people',       check: s => s.followedUsers >= 5 },
 ];
 
-type ProfileSection = 'liked' | 'saved' | 'calendar' | 'badges';
+type ProfileSection = 'liked' | 'saved' | 'going' | 'calendar' | 'badges';
 
 interface Props { onOpenAuth: () => void }
 
@@ -106,6 +107,18 @@ export default function ProfileTab({ onOpenAuth }: Props) {
 
   const likedPosts  = resolvePosts(state.likedPosts);
   const savedPosts  = resolvePosts(savedIds);
+  // Everything the user has RSVP'd "going" to — newest first, upcoming events
+  // ahead of undated/past ones so the next thing they're attending leads.
+  const goingPostsResolved = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const upcomingFirst = (p: Post) => (p.eventDateRaw && p.eventDateRaw >= today ? 0 : 1);
+    return resolvePosts(state.goingPosts).sort((a, b) => {
+      const ua = upcomingFirst(a), ub = upcomingFirst(b);
+      if (ua !== ub) return ua - ub;
+      return (a.eventDateRaw ?? '9999').localeCompare(b.eventDateRaw ?? '9999');
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.goingPosts, interactionPool]);
 
   const upcomingEvents: Post[] = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -201,7 +214,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
       const session = await getSession();
       const token = session?.access_token;
       if (token) {
-        await fetch('/api/account/delete', {
+        await fetch(apiUrl('/api/account/delete'), {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
         }).catch(() => {});
@@ -751,6 +764,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
           {([
             ['liked',    Heart,        t.profile.liked    ],
             ['saved',    BookmarkIcon, t.profile.saved    ],
+            ['going',    Check,        t.profile.going    ],
             ['calendar', Calendar,     t.profile.calendar ],
             ['badges',   Trophy,       t.profile.badges   ],
           ] as const).map(([id, Icon, label]) => (
@@ -807,6 +821,62 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                 <BookmarkIcon size={36} style={{ color: '#2a2a38' }} />
                 <p className="text-sm font-semibold text-white mt-3">{t.profile.noSavedPosts}</p>
                 <p className="text-xs mt-1" style={{ color: '#888899' }}>{t.profile.noSavedHint}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Going — everything the user has RSVP'd to */}
+        {activeSection === 'going' && (
+          <div className="px-4 pt-4">
+            {goingPostsResolved.length === 0 ? (
+              <div className="flex flex-col items-center py-16 gap-3">
+                <Check size={36} style={{ color: '#2a2a38' }} />
+                <p className="text-sm font-semibold text-white">{t.profile.noGoingPosts}</p>
+                <p className="text-xs text-center" style={{ color: '#888899' }}>{t.profile.noGoingHint}</p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3 pb-8">
+                {goingPostsResolved.map((event, i) => {
+                  const today = new Date().toISOString().split('T')[0];
+                  const isPast = Boolean(event.eventDateRaw && event.eventDateRaw < today);
+                  const days = event.eventDateRaw
+                    ? Math.floor((new Date(event.eventDateRaw).getTime() - Date.now()) / 86_400_000)
+                    : null;
+                  const daysLabel = days === null ? null
+                    : days < 0 ? t.profile.going_label
+                    : days === 0 ? t.profile.today
+                    : days === 1 ? t.profile.tomorrow
+                    : `${days}${t.profile.daysAway}`;
+                  return (
+                    <motion.div key={event.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
+                      className="flex gap-3 p-3 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38', opacity: isPast ? 0.55 : 1 }}>
+                      <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
+                        <img src={event.image} alt="" className="w-full h-full object-cover object-center" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${event.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-white truncate">{event.caption.split('\n')[0].slice(0, 50)}</p>
+                        {event.eventVenue && <p className="text-xs mt-0.5 truncate" style={{ color: '#888899' }}>📍 {event.eventVenue}</p>}
+                        <div className="flex items-center gap-2 mt-2 flex-wrap">
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
+                            {t.profile.going_label}
+                          </span>
+                          {daysLabel && !isPast && (
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                              style={{ background: days !== null && days <= 1 ? 'rgba(244,63,94,0.2)' : 'rgba(139,92,246,0.15)', color: days !== null && days <= 1 ? '#f87171' : '#a78bfa' }}>
+                              {daysLabel}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {event.eventUrl && (
+                        <a href={event.eventUrl} target="_blank" rel="noopener noreferrer" className="flex-shrink-0 self-center p-2 rounded-xl" style={{ background: 'rgba(139,92,246,0.12)' }}>
+                          <ExternalLink size={14} style={{ color: '#a78bfa' }} />
+                        </a>
+                      )}
+                    </motion.div>
+                  );
+                })}
               </div>
             )}
           </div>

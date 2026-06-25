@@ -1,4 +1,5 @@
 'use client';
+import { apiUrl } from '@/lib/apiBase';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Notifications & web push (#4)
@@ -69,7 +70,7 @@ export async function subscribeToPush(loc?: PushLocation): Promise<boolean> {
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
       });
     }
-    await fetch('/api/push/subscribe', {
+    await fetch(apiUrl('/api/push/subscribe'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ subscription: sub, ...(loc ?? {}) }),

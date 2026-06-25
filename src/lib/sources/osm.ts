@@ -11,6 +11,7 @@
 
 import { ApiPost, makeUser, getImage, picsumUrl, proxyImage } from './shared';
 import { placesBudgetExceeded, notePlacesCall } from '@/lib/placesBudget';
+import { fetchCommonsImagesByWikidata } from './wikipedia';
 
 export interface OverpassElement {
   type: 'node' | 'way' | 'relation';
@@ -556,9 +557,26 @@ export async function overpassToPost(
   const imgQ = IMG_QUERIES[category] ?? `${kind.label} ${category}`;
 
   // Real photo of the actual place, best source first:
+  //   0. Wikimedia gallery for landmarks linked to Wikidata (swipeable) →
   //   1. OSM's own image/wikimedia tag → 2. Google Places (gated) →
   //   3. the venue's own og:image → 4. category stock (Unsplash/Pexels) → picsum
   let image: string | null = osmTagImage(tags);
+  let images: string[] | undefined;
+
+  // Landmarks/parks/peaks linked to a Wikidata entity get a real, multi-photo
+  // Wikimedia gallery — the same treatment sightseeing POIs get. Bounded to the
+  // page's first elements (tryOgImage) and time-boxed inside the fetch so it
+  // never stalls a page.
+  if (tryOgImage && tags.wikidata) {
+    const gallery = await fetchCommonsImagesByWikidata(tags.wikidata).catch(() => []);
+    if (gallery.length >= 2) {
+      images = gallery;
+      image = gallery[0];
+    } else if (gallery.length === 1 && !image) {
+      image = gallery[0];
+    }
+  }
+
   if (image && image.includes('upload.wikimedia.org')) image = proxyImage(image);
   if (!image && tryOgImage) {
     image = await fetchGooglePlacePhoto(name, elLat, elLng);
@@ -590,6 +608,7 @@ export async function overpassToPost(
     id: `osm_${el.id}`,
     user: makeUser(name, domain || undefined),
     image: image!,
+    images,
     caption: `${desc}\n\n${kind.emoji} ${name}${addr ? `\n📍 ${addr}, ${city}` : `\n📍 ${city}`}${extras}${website ? `\n🔗 ${website}` : `\n🗺️ ${osmUrl}`}`,
     likes: 0,
     comments: 0,
