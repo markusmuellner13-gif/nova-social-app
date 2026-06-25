@@ -389,6 +389,73 @@ export async function getGroupEventCommentCounts(groupId: string, postIds: strin
   return out;
 }
 
+// ── Group chat (live, WhatsApp-style, text + stickers) ────────────────────────
+
+export interface GroupMessage {
+  id: string;
+  group_id: string;
+  user_id: string;
+  author_name?: string;
+  author_avatar?: string;
+  kind: 'text' | 'sticker';
+  body: string;
+  created_at: string;
+}
+
+// Most-recent `limit` messages for a group, returned oldest → newest (ready to
+// render top-to-bottom). RLS limits reads to members. Empty when Supabase / the
+// migration isn't set up.
+export async function getGroupMessages(groupId: string, limit = 100): Promise<GroupMessage[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('group_messages')
+    .select('*')
+    .eq('group_id', groupId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error || !data) return [];
+  return (data as GroupMessage[]).slice().reverse();
+}
+
+// Send a message (text or sticker). Returns the inserted row so the sender can
+// append optimistically; realtime then mirrors it to everyone else.
+export async function sendGroupMessage(
+  groupId: string, userId: string, kind: 'text' | 'sticker', body: string,
+  authorName?: string, authorAvatar?: string,
+): Promise<GroupMessage | null> {
+  if (!supabase) return null;
+  const trimmed = body.trim().slice(0, 2000);
+  if (!trimmed) return null;
+  const { data, error } = await supabase
+    .from('group_messages')
+    .insert({ group_id: groupId, user_id: userId, kind, body: trimmed, author_name: authorName, author_avatar: authorAvatar })
+    .select()
+    .single();
+  if (error) { console.error('[supabase/sendGroupMessage]', error); return null; }
+  return data as GroupMessage;
+}
+
+export async function deleteGroupMessage(messageId: string): Promise<void> {
+  if (!supabase) return;
+  await supabase.from('group_messages').delete().eq('id', messageId);
+}
+
+// Live subscription to new messages in a group. Calls `onInsert` for every new
+// row (including the sender's own — the UI dedupes by id). Returns an unsubscribe
+// function; a no-op when Supabase isn't configured.
+export function subscribeGroupMessages(groupId: string, onInsert: (m: GroupMessage) => void): () => void {
+  if (!supabase) return () => {};
+  const channel = supabase
+    .channel(`group_messages:${groupId}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'group_messages', filter: `group_id=eq.${groupId}` },
+      payload => onInsert(payload.new as GroupMessage),
+    )
+    .subscribe();
+  return () => { try { supabase?.removeChannel(channel); } catch { /* already gone */ } };
+}
+
 // ── GDPR: data access & erasure (Art. 15, 17, 20) ─────────────────────────────
 
 // Right of access / portability: assemble everything we hold about the user into
@@ -426,6 +493,7 @@ export async function deleteMyAppData(userId: string): Promise<boolean> {
     supabase.from('group_members').delete().eq('user_id', userId),
     supabase.from('group_events').delete().eq('added_by', userId),
     supabase.from('group_event_comments').delete().eq('user_id', userId),
+    supabase.from('group_messages').delete().eq('user_id', userId),
     supabase.from('profiles').delete().eq('id', userId),
   ]);
   return true;

@@ -14,6 +14,7 @@ import { Post } from '@/types';
 import { timeAgo } from '@/data/mockData';
 import Avatar from './Avatar';
 import GroupEventChat from './GroupEventChat';
+import GroupChat from './GroupChat';
 
 interface Props {
   onOpenAuth: () => void;
@@ -32,6 +33,7 @@ export default function GroupsTab({ onOpenAuth }: Props) {
   const [groupGoing, setGroupGoing] = useState<Record<string, FriendGoing[]>>({});
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
   const [chatEvent, setChatEvent] = useState<SupabaseGroupEvent | null>(null);
+  const [detailTab, setDetailTab] = useState<'events' | 'chat'>('events');
   const [loading, setLoading]     = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDesc, setNewGroupDesc] = useState('');
@@ -65,6 +67,7 @@ export default function GroupsTab({ onOpenAuth }: Props) {
   async function loadGroupEvents(group: SupabaseGroup) {
     setActiveGroup(group);
     setScreen('detail');
+    setDetailTab('events');
     const events = await getGroupEvents(group.id);
     setGroupEvents(events);
     void loadGroupGoing(group.id, events);
@@ -188,6 +191,28 @@ export default function GroupsTab({ onOpenAuth }: Props) {
         )}
       </div>
 
+      {/* Detail sub-tabs: shared events list vs. live group chat */}
+      {screen === 'detail' && activeGroup && (
+        <div className="flex flex-shrink-0" style={{ borderBottom: '1px solid #1e1e2a' }}>
+          {(['events', 'chat'] as const).map(tab => (
+            <button key={tab} onClick={() => setDetailTab(tab)}
+              className="flex-1 py-2.5 text-xs font-bold flex items-center justify-center gap-1.5"
+              style={{ color: detailTab === tab ? '#a78bfa' : '#666677', borderBottom: detailTab === tab ? '2px solid #8b5cf6' : '2px solid transparent' }}>
+              {tab === 'events' ? <Calendar size={14} /> : <MessageCircle size={14} />}
+              {tab === 'events' ? 'Events' : 'Chat'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {screen === 'detail' && detailTab === 'chat' && activeGroup && user ? (
+        <GroupChat
+          groupId={activeGroup.id}
+          userId={user.id}
+          authorName={profile?.display_name ?? profile?.username ?? 'You'}
+          authorAvatar={profile?.avatar_url ?? ''}
+        />
+      ) : (
       <div className="flex-1 overflow-y-auto">
 
         {/* Group list */}
@@ -415,6 +440,7 @@ export default function GroupsTab({ onOpenAuth }: Props) {
 
         <div style={{ height: 100 }} />
       </div>
+      )}
 
       {/* Group event discussion sheet */}
       <AnimatePresence>
