@@ -41,6 +41,9 @@ export interface Post {
   id: string;
   user: User;
   image: string;
+  // Optional extra photos for a swipeable gallery (e.g. several real Wikimedia
+  // photos of a landmark). When absent or length<=1, the post shows just `image`.
+  images?: string[];
   caption: string;
   likes: number;
   comments: number;

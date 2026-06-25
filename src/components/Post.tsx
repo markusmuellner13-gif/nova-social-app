@@ -71,6 +71,7 @@ export default function Post({ post, showHint = false }: Props) {
   const [starKey,      setStarKey]      = useState(0);
   const [expanded,     setExpanded]     = useState(false);
   const [imgLoaded,    setImgLoaded]    = useState(false);
+  const [slide,        setSlide]        = useState(0);
   const [hintDismissed, setHintDismissed] = useState(false);
   const [showReminderSheet, setShowReminderSheet] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
@@ -182,6 +183,9 @@ export default function Post({ post, showHint = false }: Props) {
 
   const caption = post.caption;
   const isLong  = caption.length > 90;
+  // Swipeable gallery when the post carries multiple real photos; otherwise just
+  // the single image (most posts).
+  const gallery = post.images && post.images.length > 1 ? post.images : [post.image];
   const fallbackImage = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`;
 
   return (
@@ -272,22 +276,65 @@ export default function Post({ post, showHint = false }: Props) {
         {/* Image */}
         <div className="relative w-full" style={{ aspectRatio: '4/5', background: '#13131a' }}>
           {!imgLoaded && <div className="absolute inset-0 shimmer" />}
-          <img
-            src={post.image}
-            alt={post.caption}
-            className="w-full h-full object-cover"
-            onLoad={() => setImgLoaded(true)}
-            onError={(e) => {
-              // Some sources (venue og:images, third-party CDNs) refuse
-              // hotlinking or 404 — swap in a deterministic fallback photo
-              // instead of leaving a blank frame
-              const el = e.currentTarget;
-              if (el.src !== fallbackImage) { el.src = fallbackImage; }
-              else { setImgLoaded(true); }
-            }}
-            onDoubleClick={handleDoubleTap}
-            style={{ opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.3s' }}
-          />
+          {gallery.length > 1 ? (
+            <div
+              className="flex w-full h-full overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              onScroll={(e) => setSlide(Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth))}
+              onDoubleClick={handleDoubleTap}
+              style={{ opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.3s' }}
+            >
+              {gallery.map((src, i) => (
+                <img
+                  key={i}
+                  src={src}
+                  alt={post.caption}
+                  loading={i === 0 ? 'eager' : 'lazy'}
+                  className="h-full object-cover flex-shrink-0 snap-center"
+                  style={{ minWidth: '100%' }}
+                  onLoad={i === 0 ? () => setImgLoaded(true) : undefined}
+                  onError={(e) => {
+                    const el = e.currentTarget;
+                    if (el.src !== fallbackImage) { el.src = fallbackImage; }
+                    else if (i === 0) { setImgLoaded(true); }
+                  }}
+                />
+              ))}
+            </div>
+          ) : (
+            <img
+              src={post.image}
+              alt={post.caption}
+              className="w-full h-full object-cover"
+              onLoad={() => setImgLoaded(true)}
+              onError={(e) => {
+                // Some sources (venue og:images, third-party CDNs) refuse
+                // hotlinking or 404 — swap in a deterministic fallback photo
+                // instead of leaving a blank frame
+                const el = e.currentTarget;
+                if (el.src !== fallbackImage) { el.src = fallbackImage; }
+                else { setImgLoaded(true); }
+              }}
+              onDoubleClick={handleDoubleTap}
+              style={{ opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.3s' }}
+            />
+          )}
+
+          {/* Gallery indicators */}
+          {gallery.length > 1 && (
+            <>
+              <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full text-xs font-semibold pointer-events-none"
+                style={{ background: 'rgba(0,0,0,0.6)', color: 'white', backdropFilter: 'blur(6px)' }}>
+                {slide + 1}/{gallery.length}
+              </div>
+              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 pointer-events-none">
+                {gallery.map((_, i) => (
+                  <div key={i} className="rounded-full transition-all"
+                    style={{ width: i === slide ? 7 : 5, height: i === slide ? 7 : 5,
+                      background: i === slide ? '#fff' : 'rgba(255,255,255,0.5)' }} />
+                ))}
+              </div>
+            </>
+          )}
 
           <AnimatePresence>
             {showStar && (

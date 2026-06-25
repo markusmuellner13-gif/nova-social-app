@@ -15,6 +15,7 @@ export interface ApiPost {
     verified: boolean;
   };
   image: string;
+  images?: string[]; // optional gallery (multiple real photos) for a carousel
   caption: string;
   likes: number;
   comments: number;
