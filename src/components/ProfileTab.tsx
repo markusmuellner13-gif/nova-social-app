@@ -21,6 +21,7 @@ import {
   getFollowers, getFollowingProfiles, getFollowerProfiles,
   exportMyData, deleteMyAppData, getSession,
 } from '@/lib/supabase';
+import { apiUrl } from '@/lib/apiBase';
 
 const ALL_LOCALES = Object.keys(LOCALE_NAMES) as Locale[];
 
@@ -213,7 +214,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
       const session = await getSession();
       const token = session?.access_token;
       if (token) {
-        await fetch('/api/account/delete', {
+        await fetch(apiUrl('/api/account/delete'), {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
         }).catch(() => {});

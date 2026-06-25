@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Post, LocationState } from '@/types';
+import { apiUrl } from '@/lib/apiBase';
 
 // Cache settings — localStorage so reopening the app shows content instantly
 const EVENTS_TTL_MS    = 5  * 60 * 1000; // 5 min for events (change often)
@@ -190,7 +191,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     inFlightRef.current = true;
     try {
       const params = buildParams(loc, category, 0, localTier(loc), DAYS_TIERS[0]);
-      const res = await fetchWithTimeout(`/api/feed?${params}`);
+      const res = await fetchWithTimeout(apiUrl(`/api/feed?${params}`));
       if (!res.ok) return;
       const data = await res.json() as FeedResponse;
       const fresh = filterExpired(data.posts ?? []);
@@ -218,7 +219,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     tourismFetchedRef.current.add(city);
 
     const params = `${buildParams(loc, 'events', 0, localTier(loc), DAYS_TIERS[0])}&source=tourism&count=6`;
-    fetchWithTimeout(`/api/events?${params}`)
+    fetchWithTimeout(apiUrl(`/api/events?${params}`))
       .then(res => (res.ok ? res.json() : null))
       .then((data: { posts?: Post[] } | null) => {
         const tourismPosts = filterExpired(data?.posts ?? []);
@@ -241,7 +242,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
   function fetchSponsored(city: string) {
     if (!city || sponsoredFetchedRef.current.has(city)) return;
     sponsoredFetchedRef.current.add(city);
-    fetchWithTimeout(`/api/sponsored?city=${encodeURIComponent(city)}`)
+    fetchWithTimeout(apiUrl(`/api/sponsored?city=${encodeURIComponent(city)}`))
       .then(res => (res.ok ? res.json() : null))
       .then((data: { posts?: Post[] } | null) => {
         const sp = data?.posts ?? [];
@@ -286,7 +287,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       prefetchRef.current.delete(params);
       return buffered;
     }
-    return fetchWithTimeout(`/api/feed?${params}`)
+    return fetchWithTimeout(apiUrl(`/api/feed?${params}`))
       .then(res => (res.ok ? (res.json() as Promise<FeedResponse>) : null))
       .catch(() => null);
   }
@@ -297,7 +298,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     if (prefetchRef.current.size > 16) prefetchRef.current.clear();
     prefetchRef.current.set(
       params,
-      fetchWithTimeout(`/api/feed?${params}`)
+      fetchWithTimeout(apiUrl(`/api/feed?${params}`))
         .then(res => (res.ok ? (res.json() as Promise<FeedResponse>) : null))
         .catch(() => null)
     );

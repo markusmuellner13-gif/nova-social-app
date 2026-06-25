@@ -1,15 +1,20 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
+// Nova ships as a REAL bundled native app (not a website wrapper): the iOS/Android
+// build embeds a static export of the UI (`out/`, produced by `npm run
+// build:native`) and talks to the hosted API on Vercel via NEXT_PUBLIC_API_BASE.
+//
+//  • No `server.url` → the app loads its own bundled assets, works offline-first
+//    for the shell, and launches instantly (no blank web load).
+//  • `androidScheme: 'https'` serves the bundle from https://localhost on Android;
+//    iOS serves from capacitor://localhost. Both are allow-listed for CORS in
+//    middleware.ts so the bundled app can reach the Vercel API.
 const config: CapacitorConfig = {
   appId: 'com.nova.discover',
   appName: 'Nova',
-  // The app is server-rendered (Next.js App Router) so Capacitor loads the
-  // live Vercel URL inside a native WebView rather than bundled static files.
-  webDir: 'public',
+  webDir: 'out',
   server: {
-    url: 'https://nova-phi-liart.vercel.app',
     androidScheme: 'https',
-    cleartext: false,
   },
   plugins: {
     SplashScreen: {

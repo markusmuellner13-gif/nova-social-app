@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Sparkles, Send, MapPin, Loader2 } from 'lucide-react';
 import { LocationState } from '@/types';
+import { apiUrl } from '@/lib/apiBase';
 
 interface Message { role: 'user' | 'ai'; text: string }
 
@@ -46,7 +47,7 @@ export default function ChatTab({ location }: Props) {
     setMessages(prev => [...prev, { role: 'user', text: msg }]);
     setLoading(true);
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(apiUrl('/api/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

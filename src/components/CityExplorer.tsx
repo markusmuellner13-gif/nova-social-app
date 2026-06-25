@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, MapPin, Loader2, CornerDownLeft } from 'lucide-react';
 import { LocationState } from '@/types';
+import { apiUrl } from '@/lib/apiBase';
 
 interface Props {
   currentCity: string;
@@ -55,7 +56,7 @@ export default function CityExplorer({ currentCity, onSelectCity, onClose }: Pro
     const myReq = ++reqIdRef.current;
     setSearching(true);
     try {
-      const res = await fetch(`/api/geocode?q=${encodeURIComponent(trimmed)}`);
+      const res = await fetch(apiUrl(`/api/geocode?q=${encodeURIComponent(trimmed)}`));
       const data = await res.json() as { results?: GeocodeCity[] };
       if (myReq !== reqIdRef.current) return; // a newer keystroke superseded this
       setResults(Array.isArray(data.results) ? data.results : []);

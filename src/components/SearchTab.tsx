@@ -9,6 +9,7 @@ import { Post, Category } from '@/types';
 import CommentsSheet from './CommentsSheet';
 import { useLanguage } from '@/context/LanguageContext';
 import { useApp } from '@/context/AppContext';
+import { apiUrl } from '@/lib/apiBase';
 
 const WorldMap = dynamic(() => import('./WorldMap'), {
   ssr: false,
@@ -57,7 +58,7 @@ export default function SearchTab() {
   // never blank.
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/map')
+    fetch(apiUrl('/api/map'))
       .then(res => (res.ok ? res.json() : null))
       .then((data: { posts?: Post[] } | null) => {
         if (cancelled) return;

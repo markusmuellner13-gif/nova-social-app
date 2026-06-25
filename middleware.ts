@@ -81,6 +81,29 @@ function getIP(req: NextRequest): string {
   );
 }
 
+// ── CORS for the bundled native app ──────────────────────────────────────────
+// The iOS/Android build is a real bundled app (Capacitor), not a URL wrapper:
+// its UI is served from a local origin and it calls this hosted API cross-origin.
+// We allow ONLY the fixed Capacitor/local origins (never a wildcard), so browsers
+// on the open web are unaffected and same-origin web requests don't even send an
+// Origin. Everything stays behind the same per-IP rate limiting below.
+const NATIVE_ORIGINS = new Set([
+  'capacitor://localhost',
+  'ionic://localhost',
+  'http://localhost',
+  'https://localhost',
+]);
+
+function corsHeaders(origin: string): Record<string, string> {
+  return {
+    'Access-Control-Allow-Origin':  origin,
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-secret',
+    'Access-Control-Max-Age':       '86400',
+    'Vary':                         'Origin',
+  };
+}
+
 function tooMany(limit: number, resetSec: number): NextResponse {
   return new NextResponse(
     JSON.stringify({ error: 'Too many requests. Please slow down.' }),
@@ -99,7 +122,20 @@ function tooMany(limit: number, resetSec: number): NextResponse {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (!pathname.startsWith('/api/')) return NextResponse.next();
-  if (isExcluded(pathname)) return NextResponse.next();
+
+  // CORS for the bundled native app. Add the headers to every response (and
+  // answer preflight) only when the request comes from an allowed native origin.
+  const origin = request.headers.get('origin') ?? '';
+  const isNative = NATIVE_ORIGINS.has(origin);
+  const finalize = (res: NextResponse): NextResponse => {
+    if (isNative) for (const [k, v] of Object.entries(corsHeaders(origin))) res.headers.set(k, v);
+    return res;
+  };
+  if (request.method === 'OPTIONS' && isNative) {
+    return new NextResponse(null, { status: 204, headers: corsHeaders(origin) });
+  }
+
+  if (isExcluded(pathname)) return finalize(NextResponse.next());
 
   const ip   = getIP(request);
   const tier = tierFor(pathname);
@@ -108,11 +144,11 @@ export async function middleware(request: NextRequest) {
   // ── Redis path ──────────────────────────────────────────────────────────────
   if (limiters) {
     const { success, remaining, reset } = await limiters[tier].limit(`${ip}:${tier}`);
-    if (!success) return tooMany(limit, Math.max(1, Math.ceil((reset - Date.now()) / 1000)));
+    if (!success) return finalize(tooMany(limit, Math.max(1, Math.ceil((reset - Date.now()) / 1000))));
     const res = NextResponse.next();
     res.headers.set('X-RateLimit-Limit',     String(limit));
     res.headers.set('X-RateLimit-Remaining', String(remaining));
-    return res;
+    return finalize(res);
   }
 
   // ── In-memory fallback ──────────────────────────────────────────────────────
@@ -125,18 +161,18 @@ export async function middleware(request: NextRequest) {
     const res = NextResponse.next();
     res.headers.set('X-RateLimit-Limit',     String(limit));
     res.headers.set('X-RateLimit-Remaining', String(limit - 1));
-    return res;
+    return finalize(res);
   }
 
   if (entry.count >= limit) {
-    return tooMany(limit, Math.max(1, Math.ceil((entry.reset - now) / 1000)));
+    return finalize(tooMany(limit, Math.max(1, Math.ceil((entry.reset - now) / 1000))));
   }
 
   entry.count++;
   const res = NextResponse.next();
   res.headers.set('X-RateLimit-Limit',     String(limit));
   res.headers.set('X-RateLimit-Remaining', String(limit - entry.count));
-  return res;
+  return finalize(res);
 }
 
 export const config = {
