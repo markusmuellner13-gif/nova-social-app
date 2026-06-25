@@ -52,9 +52,9 @@ function AppShell() {
     // Send the user's learned top interests too, so the daily push can be
     // personalised ("for the music lovers near you") instead of generic.
     const categories = getTopCategories(state.preferences, state.aiProfile, 3);
-    void subscribeToPush({ city: loc.city, lat: loc.lat, lng: loc.lng, categories });
+    void subscribeToPush({ city: loc.city, lat: loc.lat, lng: loc.lng, categories, userId: user?.id });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.location?.city]);
+  }, [state.location?.city, user?.id]);
 
   // Keep the app-icon badge in sync with unread notifications — like any other
   // app. While the notifications panel is open the user is actively reading them,

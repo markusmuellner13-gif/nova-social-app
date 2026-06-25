@@ -15,6 +15,14 @@ import type { ApiPost } from '@/lib/sources/shared';
 
 export interface PushMessage { title: string; body: string }
 
+// A friend is going to an event near the user — the strongest social nudge.
+export function buildFriendGoingPush(friendName: string, title: string): { title: string; body: string } {
+  return {
+    title: `${friendName} is going 👀`,
+    body: `${title} — happening near you. You in?`,
+  };
+}
+
 const CAT_EMOJI: Record<string, string> = {
   events: '🎉', music: '🎵', sports: '⚽', art: '🎨', community: '🤝',
   venues: '🎭', restaurants: '🍽️', food: '🍕', hotels: '🏨', rentals: '🚲',

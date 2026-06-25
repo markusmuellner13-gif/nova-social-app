@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cacheEnabled, cacheScanKeys, cacheGet, cacheSet, cacheDelete } from '@/lib/serverCache';
 import { webPushEnabled, sendPush, PushSub } from '@/lib/webpush';
 import { dbReadEnabled, queryTopEventsNear } from '@/lib/eventsDb';
-import { buildSmartPush } from '@/lib/pushContent';
+import { buildSmartPush, buildFriendGoingPush } from '@/lib/pushContent';
+import { friendsGoingNear, socialServerEnabled } from '@/lib/socialServer';
 import type { ApiPost } from '@/lib/sources/shared';
 
 export const runtime = 'nodejs';
@@ -27,6 +28,7 @@ interface Envelope {
   lat?: number | null;
   lng?: number | null;
   categories?: string[] | null; // the user's learned top interests
+  userId?: string | null;       // signed-in user id (for "friends going" nudges)
   ts?: number;
   lastPush?: number;            // when we last pushed to this user (cooldown)
 }
@@ -100,23 +102,42 @@ export async function GET(request: NextRequest) {
       (isMorning || isEvening);
     if (!wantSlot) { skipped++; continue; }
 
-    // Pull a rich, multi-category set of nearby events, then craft the copy
-    // using the user's LOCAL time so "morning"/"tonight" framing is accurate.
-    let nearby: ApiPost[] = [];
-    if (dbReadEnabled && Number.isFinite(env.lat) && Number.isFinite(env.lng)) {
-      nearby = await queryTopEventsNear({
-        lat: env.lat as number, lng: env.lng as number, radiusKm: 50, limit: 12,
-      }).catch(() => [] as ApiPost[]);
+    // Strongest nudge first: is someone this user FOLLOWS going to an event near
+    // them? If so, lead with that ("Anna is going 👀") instead of the generic
+    // digest. Only when signed-in + the social backend (service key) is wired.
+    let msg: { title: string; body: string };
+    let url = '/';
+    let tag = 'nova-digest';
+    let friendPush: { title: string; body: string } | null = null;
+    if (socialServerEnabled && env.userId && Number.isFinite(env.lat) && Number.isFinite(env.lng)) {
+      const fg = await friendsGoingNear(env.userId, env.lat as number, env.lng as number).catch(() => null);
+      if (fg) {
+        friendPush = buildFriendGoingPush(fg.friendName, fg.title);
+        url = `/e/${fg.postId}`;
+        tag = 'nova-friend-going';
+      }
     }
 
-    const msg = buildSmartPush({
-      city: env.city || 'your area',
-      events: nearby,
-      categories: Array.isArray(env.categories) ? env.categories : [],
-      now: local,
-      seed: seedFromKey(key),
-    });
-    const payload = { ...msg, url: '/', tag: 'nova-digest' };
+    if (friendPush) {
+      msg = friendPush;
+    } else {
+      // Pull a rich, multi-category set of nearby events, then craft the copy
+      // using the user's LOCAL time so "morning"/"tonight" framing is accurate.
+      let nearby: ApiPost[] = [];
+      if (dbReadEnabled && Number.isFinite(env.lat) && Number.isFinite(env.lng)) {
+        nearby = await queryTopEventsNear({
+          lat: env.lat as number, lng: env.lng as number, radiusKm: 50, limit: 12,
+        }).catch(() => [] as ApiPost[]);
+      }
+      msg = buildSmartPush({
+        city: env.city || 'your area',
+        events: nearby,
+        categories: Array.isArray(env.categories) ? env.categories : [],
+        now: local,
+        seed: seedFromKey(key),
+      });
+    }
+    const payload = { ...msg, url, tag };
 
     const res = await sendPush(env.subscription, payload);
     if (res.ok) {
