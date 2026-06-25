@@ -129,6 +129,44 @@ export async function fetchWikipediaSummary(title: string): Promise<WikiSummary 
   } catch { return null; }
 }
 
+// ── Multiple real photos of a landmark (free, from Wikimedia) ─────────────────
+// The REST media-list endpoint returns every image used on the article. We keep
+// the real photos (skip SVG logos/icons/maps), upscale the thumbnails, and proxy
+// them — giving a sightseeing post a genuine swipeable gallery instead of one shot.
+export async function fetchWikipediaImages(title: string, max = 6): Promise<string[]> {
+  try {
+    const encoded = encodeURIComponent(title.replace(/ /g, '_'));
+    const res = await fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/media-list/${encoded}`,
+      { headers: WIKI_HEADERS, signal: AbortSignal.timeout(3000) }
+    );
+    if (!res.ok) return [];
+    const d = await res.json() as {
+      items?: { type?: string; title?: string; srcset?: { src?: string }[] }[];
+    };
+    const urls: string[] = [];
+    const seen = new Set<string>();
+    for (const it of d.items ?? []) {
+      if (it.type !== 'image') continue;
+      const fileTitle = (it.title ?? '').toLowerCase();
+      // Skip vector logos, icons, maps, flags and other non-photo chrome.
+      if (/\.svg|icon|logo|symbol|flag|map|locator|wiki|commons-|edit-|seal|coat[_ ]of[_ ]arms/i.test(fileTitle)) continue;
+      const src = it.srcset?.[0]?.src;
+      if (!src) continue;
+      let full = src.startsWith('//') ? `https:${src}` : src;
+      full = full.replace(/\/\d+px-/, '/800px-'); // request a larger render
+      const key = full.split('/').pop() ?? full;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      urls.push(proxyImage(full));
+      if (urls.length >= max) break;
+    }
+    return urls;
+  } catch {
+    return [];
+  }
+}
+
 export async function wikiToPost(
   poi: WikiGeoResult, summary: WikiSummary | null, desc: string, city: string,
   unsplashKey?: string, pexelsKey?: string
@@ -137,15 +175,26 @@ export async function wikiToPost(
   const wikiUrl = summary?.content_urls?.desktop?.page
     ?? `https://en.wikipedia.org/wiki/${encodeURIComponent(poi.title.replace(/ /g, '_'))}`;
 
-  // Prefer Wikipedia's own image (proxied); fall back to Unsplash/Pexels/picsum
-  const image = wikiImg
-    ? proxyImage(wikiImg)
-    : await getImage(`${poi.title} ${city} landmark`, unsplashKey, pexelsKey, `wiki_${poi.pageid}`);
+  // Pull several real photos of the landmark for a swipeable gallery. When the
+  // article has 2+ usable photos we lead with them; otherwise fall back to the
+  // single summary thumbnail (then Unsplash/Pexels/picsum) — unchanged behaviour.
+  const gallery = await fetchWikipediaImages(poi.title).catch(() => []);
+  let image: string;
+  let images: string[] | undefined;
+  if (gallery.length >= 2) {
+    images = gallery;
+    image = gallery[0];
+  } else {
+    image = wikiImg
+      ? proxyImage(wikiImg)
+      : (gallery[0] ?? await getImage(`${poi.title} ${city} landmark`, unsplashKey, pexelsKey, `wiki_${poi.pageid}`));
+  }
 
   return {
     id: `wiki_${poi.pageid}`,
     user: makeUser(poi.title),
     image,
+    images,
     caption: `${desc}\n\n🏛️ ${summary?.description ?? 'Landmark'}\n📍 ${poi.title}, ${city}\n📏 ${Math.round(poi.dist)}m from centre\n🔗 Learn more: ${wikiUrl}`,
     likes: 0,
     comments: 0,
