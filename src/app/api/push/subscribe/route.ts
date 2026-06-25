@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json() as {
       subscription?: { endpoint?: string };
       endpoint?: string;
-      city?: string; lat?: number; lng?: number; categories?: unknown;
+      city?: string; lat?: number; lng?: number; categories?: unknown; userId?: unknown;
     };
     const sub = body.subscription ?? (body.endpoint ? body : null);
     if (!sub?.endpoint) {
@@ -33,6 +33,9 @@ export async function POST(request: NextRequest) {
         lat: Number.isFinite(body.lat) ? body.lat : null,
         lng: Number.isFinite(body.lng) ? body.lng : null,
         categories,
+        // The signed-in user's id, so the digest can surface "a friend you follow
+        // is going to an event near you". Null for anonymous subscribers.
+        userId: typeof body.userId === 'string' ? body.userId.slice(0, 64) : null,
         ts: Date.now(),
       };
       await cacheSet(`nova:push:sub:${(h >>> 0).toString(36)}`, envelope, 60 * 60 * 24 * 60); // 60 days

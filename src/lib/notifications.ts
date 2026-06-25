@@ -48,7 +48,7 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   return arr;
 }
 
-interface PushLocation { city?: string; lat?: number; lng?: number; categories?: string[] }
+interface PushLocation { city?: string; lat?: number; lng?: number; categories?: string[]; userId?: string }
 
 // Subscribe to web push. Returns true if a subscription was created & stored.
 // Pass the user's location (and learned top interests) so the daily digest cron
