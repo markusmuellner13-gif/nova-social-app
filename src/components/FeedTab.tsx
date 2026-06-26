@@ -139,7 +139,10 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   const scrollRef = useRef<HTMLDivElement>(null);
   const initialFetchDone = useRef(false);
   const adCounter = useRef(0);
-  const [scrollY, setScrollY] = useState(0);
+  // Use a ref for raw scroll position to avoid re-rendering on every scroll
+  // event; only setState when crossing the scroll-to-top visibility threshold.
+  const scrollYRef = useRef(0);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const prevScrollYRef = useRef(0);
 
   // Derived AI category from active main tab
@@ -307,7 +310,9 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     const el = scrollRef.current;
     if (!el) return;
     const top = el.scrollTop;
-    setScrollY(top);
+    scrollYRef.current = top;
+    // Only trigger a re-render when crossing the scroll-to-top threshold
+    if ((top > 300) !== showScrollTop) setShowScrollTop(top > 300);
 
     if (top === 0 && prevScrollYRef.current > 400 && activeMainTab === 'discover') {
       resetAI();
@@ -329,7 +334,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     if (activeMainTab !== 'partners' && aiHasMore && !aiLoading) {
       void fetchMore(aiCategory);
     }
-  }, [visibleCurated, curatedPool.length, aiHasMore, aiLoading, fetchMore, aiCategory, resetAI, activeMainTab]);
+  }, [visibleCurated, curatedPool.length, aiHasMore, aiLoading, fetchMore, aiCategory, resetAI, activeMainTab, showScrollTop]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -854,13 +859,19 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
                         </span>
                       </div>
                     )}
-                    <motion.div
-                      initial={{ opacity: 0, y: 12 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.25, delay: Math.min(i * 0.02, 0.15) }}
-                    >
-                      <PostComponent post={post} showHint={i === 0} />
-                    </motion.div>
+                    {/* Only animate entry for the first 5 visible posts to
+                        avoid Framer Motion overhead on long feeds. */}
+                    {i < 5 ? (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.2, delay: i * 0.04 }}
+                      >
+                        <PostComponent post={post} showHint={i === 0} />
+                      </motion.div>
+                    ) : (
+                      <PostComponent post={post} showHint={false} />
+                    )}
                   </div>
                 );
               })}
@@ -900,7 +911,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
 
       {/* Scroll-to-top button */}
       <AnimatePresence>
-        {scrollY > 300 && (
+        {showScrollTop && (
           <motion.button
             initial={{ opacity: 0, y: 8, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}

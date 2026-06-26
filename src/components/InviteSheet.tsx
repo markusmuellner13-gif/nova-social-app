@@ -62,7 +62,7 @@ export default function InviteSheet({ post, onClose }: Props) {
   const inviteText = useMemo(() => {
     if (post.isEvent) {
       const when = post.eventDate ? ` on ${post.eventDate}` : '';
-      const where = post.eventVenue ? ` at ${post.eventVenue}` : (post.location?.name ? ` in ${post.location.name}` : '');
+      const where = post.eventVenue ? ` at ${post.eventVenue}` : (post.location?.name ? ` in ${post.location!.name}` : '');
       return `Let's go to ${title}${when}${where}! 🎉 Found it on Nova — you in?`;
     }
     return `Check this out on Nova — ${title} ✨`;

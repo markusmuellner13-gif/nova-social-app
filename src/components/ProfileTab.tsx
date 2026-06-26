@@ -231,8 +231,8 @@ export default function ProfileTab({ onOpenAuth }: Props) {
     }
   }
 
-  const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? CURRENT_USER.username;
-  const avatarUrl   = profile?.avatar_url ?? CURRENT_USER.avatar;
+  const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? 'You';
+  const avatarUrl   = profile?.avatar_url ?? null;  // null = show gradient placeholder
 
   return (
     <div className="flex flex-col h-full">
@@ -244,62 +244,83 @@ export default function ProfileTab({ onOpenAuth }: Props) {
         </motion.button>
       </div>
 
-      {/* Settings panel */}
+      {/* Settings bottom sheet */}
       <AnimatePresence>
         {showSettings && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25 }}
-            className="overflow-hidden flex-shrink-0" style={{ background: '#13131a', borderBottom: '1px solid #1e1e2a' }}>
-            {[
-              { icon: Camera, label: t.settings.changePhoto, action: () => addToast(t.settings.comingSoon, 'info', '📸') },
-              { icon: BadgeCheck, label: t.settings.requestVerification, action: () => addToast(t.settings.verificationSent, 'success') },
-              {
-                icon: state.locationEnabled ? MapPin : MapPinOff,
-                label: state.locationEnabled ? `${t.settings.locationOn}: ${state.location?.city ?? 'On'}` : t.settings.locationOff,
-                action: () => {
-                  setLocationEnabled(!state.locationEnabled);
-                  addToast(state.locationEnabled ? t.settings.locationDisabled : t.settings.locationEnabled, 'info', '📍');
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 z-40" style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
+              onClick={() => setShowSettings(false)} />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl pb-10 pt-2 flex flex-col overflow-y-auto"
+              style={{ background: 'rgba(20,17,30,0.98)', border: '1px solid rgba(255,255,255,0.07)', maxHeight: '85dvh', backdropFilter: 'blur(20px)' }}>
+              <div className="w-10 h-1 rounded-full mx-auto mb-4" style={{ background: '#3a3a4a' }} />
+              <div className="flex items-center justify-between px-5 mb-4">
+                <p className="text-base font-bold text-white">Settings</p>
+                <button onClick={() => setShowSettings(false)}>
+                  <X size={20} style={{ color: '#666677' }} />
+                </button>
+              </div>
+
+              {[
+                { icon: Camera, label: t.settings.changePhoto, action: () => { addToast(t.settings.comingSoon, 'info', '📸'); setShowSettings(false); } },
+                { icon: BadgeCheck, label: t.settings.requestVerification, action: () => { addToast(t.settings.verificationSent, 'success'); setShowSettings(false); } },
+                {
+                  icon: state.locationEnabled ? MapPin : MapPinOff,
+                  label: state.locationEnabled ? `${t.settings.locationOn}: ${state.location?.city ?? 'On'}` : t.settings.locationOff,
+                  action: () => {
+                    setLocationEnabled(!state.locationEnabled);
+                    addToast(state.locationEnabled ? t.settings.locationDisabled : t.settings.locationEnabled, 'info', '📍');
+                  },
                 },
-              },
-              { icon: Shield, label: t.settings.privacy, action: () => addToast(t.settings.privacyMsg, 'info', '🔒') },
-              { icon: Bell, label: t.settings.notificationSettings, action: () => {} },
-              { icon: Globe, label: `${t.settings.language} · ${LOCALE_FLAGS[locale]} ${LOCALE_NAMES[locale]}`, action: () => setShowLanguagePicker(true) },
-              { icon: Trash2, label: t.settings.clearData, danger: true, action: () => setShowClearConfirm(true) },
-              ...(user ? [
-                { icon: Download, label: 'Download my data', action: handleExportData },
-                { icon: UserX, label: 'Delete account & data', danger: true, action: () => setShowDeleteConfirm(true) },
-                { icon: LogOut, label: t.settings.signOut, danger: true, action: handleSignOut },
-              ] : []),
-            ].map(({ icon: Icon, label, danger, action }) => (
-              <button key={label} onClick={action}
-                className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-medium"
-                style={{ color: danger ? '#ef4444' : '#d0d0e0', borderBottom: '1px solid #1a1a24' }}>
-                <Icon size={18} style={{ color: danger ? '#ef4444' : '#888899' }} />
-                {label}
-              </button>
-            ))}
+                { icon: Shield, label: t.settings.privacy, action: () => { addToast(t.settings.privacyMsg, 'info', '🔒'); setShowSettings(false); } },
+                { icon: Bell, label: t.settings.notificationSettings, action: () => {} },
+                { icon: Globe, label: `${t.settings.language} · ${LOCALE_FLAGS[locale]} ${LOCALE_NAMES[locale]}`, action: () => { setShowLanguagePicker(true); setShowSettings(false); } },
+                { icon: Trash2, label: t.settings.clearData, danger: true, action: () => { setShowClearConfirm(true); setShowSettings(false); } },
+                ...(user ? [
+                  { icon: Download, label: 'Download my data', action: () => { handleExportData(); setShowSettings(false); } },
+                  { icon: UserX, label: 'Delete account & data', danger: true, action: () => { setShowDeleteConfirm(true); setShowSettings(false); } },
+                  { icon: LogOut, label: t.settings.signOut, danger: true, action: () => { handleSignOut(); setShowSettings(false); } },
+                ] : []),
+              ].map(({ icon: Icon, label, danger, action }) => (
+                <button key={label} onClick={action}
+                  className="w-full flex items-center gap-3 px-5 py-4 text-sm font-medium"
+                  style={{ color: danger ? '#ef4444' : '#d0d0e0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: danger ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.05)' }}>
+                    <Icon size={16} style={{ color: danger ? '#ef4444' : '#888899' }} />
+                  </div>
+                  {label}
+                </button>
+              ))}
 
-            {/* Section separator */}
-            <div className="px-4 py-2" style={{ borderBottom: '1px solid #1a1a24' }}>
-              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: '#444455' }}>Contact & Legal</p>
-            </div>
+              {/* Section separator */}
+              <div className="px-5 py-3">
+                <p className="text-xs font-bold uppercase tracking-widest" style={{ color: '#444455' }}>Contact & Legal</p>
+              </div>
 
-            {[
-              { icon: Star,          label: 'List your business ✨', action: () => window.open('/business', '_blank') },
-              { icon: MessageSquare, label: 'Contact Leone Nero', action: () => setShowContactSheet(true) },
-              { icon: Shield,        label: 'Privacy Policy',     action: () => window.open('/privacy', '_blank') },
-              { icon: FileText,      label: 'Terms of Service',   action: () => window.open('/terms', '_blank') },
-              { icon: Info,          label: 'Cookie Policy',      action: () => window.open('/cookie', '_blank') },
-            ].map(({ icon: Icon, label, action }) => (
-              <button key={label} onClick={action}
-                className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-medium"
-                style={{ color: '#d0d0e0', borderBottom: '1px solid #1a1a24' }}>
-                <Icon size={18} style={{ color: '#888899' }} />
-                {label}
-                <ExternalLink size={12} style={{ color: '#444455', marginLeft: 'auto' }} />
-              </button>
-            ))}
-          </motion.div>
+              {[
+                { icon: Star,          label: 'List your business ✨', action: () => window.open('/business', '_blank') },
+                { icon: MessageSquare, label: 'Contact Leone Nero', action: () => { setShowContactSheet(true); setShowSettings(false); } },
+                { icon: Shield,        label: 'Privacy Policy',     action: () => window.open('/privacy', '_blank') },
+                { icon: FileText,      label: 'Terms of Service',   action: () => window.open('/terms', '_blank') },
+                { icon: Info,          label: 'Cookie Policy',      action: () => window.open('/cookie', '_blank') },
+              ].map(({ icon: Icon, label, action }) => (
+                <button key={label} onClick={action}
+                  className="w-full flex items-center gap-3 px-5 py-4 text-sm font-medium"
+                  style={{ color: '#d0d0e0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: 'rgba(255,255,255,0.05)' }}>
+                    <Icon size={16} style={{ color: '#888899' }} />
+                  </div>
+                  {label}
+                  <ExternalLink size={12} style={{ color: '#444455', marginLeft: 'auto' }} />
+                </button>
+              ))}
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
 
@@ -586,12 +607,37 @@ export default function ProfileTab({ onOpenAuth }: Props) {
       {/* Scrollable content */}
       <div className="tab-content flex-1 overflow-y-auto">
         {/* Profile info */}
-        <div className="px-4 pt-5 pb-4">
-          <div className="flex items-center gap-5">
-            <div className="story-ring flex-shrink-0">
-              <div className="bg-[#0a0a0f] p-1 rounded-full">
-                <img src={avatarUrl} alt={displayName} className="w-20 h-20 rounded-full object-cover" />
+        <div className="pb-4">
+          {/* Gradient banner strip */}
+          <div className="w-full h-24 relative overflow-hidden"
+            style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.35) 0%, rgba(236,72,153,0.25) 60%, rgba(249,115,22,0.15) 100%)' }}>
+            <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, transparent 0%, #0f0d14 100%)' }} />
+          </div>
+          <div className="px-4 -mt-12 flex items-end gap-5">
+            <div className="flex-shrink-0 relative">
+              {/* Gradient banner strip behind avatar */}
+              <div className="absolute inset-0 rounded-full blur-xl opacity-40 scale-125 pointer-events-none"
+                style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }} />
+              {/* Thick gradient ring */}
+              <div className="rounded-full p-[3px] relative" style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899, #f97316)' }}>
+                <div className="rounded-full p-[2px]" style={{ background: '#0f0d14' }}>
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt={displayName} className="w-24 h-24 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-24 h-24 rounded-full flex items-center justify-center text-3xl font-black text-white"
+                      style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
+                      {displayName[0]?.toUpperCase() ?? '?'}
+                    </div>
+                  )}
+                </div>
               </div>
+              {/* Camera button floating over corner */}
+              <button
+                onClick={() => addToast('Coming soon', 'info', '📸')}
+                className="absolute bottom-0 right-0 w-8 h-8 rounded-full flex items-center justify-center"
+                style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', border: '2px solid #0f0d14', boxShadow: '0 4px 12px rgba(139,92,246,0.5)' }}>
+                <Camera size={14} color="white" />
+              </button>
             </div>
             {/* People: tap to see who you follow and who follows you */}
             <div className="flex-1 flex justify-around">
@@ -601,7 +647,8 @@ export default function ProfileTab({ onOpenAuth }: Props) {
               ]).map(({ key, label, value }) => (
                 <motion.button key={key} whileTap={{ scale: 0.94 }}
                   onClick={() => (user ? setShowConnections(key) : onOpenAuth())}
-                  className="flex flex-col items-center px-3">
+                  className="flex flex-col items-center px-3 py-2 rounded-2xl"
+                  style={{ background: 'rgba(255,255,255,0.04)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.06)' }}>
                   <span className="text-lg font-bold text-white">{formatCount(value)}</span>
                   <span className="text-xs" style={{ color: '#888899' }}>{label}</span>
                 </motion.button>
@@ -610,21 +657,21 @@ export default function ProfileTab({ onOpenAuth }: Props) {
           </div>
 
           {/* Real activity counts — likes, saves, going */}
-          <div className="grid grid-cols-3 gap-2 mt-4">
+          <div className="grid grid-cols-3 gap-2 mt-4 px-4">
             {[
               { label: t.profile.liked, value: state.likedPosts.length, emoji: '⭐' },
               { label: t.profile.saved, value: savedIds.length,         emoji: '🔖' },
               { label: t.profile.going, value: goingPosts.length,       emoji: '✅' },
             ].map(({ label, value, emoji }) => (
               <div key={label} className="flex flex-col items-center py-2.5 rounded-2xl"
-                style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
+                style={{ background: 'rgba(255,255,255,0.04)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.06)' }}>
                 <span className="text-base font-bold text-white">{emoji} {formatCount(value)}</span>
                 <span className="text-xs mt-0.5" style={{ color: '#888899' }}>{label}</span>
               </div>
             ))}
           </div>
 
-          <div className="mt-4">
+          <div className="mt-4 px-4">
             <div className="flex items-center gap-1.5">
               <p className="text-sm font-semibold text-white">{displayName}</p>
               {user && <BadgeCheck size={14} style={{ color: '#8b5cf6' }} />}
@@ -635,7 +682,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
           </div>
 
           {/* Top interests */}
-          <div className="mt-3 flex gap-2 flex-wrap">
+          <div className="mt-3 px-4 flex gap-2 flex-wrap">
             {topInterests.map(({ emoji, labelKey, key, color }) => (
               <span key={key} className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold"
                 style={{ background: `${color}18`, color, border: `1px solid ${color}33` }}>
@@ -645,24 +692,25 @@ export default function ProfileTab({ onOpenAuth }: Props) {
           </div>
 
           {/* Action buttons */}
-          <div className="flex gap-2 mt-4">
+          <div className="flex gap-2 mt-4 px-4">
             {user ? (
               <>
-                <button className="flex-1 py-2 rounded-xl text-sm font-semibold text-white" style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}>
+                <button className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', backdropFilter: 'blur(12px)' }}>
                   {t.profile.editProfile}
                 </button>
                 {supabase && (
                   <button onClick={() => setShowFollowSearch(true)}
-                    className="flex-1 py-2 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-1.5"
-                    style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}>
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-1.5"
+                    style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', boxShadow: '0 4px 20px rgba(139,92,246,0.4)' }}>
                     <Users size={14} /> {t.profile.findFriends}
                   </button>
                 )}
               </>
             ) : (
               <button onClick={onOpenAuth}
-                className="flex-1 py-2 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2"
-                style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2"
+                style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', boxShadow: '0 4px 20px rgba(139,92,246,0.4)' }}>
                 <LogIn size={14} /> {t.profile.signInSync}
               </button>
             )}
@@ -759,22 +807,30 @@ export default function ProfileTab({ onOpenAuth }: Props) {
           </div>
         )}
 
-        {/* Section tabs */}
-        <div className="flex" style={{ borderTop: '1px solid #1e1e2a', borderBottom: '1px solid #1e1e2a' }}>
+        {/* Section tabs — pill style */}
+        <div className="px-3 py-3 flex gap-2 overflow-x-auto" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', scrollbarWidth: 'none' }}>
           {([
             ['liked',    Heart,        t.profile.liked    ],
             ['saved',    BookmarkIcon, t.profile.saved    ],
             ['going',    Check,        t.profile.going    ],
             ['calendar', Calendar,     t.profile.calendar ],
             ['badges',   Trophy,       t.profile.badges   ],
-          ] as const).map(([id, Icon, label]) => (
-            <button key={id} onClick={() => setActiveSection(id as ProfileSection)}
-              className="flex-1 flex items-center justify-center gap-1 py-3"
-              style={{ color: activeSection === id ? '#a78bfa' : '#555566', borderBottom: activeSection === id ? '2px solid #8b5cf6' : '2px solid transparent' }}>
-              <Icon size={17} />
-              <span className="text-xs font-semibold">{label}</span>
-            </button>
-          ))}
+          ] as const).map(([id, Icon, label]) => {
+            const active = activeSection === id;
+            return (
+              <motion.button key={id} whileTap={{ scale: 0.93 }} onClick={() => setActiveSection(id as ProfileSection)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold flex-shrink-0"
+                style={{
+                  background: active ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : 'rgba(255,255,255,0.05)',
+                  color: active ? 'white' : '#666677',
+                  boxShadow: active ? '0 4px 16px rgba(139,92,246,0.4)' : 'none',
+                  border: active ? 'none' : '1px solid rgba(255,255,255,0.06)',
+                }}>
+                <Icon size={13} />
+                <span>{label}</span>
+              </motion.button>
+            );
+          })}
         </div>
 
         {/* Liked grid */}

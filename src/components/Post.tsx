@@ -257,7 +257,7 @@ export default function Post({ post, showHint = false }: Props) {
             {post.location?.name && (
               <div className="flex items-center gap-0.5">
                 <MapPin size={10} style={{ color: '#8b5cf6' }} />
-                <span className="text-xs font-medium truncate" style={{ color: '#a78bfa' }}>{post.location.name}</span>
+                <span className="text-xs font-medium truncate" style={{ color: '#a78bfa' }}>{post.location!.name}</span>
                 {typeof post.distanceKm === 'number' && post.distanceKm > 0 && (
                   <span className="text-xs font-semibold flex-shrink-0" style={{ color: '#6d6d80' }}>
                     · {post.distanceKm < 10 ? post.distanceKm.toFixed(1) : Math.round(post.distanceKm)} km

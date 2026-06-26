@@ -50,7 +50,7 @@ export interface Post {
   category: Category;
   hashtags: string[];
   timestamp: number;
-  location: PostLocation;
+  location?: PostLocation;
   saved: boolean;
   liked: boolean;
   isEvent?: boolean;

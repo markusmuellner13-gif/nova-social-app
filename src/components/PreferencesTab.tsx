@@ -217,7 +217,7 @@ export default function PreferencesTab({ preferences, onPreferencesChange }: Pro
                       <div className="flex-1 min-w-0 py-2 pr-3">
                         <div className="flex items-center gap-1 mb-0.5">
                           <MapPin size={11} style={{ color: '#8b5cf6' }} />
-                          <span className="text-xs font-semibold" style={{ color: '#a78bfa' }}>{post.location.name}</span>
+                          <span className="text-xs font-semibold" style={{ color: '#a78bfa' }}>{post.location?.name}</span>
                         </div>
                         <p className="text-sm font-semibold text-white truncate">{post.user.name}</p>
                         <p className="text-xs mt-0.5 line-clamp-2 leading-snug" style={{ color: '#888899' }}>{post.caption}</p>
