@@ -282,19 +282,58 @@ function isDifferentMajorCity(venueCity: string, searchCity: string): boolean {
 // JSON-LD), so the feed gets two independent free web sources. Each builder
 // returns 0+ URLs; per-URL failures are ignored.
 
-// Categories where a live-music/concert crawl is genuinely on-topic — so a
-// concert is never mislabelled as e.g. "art".
+// Categories where a live-music/concert crawl is genuinely on-topic
 const MUSIC_LIKE = new Set(['music', 'events', 'discover']);
+
+// Major cities where timeout.com has deep editorial coverage
+const TIMEOUT_CITIES = new Set([
+  'london', 'new-york', 'paris', 'barcelona', 'amsterdam', 'berlin',
+  'tokyo', 'sydney', 'singapore', 'dubai', 'chicago', 'los-angeles',
+  'miami', 'toronto', 'melbourne', 'hong-kong', 'madrid', 'rome',
+  'istanbul', 'lisbon', 'prague', 'budapest', 'copenhagen', 'stockholm',
+  'vienna', 'zurich', 'brussels', 'athens', 'dublin', 'edinburgh',
+  'montreal', 'boston', 'san-francisco', 'seattle', 'bangkok', 'shanghai',
+]);
+
+// Map our feed category → timeout.com section slugs
+const TIMEOUT_SECTION: Record<string, string> = {
+  food: 'restaurants',
+  restaurants: 'restaurants',
+  art: 'art',
+  music: 'music',
+  events: 'things-to-do',
+  discover: 'things-to-do',
+  sightseeing: 'things-to-do',
+  nightlife: 'nightlife',
+  lifestyle: 'things-to-do',
+  tech: 'things-to-do',
+  fashion: 'shopping',
+  fitness: 'things-to-do',
+  sports: 'things-to-do',
+};
 
 function buildSourceUrls(city: string, country: string, category: string): string[] {
   const citySlug = slugify(city);
   if (!citySlug) return [];
   const urls: string[] = [];
 
-  // bandsintown — concerts & live music by city (real Event JSON-LD server-side)
+  // allevents.in — worldwide events with real schema.org JSON-LD, covers all categories
+  // Supports two URL patterns for better city coverage
+  const countrySlug = slugify(country);
+  urls.push(`https://allevents.in/${citySlug}/`);
+  if (countrySlug && countrySlug !== citySlug) {
+    urls.push(`https://allevents.in/${countrySlug}/${citySlug}/`);
+  }
+
+  // bandsintown — concerts & live music (JSON-LD server-side, best for music categories)
   if (MUSIC_LIKE.has(category)) {
-    const countrySlug = slugify(country);
     urls.push(`https://www.bandsintown.com/c/${citySlug}${countrySlug ? `-${countrySlug}` : ''}`);
+  }
+
+  // timeout.com — editorial event listings for major cities
+  if (TIMEOUT_CITIES.has(citySlug)) {
+    const section = TIMEOUT_SECTION[category] ?? 'things-to-do';
+    urls.push(`https://www.timeout.com/${citySlug}/${section}`);
   }
 
   return urls;

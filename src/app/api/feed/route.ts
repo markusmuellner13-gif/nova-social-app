@@ -387,7 +387,9 @@ async function computeFeed(request: NextRequest) {
   // events from their schema.org JSON-LD. No key, no per-call credits. Runs
   // first whenever the keyed sources are sparse, so most "empty" feeds get
   // filled for free before we ever consider the paid LLM path below.
-  if (pool.length < sparseThreshold && category !== 'sightseeing') {
+  // Always crawl web sources to maximise local content density; merge with
+  // whatever the keyed APIs already returned so the feed is as full as possible.
+  if (category !== 'sightseeing') {
     try {
       const crawled = await crawlCityEvents({ city, country, lat, lng, category, count, page });
       if (crawled.length > 0) {
