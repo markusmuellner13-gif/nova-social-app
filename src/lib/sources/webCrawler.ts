@@ -520,8 +520,8 @@ export async function crawlCityEvents(opts: {
   return posts.sort((a, b) => {
     const da = a.eventDateRaw ?? '9999', db = b.eventDateRaw ?? '9999';
     if (da !== db) return da < db ? -1 : 1;
-    const ga = haversineKm(lat, lng, a.location.lat, a.location.lng);
-    const gb = haversineKm(lat, lng, b.location.lat, b.location.lng);
+    const ga = a.location ? haversineKm(lat, lng, a.location.lat, a.location.lng) : 9999;
+    const gb = b.location ? haversineKm(lat, lng, b.location.lat, b.location.lng) : 9999;
     return ga - gb;
   });
 }

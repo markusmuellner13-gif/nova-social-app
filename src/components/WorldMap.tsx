@@ -171,7 +171,7 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props
     const front: { p: Post; d: number }[] = [];
     for (const p of posts) {
       if (!p.location || !Number.isFinite(p.location.lat) || !Number.isFinite(p.location.lng)) continue;
-      const d = angularDistance(centerLng, centerLat, p.location.lng, p.location.lat);
+      const d = angularDistance(centerLng, centerLat, p.location!.lng, p.location!.lat);
       if (d < 89) front.push({ p, d });
     }
 
@@ -182,7 +182,7 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props
       const grid = zoom >= 2 ? 1.5 : zoom >= 1.4 ? 3 : 6; // degrees per bucket
       const best = new Map<string, Post>();
       for (const { p } of front) {
-        const key = `${Math.round(p.location.lat / grid)}:${Math.round(p.location.lng / grid)}`;
+        const key = `${Math.round(p.location!.lat / grid)}:${Math.round(p.location!.lng / grid)}`;
         const cur = best.get(key);
         if (!cur || (p.likes ?? 0) > (cur.likes ?? 0)) best.set(key, p);
       }
@@ -210,7 +210,7 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props
     // Prefer the in-app map + turn-by-turn navigation when available; otherwise
     // fall back to Google Maps directions.
     if (onNavigate) { onNavigate(p); return; }
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${p.location.lat},${p.location.lng}`;
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${p.location!.lat},${p.location!.lng}`;
     if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer');
   }
 
@@ -271,7 +271,7 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props
           const emoji = CATEGORY_EMOJI[post.category] ?? '📍';
           const isSelected = selected?.id === post.id;
           return (
-            <Marker key={post.id} coordinates={[post.location.lng, post.location.lat]}>
+            <Marker key={post.id} coordinates={[post.location!.lng, post.location!.lat]}>
               <g
                 onClick={(e) => {
                   e.stopPropagation();
@@ -362,7 +362,7 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold text-white truncate">{selected.caption.split('\n')[0]}</p>
               <p className="text-xs truncate mt-0.5" style={{ color: '#9aa0b5' }}>
-                📍 {selected.location.name}{selected.eventDate ? ` · ${selected.eventDate}` : ''}
+                📍 {selected.location?.name}{selected.eventDate ? ` · ${selected.eventDate}` : ''}
               </p>
               <div className="flex items-center gap-2 mt-1.5">
                 <span className="text-xs font-semibold" style={{ color: CATEGORY_COLOR[selected.category] }}>
