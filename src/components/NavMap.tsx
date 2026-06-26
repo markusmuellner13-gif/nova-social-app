@@ -501,7 +501,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
         }
         // Arrived?
         const dest = target.location;
-        if (metresBetween(lat, lng, dest.lat, dest.lng) < 30) {
+        if (dest && metresBetween(lat, lng, dest.lat, dest.lng) < 30) {
           speak('You have arrived at your destination.');
           stopGuidance();
         }
