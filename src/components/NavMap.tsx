@@ -220,7 +220,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
         const valid = posts.filter(p => p.location && Number.isFinite(p.location.lat) && Number.isFinite(p.location.lng));
         if (!anchor || valid.length <= 80) return valid;
         return valid
-          .map(p => ({ p, d: metresBetween(anchor.lat, anchor.lng, p.location.lat, p.location.lng) }))
+          .map(p => ({ p, d: metresBetween(anchor.lat, anchor.lng, p.location!.lat, p.location!.lng) }))
           .sort((a, b) => a.d - b.d)
           .slice(0, 80)
           .map(x => x.p);
@@ -236,7 +236,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
         el.appendChild(inner);
         el.onclick = (e) => { e.stopPropagation(); setTarget(p); };
         const m = new maplibregl.Marker({ element: el, anchor: 'bottom' })
-          .setLngLat([p.location.lng, p.location.lat])
+          .setLngLat([p.location!.lng, p.location!.lat])
           .addTo(map);
         markersRef.current.push(m);
       }
@@ -322,7 +322,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     // Try the public OSRM demo server; if it's slow or unavailable (it's a
     // best-effort free service), fall back to a secondary instance.
     const osrmUrl = (base: string) =>
-      `${base}/route/v1/${profile}/${origin.lng},${origin.lat};${dest.location.lng},${dest.location.lat}?overview=full&geometries=geojson&steps=true`;
+      `${base}/route/v1/${profile}/${origin.lng},${origin.lat};${dest.location!.lng},${dest.location!.lat}?overview=full&geometries=geojson&steps=true`;
 
     let data: {
       routes?: { distance: number; duration: number; geometry: GeoJSON.LineString;
@@ -452,7 +452,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
           // coordinates so the user at least sees the route shape and steps.
           if (dest.location) {
             setRouting(true);
-            const approxOrigin = { lat: dest.location.lat + 0.01, lng: dest.location.lng + 0.01 };
+            const approxOrigin = { lat: dest.location!.lat + 0.01, lng: dest.location!.lng + 0.01 };
             drawRoute(approxOrigin, dest).then(ok => {
               setRouting(false);
               if (!ok) { setNextStep('Enable location to get precise directions.'); setRouteError(true); }
@@ -586,7 +586,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
               <img src={target.image} alt="" className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-white truncate">{target.caption.split('\n')[0]}</p>
-                <p className="text-xs truncate" style={{ color: '#9aa0b5' }}>📍 {target.location.name}</p>
+                {target.location?.name && <p className="text-xs truncate" style={{ color: '#9aa0b5' }}>📍 {target.location.name}</p>}
                 {routeInfo && (
                   <p className="text-xs font-semibold mt-0.5" style={{ color: theme.accent }}>
                     {routeInfo.km} km · ~{routeInfo.min} min {profile === 'driving' ? '🚗' : '🚶'}
