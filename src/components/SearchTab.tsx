@@ -222,7 +222,7 @@ export default function SearchTab() {
                     <Flame size={16} style={{ color: '#f97316' }} />
                     <h3 className="text-sm font-semibold text-white">Hot Right Now</h3>
                   </div>
-                  <PostGrid posts={MOCK_POSTS.slice(0, 9)} onPostOpen={setSelectedPost} />
+                  <PostGrid posts={MOCK_POSTS.slice(0, 18)} onPostOpen={setSelectedPost} />
                 </div>
               </motion.div>
             ) : (

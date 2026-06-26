@@ -120,6 +120,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const watchIdRef = useRef<number | null>(null);
   const stepsRef = useRef<RouteStep[]>([]);
   const lastSpokenRef = useRef<string>('');
+  const ttsVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
   const [satellite, setSatellite] = useState(false);
   const [theme, setTheme] = useState<NavTheme>(DEFAULT_THEME);
@@ -132,6 +133,25 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     const saved = window.localStorage.getItem('nova_nav_theme');
     const found = NAV_THEMES.find(t => t.id === saved);
     if (found) setTheme(found);
+  }, []);
+
+  // Pick an English TTS voice once voices are loaded. Browsers load voices
+  // asynchronously; voiceschanged fires when they're ready.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const pickVoice = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (!voices.length) return;
+      ttsVoiceRef.current =
+        voices.find(v => v.lang === 'en-US' && v.localService) ??
+        voices.find(v => v.lang === 'en-US') ??
+        voices.find(v => v.lang.startsWith('en-GB')) ??
+        voices.find(v => v.lang.startsWith('en')) ??
+        voices[0];
+    };
+    pickVoice();
+    window.speechSynthesis.addEventListener('voiceschanged', pickVoice);
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', pickVoice);
   }, []);
 
   const pickTheme = useCallback((t: NavTheme) => {
@@ -156,8 +176,19 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     if (text === lastSpokenRef.current) return;
     lastSpokenRef.current = text;
     try {
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = 1; u.pitch = 1; u.lang = 'en-US';
+      // Strip road names (everything after " onto " / " on ") from the spoken
+      // text — local street names in German/French/etc. cause the TTS engine
+      // to switch language mid-sentence, producing the jarring two-language
+      // effect. The turn direction is what matters for audio guidance.
+      const spokenText = text
+        .replace(/ onto\s+\S.*$/i, '')
+        .replace(/ on\s+[A-ZÄÖÜÉÀÂ]\S.*$/i, '')
+        .trim() || text;
+      const u = new SpeechSynthesisUtterance(spokenText);
+      u.rate = 1.05; u.pitch = 1; u.lang = 'en-US';
+      // Use the pre-selected English voice if available so the browser never
+      // auto-detects a non-English locale from the road name.
+      if (ttsVoiceRef.current) u.voice = ttsVoiceRef.current;
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(u);
     } catch { /* TTS unavailable */ }
@@ -280,31 +311,73 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const drawRoute = useCallback(async (origin: { lat: number; lng: number }, dest: Post): Promise<boolean> => {
     const map = mapRef.current;
     if (!map) return false;
-    const url = `https://router.project-osrm.org/route/v1/${profile}/${origin.lng},${origin.lat};${dest.location.lng},${dest.location.lat}?overview=full&geometries=geojson&steps=true`;
+
+    // Wait for the map style to be ready before adding layers. The style is
+    // normally loaded before drawRoute is called (we set target inside
+    // map.on('load')), but profile-change re-routes can race with style events.
+    if (!map.isStyleLoaded()) {
+      await new Promise<void>(resolve => map.once('idle', resolve));
+    }
+
+    // Try the public OSRM demo server; if it's slow or unavailable (it's a
+    // best-effort free service), fall back to a secondary instance.
+    const osrmUrl = (base: string) =>
+      `${base}/route/v1/${profile}/${origin.lng},${origin.lat};${dest.location.lng},${dest.location.lat}?overview=full&geometries=geojson&steps=true`;
+
     let data: {
       routes?: { distance: number; duration: number; geometry: GeoJSON.LineString;
         legs: { steps: { maneuver: { location: [number, number]; type: string; modifier?: string }; name?: string; distance: number }[] }[] }[];
-    };
-    try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-      data = await res.json();
-    } catch { return false; }
+    } | null = null;
+
+    const OSRM_BASES = [
+      'https://router.project-osrm.org',
+      'https://routing.openstreetmap.de/routed-car',
+    ];
+
+    for (const base of OSRM_BASES) {
+      try {
+        const res = await fetch(osrmUrl(base), { signal: AbortSignal.timeout(12000) });
+        if (res.ok) { data = await res.json(); break; }
+      } catch { /* try next */ }
+    }
+    if (!data) return false;
 
     const route = data.routes?.[0];
     if (!route) return false;
 
-    // Draw the route line
+    // Draw the route line — update existing source if already drawn, otherwise
+    // add fresh layers on top of the basemap.
     const geo: GeoJSON.Feature = { type: 'Feature', properties: {}, geometry: route.geometry };
-    const src = map.getSource('route') as maplibregl.GeoJSONSource | undefined;
-    if (src) src.setData(geo);
-    else {
-      map.addSource('route', { type: 'geojson', data: geo });
-      map.addLayer({ id: 'route-line', type: 'line', source: 'route',
-        layout: { 'line-join': theme.square ? 'miter' : 'round', 'line-cap': theme.square ? 'square' : 'round' },
-        paint: { 'line-color': theme.route, 'line-width': theme.routeWidth, 'line-opacity': 0.9 } });
-      map.addLayer({ id: 'route-glow', type: 'line', source: 'route',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': theme.routeGlow, 'line-width': theme.routeWidth * 2, 'line-opacity': 0.25 } }, 'route-line');
+    try {
+      const src = map.getSource('route') as maplibregl.GeoJSONSource | undefined;
+      if (src) {
+        src.setData(geo);
+        // Sync paint properties to current theme in case it changed
+        if (map.getLayer('route-line')) {
+          map.setPaintProperty('route-line', 'line-color', theme.route);
+          map.setPaintProperty('route-line', 'line-width', theme.routeWidth);
+        }
+        if (map.getLayer('route-glow')) {
+          map.setPaintProperty('route-glow', 'line-color', theme.routeGlow);
+          map.setPaintProperty('route-glow', 'line-width', theme.routeWidth * 2);
+        }
+      } else {
+        map.addSource('route', { type: 'geojson', data: geo });
+        // Glow first (lower z-order), then line on top
+        map.addLayer({
+          id: 'route-glow', type: 'line', source: 'route',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': theme.routeGlow, 'line-width': theme.routeWidth * 2.5, 'line-opacity': 0.3 },
+        });
+        map.addLayer({
+          id: 'route-line', type: 'line', source: 'route',
+          layout: { 'line-join': theme.square ? 'miter' : 'round', 'line-cap': theme.square ? 'square' : 'round' },
+          paint: { 'line-color': theme.route, 'line-width': theme.routeWidth, 'line-opacity': 0.95 },
+        });
+      }
+    } catch (err) {
+      console.error('[NavMap/drawRoute layers]', err);
+      return false;
     }
 
     const allSteps: RouteStep[] = [];
@@ -321,10 +394,10 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     setSteps(allSteps);
     setRouteInfo({ km: Math.round(route.distance / 100) / 10, min: Math.round(route.duration / 60) });
 
-    // Fit the route in view
+    // Fit the route in view with comfortable padding
     const coords = route.geometry.coordinates as [number, number][];
     const b = coords.reduce((bb, c) => bb.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
-    map.fitBounds(b, { padding: 60, maxZoom: 15 });
+    map.fitBounds(b, { padding: { top: 80, bottom: 220, left: 40, right: 40 }, maxZoom: 16, duration: 600 });
     return true;
   }, [profile, theme]);
 
@@ -352,7 +425,10 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     }
 
     if (!navigator.geolocation) {
-      if (!hint) { setNextStep('Enable location to get directions.'); setRouteError(true); }
+      if (!hint) {
+        setNextStep('Enable device location to get turn-by-turn directions.');
+        setRouteError(true);
+      }
       return;
     }
 
@@ -370,8 +446,25 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
           drawRoute(fresh, dest).then(ok => { setRouting(false); if (!ok && !hint) setRouteError(true); });
         }
       },
-      () => { if (!hint) { setNextStep('Enable location to get directions.'); setRouting(false); } },
-      { enableHighAccuracy: true, maximumAge: 30000, timeout: 6000 },
+      () => {
+        if (!hint) {
+          // No GPS and no city hint — try to route from the target's own
+          // coordinates so the user at least sees the route shape and steps.
+          if (dest.location) {
+            setRouting(true);
+            const approxOrigin = { lat: dest.location.lat + 0.01, lng: dest.location.lng + 0.01 };
+            drawRoute(approxOrigin, dest).then(ok => {
+              setRouting(false);
+              if (!ok) { setNextStep('Enable location to get precise directions.'); setRouteError(true); }
+              else setNextStep('Enable GPS for real-time turn-by-turn guidance.');
+            });
+          } else {
+            setNextStep('Enable device location to get directions.');
+            setRouting(false);
+          }
+        }
+      },
+      { enableHighAccuracy: true, maximumAge: 30000, timeout: 8000 },
     );
   }, [userLocation, setUserMarker, drawRoute]);
 
