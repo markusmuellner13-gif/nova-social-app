@@ -284,6 +284,8 @@ function isDifferentMajorCity(venueCity: string, searchCity: string): boolean {
 
 // Categories where a live-music/concert crawl is genuinely on-topic
 const MUSIC_LIKE = new Set(['music', 'events', 'discover']);
+const FOOD_LIKE  = new Set(['food', 'restaurants']);
+const ART_LIKE   = new Set(['art', 'culture', 'lifestyle', 'community']);
 
 // Major cities where timeout.com has deep editorial coverage
 const TIMEOUT_CITIES = new Set([
@@ -293,6 +295,9 @@ const TIMEOUT_CITIES = new Set([
   'istanbul', 'lisbon', 'prague', 'budapest', 'copenhagen', 'stockholm',
   'vienna', 'zurich', 'brussels', 'athens', 'dublin', 'edinburgh',
   'montreal', 'boston', 'san-francisco', 'seattle', 'bangkok', 'shanghai',
+  'milan', 'munich', 'hamburg', 'cologne', 'warsaw', 'krakow', 'oslo',
+  'helsinki', 'cape-town', 'nairobi', 'lagos', 'mexico-city', 'sao-paulo',
+  'buenos-aires', 'bogota', 'lima', 'santiago', 'jakarta', 'kuala-lumpur',
 ]);
 
 // Map our feed category → timeout.com section slugs
@@ -308,32 +313,90 @@ const TIMEOUT_SECTION: Record<string, string> = {
   lifestyle: 'things-to-do',
   tech: 'things-to-do',
   fashion: 'shopping',
-  fitness: 'things-to-do',
-  sports: 'things-to-do',
+  fitness: 'sport-and-fitness',
+  sports: 'sport-and-fitness',
+  community: 'things-to-do',
 };
+
+// lu.ma uses city slugs that match most major city names directly
+const LUMA_CITIES = new Set([
+  'london', 'new-york', 'paris', 'berlin', 'amsterdam', 'barcelona', 'vienna',
+  'zurich', 'munich', 'dubai', 'singapore', 'tokyo', 'sydney', 'toronto',
+  'san-francisco', 'los-angeles', 'chicago', 'miami', 'boston', 'seattle',
+  'stockholm', 'copenhagen', 'lisbon', 'prague', 'budapest', 'rome', 'milan',
+  'brussels', 'oslo', 'helsinki', 'warsaw', 'hong-kong', 'bangkok', 'istanbul',
+  'montreal', 'melbourne', 'cape-town', 'johannesburg', 'nairobi', 'lagos',
+  'mexico-city', 'buenos-aires', 'sao-paulo', 'bogota', 'lima',
+]);
+
+// dice.fm city slugs for electronic/live music events
+const DICE_CITIES = new Set([
+  'london', 'new-york', 'los-angeles', 'berlin', 'amsterdam', 'barcelona',
+  'paris', 'madrid', 'milan', 'rome', 'vienna', 'zurich', 'brussels',
+  'amsterdam', 'dublin', 'manchester', 'glasgow', 'birmingham',
+  'chicago', 'miami', 'toronto', 'montreal', 'sydney', 'melbourne',
+  'tokyo', 'lisbon', 'prague', 'budapest', 'istanbul', 'dubai', 'singapore',
+]);
 
 function buildSourceUrls(city: string, country: string, category: string): string[] {
   const citySlug = slugify(city);
   if (!citySlug) return [];
   const urls: string[] = [];
-
-  // allevents.in — worldwide events with real schema.org JSON-LD, covers all categories
-  // Supports two URL patterns for better city coverage
   const countrySlug = slugify(country);
+
+  // allevents.in — worldwide, all categories, real schema.org JSON-LD server-side
   urls.push(`https://allevents.in/${citySlug}/`);
   if (countrySlug && countrySlug !== citySlug) {
     urls.push(`https://allevents.in/${countrySlug}/${citySlug}/`);
   }
 
-  // bandsintown — concerts & live music (JSON-LD server-side, best for music categories)
+  // lu.ma — tech, startup, community and general events; excellent JSON-LD
+  if (LUMA_CITIES.has(citySlug)) {
+    urls.push(`https://lu.ma/${citySlug}`);
+  }
+
+  // bandsintown — concerts & live music (verified JSON-LD, best music data)
   if (MUSIC_LIKE.has(category)) {
     urls.push(`https://www.bandsintown.com/c/${citySlug}${countrySlug ? `-${countrySlug}` : ''}`);
   }
 
-  // timeout.com — editorial event listings for major cities
+  // dice.fm — nightlife, electronic music, live concerts
+  if ((MUSIC_LIKE.has(category) || category === 'nightlife') && DICE_CITIES.has(citySlug)) {
+    urls.push(`https://dice.fm/browse/music/${citySlug}`);
+  }
+
+  // timeout.com — editorial listings covering food, art, nightlife, music, etc.
   if (TIMEOUT_CITIES.has(citySlug)) {
     const section = TIMEOUT_SECTION[category] ?? 'things-to-do';
     urls.push(`https://www.timeout.com/${citySlug}/${section}`);
+    // Always also include the main "things-to-do" page as a general events source
+    if (section !== 'things-to-do') {
+      urls.push(`https://www.timeout.com/${citySlug}/things-to-do`);
+    }
+  }
+
+  // Eventbrite public city pages — rich Event JSON-LD, all categories
+  // Pattern: /d/{country-slug}--{city-slug}/all-events/ → structured event listing
+  if (countrySlug) {
+    urls.push(`https://www.eventbrite.com/d/${countrySlug}--${citySlug}/all-events/`);
+    if (FOOD_LIKE.has(category)) {
+      urls.push(`https://www.eventbrite.com/d/${countrySlug}--${citySlug}/food-and-drink/`);
+    }
+    if (ART_LIKE.has(category)) {
+      urls.push(`https://www.eventbrite.com/d/${countrySlug}--${citySlug}/arts/`);
+    }
+    if (MUSIC_LIKE.has(category)) {
+      urls.push(`https://www.eventbrite.com/d/${countrySlug}--${citySlug}/music/`);
+    }
+    if (category === 'sports' || category === 'fitness') {
+      urls.push(`https://www.eventbrite.com/d/${countrySlug}--${citySlug}/sports-and-fitness/`);
+    }
+    if (category === 'tech') {
+      urls.push(`https://www.eventbrite.com/d/${countrySlug}--${citySlug}/science-and-tech/`);
+    }
+    if (category === 'community') {
+      urls.push(`https://www.eventbrite.com/d/${countrySlug}--${citySlug}/community/`);
+    }
   }
 
   return urls;

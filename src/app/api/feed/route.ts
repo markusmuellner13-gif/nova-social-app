@@ -364,12 +364,16 @@ async function computeFeed(request: NextRequest) {
     );
   }
 
-  // Blend real OSM places into the mixed categories so they're rich and free
-  // everywhere — even a tiny town's "art" / "community" / "music" / "sport" tab
-  // fills with its actual museums, churches, clubs, gyms, pitches and markets.
-  if (OSM_BLEND_CATEGORIES.has(category)) {
+  // Blend real OSM places into mixed categories + discover so every feed is rich
+  // even for small towns with no ticketed events. Covers real museums, clubs,
+  // cafés, gyms, parks, markets — all free, no API key, always local.
+  if (OSM_BLEND_CATEGORIES.has(category) || category === 'discover') {
+    // For discover, rotate through place types so each page feels different
+    const osmCatForDiscover = category === 'discover'
+      ? (['events', 'restaurants', 'art', 'fitness', 'music', 'community'] as const)[page % 6]
+      : category as string;
     tasks.push(
-      osmPosts(lat, lng, city, category, page, radius, count, unsplashKey, pexelsKey)
+      osmPosts(lat, lng, city, osmCatForDiscover, page, radius, count, unsplashKey, pexelsKey)
         .then(r => ({ source: 'osm', ...r }))
         .catch(err => { console.error('[feed/osm-blend]', err); return { source: 'osm', posts: [], hasMore: false }; })
     );

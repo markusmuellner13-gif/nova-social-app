@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, X, Hash, TrendingUp, Flame } from 'lucide-react';
+import { Search, X, Hash, TrendingUp, Flame, MapPin, Loader2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { MOCK_POSTS, formatCount } from '@/data/mockData';
 import { Post, Category } from '@/types';
@@ -43,6 +43,7 @@ export default function SearchTab() {
   const { t } = useLanguage();
   const { state } = useApp();
   const categories = CATEGORY_EMOJIS.map(({ id, emoji }) => ({ id, emoji, label: t.categories[id] }));
+  const location = state.location;
 
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<Category | null>(null);
@@ -51,11 +52,12 @@ export default function SearchTab() {
   const [mapPosts, setMapPosts] = useState<Post[]>([]);
   const [showNav, setShowNav] = useState(false);
   const [navTarget, setNavTarget] = useState<Post | null>(null);
+  const [localHotPosts, setLocalHotPosts] = useState<Post[]>([]);
+  const [localHotLoading, setLocalHotLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const prevCityRef = useRef<string | null>(null);
 
-  // Real, live events worldwide for the globe — fetched from our own events DB.
-  // Falls back to the local sample if the DB is empty/unreachable so the map is
-  // never blank.
+  // Real, live events worldwide for the globe map
   useEffect(() => {
     let cancelled = false;
     fetch(apiUrl('/api/map'))
@@ -69,13 +71,48 @@ export default function SearchTab() {
     return () => { cancelled = true; };
   }, []);
 
+  // Fetch location-specific "Hot Right Now" posts whenever the city changes
+  const fetchLocalHot = useCallback(async () => {
+    if (!location?.city) return;
+    if (location.city === prevCityRef.current) return;
+    prevCityRef.current = location.city;
+    setLocalHotLoading(true);
+    try {
+      const params = new URLSearchParams({
+        city:     location.city,
+        country:  location.country,
+        lat:      location.lat.toFixed(3),
+        lng:      location.lng.toFixed(3),
+        category: 'discover',
+        count:    '18',
+        page:     '0',
+        radius:   '15',
+        days:     '60',
+      });
+      const res = await fetch(apiUrl(`/api/feed?${params}`), {
+        signal: AbortSignal.timeout?.(18_000) ?? undefined,
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { posts?: Post[] };
+      const posts = data.posts ?? [];
+      if (posts.length > 0) setLocalHotPosts(posts);
+    } catch { /* keep fallback */ } finally {
+      setLocalHotLoading(false);
+    }
+  }, [location?.city, location?.country, location?.lat, location?.lng]);
+
+  useEffect(() => { void fetchLocalHot(); }, [fetchLocalHot]);
+
   const globePosts = mapPosts.length > 0 ? mapPosts : MOCK_POSTS;
-  const globeFocus = state.location
-    ? { lat: state.location.lat, lng: state.location.lng }
+  const globeFocus = location
+    ? { lat: location.lat, lng: location.lng }
     : null;
 
+  // Search pool: prefer real local posts, fall back to global mock posts
+  const searchPool = localHotPosts.length > 0 ? localHotPosts : MOCK_POSTS;
+
   const filteredPosts = useMemo(() => {
-    let results = MOCK_POSTS;
+    let results = searchPool;
     if (activeCategory) results = results.filter(p => p.category === activeCategory);
     if (query.trim()) {
       const q = query.toLowerCase().replace('#', '');
@@ -89,7 +126,7 @@ export default function SearchTab() {
       );
     }
     return results;
-  }, [query, activeCategory]);
+  }, [query, activeCategory, searchPool]);
 
   const showResults = query.trim().length > 0 || activeCategory !== null;
 
@@ -216,13 +253,25 @@ export default function SearchTab() {
                   </div>
                 </div>
 
-                {/* Hot posts grid */}
+                {/* Hot posts grid — location-aware */}
                 <div className="mt-6 mb-2">
                   <div className="flex items-center gap-2 mb-3 px-4">
                     <Flame size={16} style={{ color: '#f97316' }} />
-                    <h3 className="text-sm font-semibold text-white">Hot Right Now</h3>
+                    <h3 className="text-sm font-semibold text-white">
+                      {location?.city ? `Hot in ${location.city}` : 'Hot Right Now'}
+                    </h3>
+                    {location?.city && (
+                      <div className="flex items-center gap-1 ml-auto">
+                        <MapPin size={10} style={{ color: '#a78bfa' }} />
+                        <span className="text-xs" style={{ color: '#a78bfa' }}>{location.city}</span>
+                      </div>
+                    )}
+                    {localHotLoading && <Loader2 size={12} style={{ color: '#8b5cf6', marginLeft: 'auto' }} className="animate-spin" />}
                   </div>
-                  <PostGrid posts={MOCK_POSTS.slice(0, 18)} onPostOpen={setSelectedPost} />
+                  <PostGrid
+                    posts={localHotPosts.length > 0 ? localHotPosts.slice(0, 18) : MOCK_POSTS.slice(0, 18)}
+                    onPostOpen={setSelectedPost}
+                  />
                 </div>
               </motion.div>
             ) : (
