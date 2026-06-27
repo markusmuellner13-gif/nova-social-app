@@ -90,14 +90,14 @@ function maneuverText(type: string, modifier: string, road: string): string {
   }
 }
 
-// Request a fresh, high-accuracy GPS fix. Resolves null on failure/denial.
-function getGPSPosition(timeoutMs = 10000): Promise<{ lat: number; lng: number } | null> {
+// Request a GPS fix. maximumAge lets callers trade staleness for speed.
+function getGPSPosition(timeoutMs = 7000, maximumAge = 0): Promise<{ lat: number; lng: number } | null> {
   return new Promise(resolve => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) { resolve(null); return; }
     navigator.geolocation.getCurrentPosition(
       p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
       () => resolve(null),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: timeoutMs },
+      { enableHighAccuracy: true, maximumAge, timeout: timeoutMs },
     );
   });
 }
@@ -113,6 +113,9 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const ttsVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const satelliteLayerAddedRef = useRef(false);
 
+  // Pre-fetch GPS immediately when the map mounts — runs in parallel with tile loading.
+  const prefetchedGPSRef = useRef<Promise<{ lat: number; lng: number } | null> | null>(null);
+
   const [satellite, setSatellite] = useState(false);
   const [theme, setTheme] = useState<NavTheme>(DEFAULT_THEME);
   const [themePickerOpen, setThemePickerOpen] = useState(false);
@@ -125,6 +128,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const [nextStep, setNextStep] = useState<string>('');
   const [routing, setRouting] = useState(false);
   const [routeError, setRouteError] = useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
 
   // Restore saved theme
   useEffect(() => {
@@ -189,6 +193,9 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   // ── Init map ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    // Kick off GPS immediately — runs in parallel while map tiles load.
+    // First try a cached fix (fast), then fall back to fresh fix inside buildRoute.
+    prefetchedGPSRef.current = getGPSPosition(7000, 5000);
     const center: [number, number] = userLocation
       ? [userLocation.lng, userLocation.lat]
       : (posts[0]?.location ? [posts[0].location!.lng, posts[0].location!.lat] : [16.37, 48.21]);
@@ -205,6 +212,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     mapRef.current = map;
 
     map.on('load', () => {
+      setMapLoaded(true);
       // Add event-pin markers near the user/target
       const anchor = userLocation ?? (initialTarget?.location ?? posts[0]?.location);
       const valid = posts.filter(p => p.location && Number.isFinite(p.location.lat) && Number.isFinite(p.location.lng));
@@ -394,9 +402,13 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     setRouting(true);
     setNextStep('Getting your location…');
 
-    // Fresh GPS first — no cached position (maximumAge: 0). This is what makes
-    // directions differ correctly between Baden, Bad Vöslau, Vienna, etc.
-    const gps = await getGPSPosition(10000);
+    // Use pre-fetched GPS if available (kicked off when map mounted, in parallel
+    // with tile loading), then fall back to a fresh fix, then to the city center.
+    const gps = prefetchedGPSRef.current
+      ? await prefetchedGPSRef.current
+      : await getGPSPosition(7000, 0);
+    // Clear the pre-fetched promise so subsequent route rebuilds get a fresh fix.
+    prefetchedGPSRef.current = null;
     const origin = gps ?? userLocation;
 
     if (!origin) {
@@ -481,6 +493,25 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   return (
     <div className="fixed inset-0 z-50" style={{ background: '#0a0a0f' }}>
       <div ref={containerRef} className="absolute inset-0" />
+
+      {/* Map loading overlay — hidden once tiles are ready */}
+      {!mapLoaded && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 pointer-events-none"
+          style={{ background: '#0a0a0f', zIndex: 10 }}>
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+            style={{ background: theme.gradient, boxShadow: `0 0 32px ${theme.accent}66` }}>
+            <Navigation size={26} color="#fff" />
+          </div>
+          <div className="flex flex-col items-center gap-1.5">
+            <div className="flex gap-1.5">
+              {[0, 1, 2].map(i => (
+                <div key={i} className="w-2 h-2 rounded-full animate-bounce" style={{ background: theme.accent, animationDelay: `${i * 0.15}s` }} />
+              ))}
+            </div>
+            <p className="text-xs font-medium" style={{ color: '#666677' }}>Loading map…</p>
+          </div>
+        </div>
+      )}
 
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-12 pb-3 pointer-events-none">
