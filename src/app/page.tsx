@@ -20,6 +20,7 @@ import { LanguageProvider } from '@/context/LanguageContext';
 import { getUserInteractions } from '@/lib/supabase';
 import { setFriendsGoingUser } from '@/lib/friendsGoing';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import Onboarding from '@/components/Onboarding';
 import { useLocation } from '@/hooks/useLocation';
 import { initNotifications, subscribeToPush, setAppBadge, clearAppBadge } from '@/lib/notifications';
 import { getTopCategories } from '@/lib/aiEngine';
@@ -119,6 +120,7 @@ function AppShell() {
   }, []);
 
   if (!splashDone) return <SplashScreen onComplete={handleSplashComplete} />;
+  if (!state.hasOnboarded) return <Onboarding />;
 
   return (
     <div className="app-frame" style={{

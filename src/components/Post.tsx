@@ -346,6 +346,17 @@ export default function Post({ post, showHint = false }: Props) {
             )}
           </AnimatePresence>
 
+          {/* Going count pill — visible on the image so social proof is front and centre */}
+          {isEventPost && goingCount > 0 && (
+            <div
+              className="absolute bottom-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full pointer-events-none"
+              style={{ background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(8px)', border: '1px solid rgba(34,197,94,0.3)' }}
+            >
+              <CheckCircle2 size={12} fill="#22c55e" style={{ color: '#22c55e' }} />
+              <span className="text-xs font-bold" style={{ color: '#4ade80' }}>{formatCount(goingCount)} going</span>
+            </div>
+          )}
+
           <AnimatePresence>
             {showHint && !hintDismissed && (
               <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}

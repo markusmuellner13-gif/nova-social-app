@@ -45,7 +45,7 @@ export default function BottomNav({ active, onChange }: Props) {
     { id: 'feed',    Icon: Compass,  label: t.nav.discover },
     { id: 'explore', Icon: Search,   label: t.nav.explore  },
     { id: 'groups',  Icon: Users,    label: t.nav.groups,  center: true },
-    { id: 'chat',    Icon: Sparkles, label: 'Nova AI' },
+    { id: 'chat',    Icon: Sparkles, label: 'AI' },
     { id: 'profile', Icon: User,     label: t.nav.profile  },
   ];
 

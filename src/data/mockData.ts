@@ -445,9 +445,9 @@ export const CURRENT_USER = {
 
 // AI/event-only notifications — no likes, follows, or mentions
 export const MOCK_NOTIFICATIONS: NovaNotification[] = [
-  { id: 'n1', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: U('1514525253161-7a46d19cd819', 80, 80), text: 'New concerts dropping in your area tonight 🎵', timestamp: h(0.3), read: false },
-  { id: 'n2', user: NOVA_AI_USER, type: 'event', postImage: U('1514525253161-7a46d19cd819', 80, 80), text: 'Glastonbury 2026 lineup just confirmed — check it out 🎸', timestamp: h(0.8), read: false },
-  { id: 'n3', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: U('1547826039-bfc35e0f1ea8', 80, 80), text: 'New art exhibitions near you this weekend 🎨', timestamp: h(1.5), read: false },
+  { id: 'n1', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: U('1514525253161-7a46d19cd819', 80, 80), text: 'New concerts dropping in your area tonight 🎵', timestamp: h(0.3), read: true },
+  { id: 'n2', user: NOVA_AI_USER, type: 'event', postImage: U('1514525253161-7a46d19cd819', 80, 80), text: 'Glastonbury 2026 lineup just confirmed — check it out 🎸', timestamp: h(0.8), read: true },
+  { id: 'n3', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: U('1547826039-bfc35e0f1ea8', 80, 80), text: 'New art exhibitions near you this weekend 🎨', timestamp: h(1.5), read: true },
   { id: 'n4', user: NOVA_AI_USER, type: 'event', postImage: U('1569050467447-ce54b3bbc37d', 80, 80), text: 'Food festival starts in 2 days — save your spot 🍕', timestamp: h(3), read: true },
   { id: 'n5', user: NOVA_AI_USER, type: 'ai_suggestion', postImage: U('1559136555-9303baea8ebd', 80, 80), text: 'Tech meetup tonight — 47 people attending 💻', timestamp: h(6), read: true },
   { id: 'n6', user: NOVA_AI_USER, type: 'event', postImage: U('1540039155733-5bb30b53aa14', 80, 80), text: 'Coachella 2026 tickets on sale Friday 🎪', timestamp: h(12), read: true },

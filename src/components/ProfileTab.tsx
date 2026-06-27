@@ -8,7 +8,7 @@ import {
   MapPin, MapPinOff, Calendar, Users, Star, Trophy, Search,
   UserPlus, UserCheck, X, LogIn, Globe, Heart, Check,
   MessageSquare, FileText, Info, ExternalLink, Phone,
-  Download, UserX,
+  Download, UserX, Sparkles,
 } from 'lucide-react';
 import { CURRENT_USER, formatCount } from '@/data/mockData';
 import { Category, Post } from '@/types';
@@ -798,6 +798,17 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             )}
           </AnimatePresence>
         </div>
+
+        {/* Personalization hint for logged-out users */}
+        {!user && (
+          <div className="mx-4 mb-2 px-4 py-3 rounded-2xl flex items-start gap-3" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.12), rgba(236,72,153,0.08))', border: '1px solid rgba(139,92,246,0.22)' }}>
+            <Sparkles size={16} style={{ color: '#a78bfa', flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <p className="text-xs font-bold mb-0.5" style={{ color: '#c4b5fd' }}>Tell Nova what you love</p>
+              <p className="text-xs leading-relaxed" style={{ color: '#888899' }}>Your interests below train Nova&apos;s AI to show you better events and discoveries every session.</p>
+            </div>
+          </div>
+        )}
 
         {/* Security info */}
         {!user && isSupabaseEnabled && (

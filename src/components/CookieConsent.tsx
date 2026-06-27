@@ -77,7 +77,6 @@ export default function CookieConsent() {
         maxWidth: 560, margin: '0 auto',
         background: '#13131a', border: '1px solid #2a2a38', borderRadius: 18,
         padding: 18, boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
-        fontFamily: 'system-ui, sans-serif',
       }}
     >
       <p style={{ color: '#fff', fontSize: 14, fontWeight: 700, margin: 0, marginBottom: 6 }}>
