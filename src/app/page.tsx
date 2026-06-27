@@ -89,7 +89,7 @@ function AppShell() {
 
   // Show location prompt once after onboarding
   useEffect(() => {
-    if (splashDone && state.hasOnboarded && !state.hasSeenLocationPrompt && permission === 'prompt') {
+    if (splashDone && state.hasOnboarded && !state.hasSeenLocationPrompt && !state.location?.city && permission === 'prompt') {
       const t = setTimeout(() => setShowLocationPrompt(true), 1500);
       return () => clearTimeout(t);
     }

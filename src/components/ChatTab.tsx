@@ -91,7 +91,8 @@ export default function ChatTab({ location }: Props) {
       </div>
 
       {/* Messages */}
-      <div className="tab-content flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      <div className="tab-content flex-1 overflow-y-auto px-4 py-3">
+        <div className="flex flex-col justify-end min-h-full space-y-3">
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             {m.role === 'ai' && (
@@ -128,6 +129,7 @@ export default function ChatTab({ location }: Props) {
           </div>
         )}
         <div ref={bottomRef} />
+        </div>
       </div>
 
       {/* Quick prompts */}
