@@ -44,11 +44,26 @@ const CATEGORY_EMOJI: Record<Category, string> = {
   outdoors: '🏞️',
 };
 
-// OpenFreeMap provides free vector tiles with full street labels — no API key.
-// The liberty style is a clean, well-labelled street map.
-const OFMAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+// CartoDB Voyager raster tiles — inline style (no external JSON to fetch),
+// labels baked into tiles, very fast CDN, already in CSP. Loads near-instantly
+// on any connection, unlike vector styles that need a large JSON + fonts + sprites.
+const CARTO_TILES = [
+  'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+  'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+  'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+  'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+];
 
-// Esri satellite imagery overlaid on top of vector labels (satellite mode).
+const MAP_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    carto: { type: 'raster', tiles: CARTO_TILES, tileSize: 256, maxzoom: 19,
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © <a href="https://carto.com/attributions">CARTO</a>' },
+  },
+  layers: [{ id: 'carto-base', type: 'raster', source: 'carto' }],
+};
+
+// Esri satellite imagery overlaid on top of the street map (satellite mode).
 const SATELLITE_TILES = ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'];
 
 interface RouteStep {
@@ -90,14 +105,14 @@ function maneuverText(type: string, modifier: string, road: string): string {
   }
 }
 
-// Request a fresh, high-accuracy GPS fix. Resolves null on failure/denial.
-function getGPSPosition(timeoutMs = 10000): Promise<{ lat: number; lng: number } | null> {
+// Request a GPS fix. maximumAge lets callers trade staleness for speed.
+function getGPSPosition(timeoutMs = 7000, maximumAge = 0): Promise<{ lat: number; lng: number } | null> {
   return new Promise(resolve => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) { resolve(null); return; }
     navigator.geolocation.getCurrentPosition(
       p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
       () => resolve(null),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: timeoutMs },
+      { enableHighAccuracy: true, maximumAge, timeout: timeoutMs },
     );
   });
 }
@@ -113,6 +128,9 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const ttsVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const satelliteLayerAddedRef = useRef(false);
 
+  // Pre-fetch GPS immediately when the map mounts — runs in parallel with tile loading.
+  const prefetchedGPSRef = useRef<Promise<{ lat: number; lng: number } | null> | null>(null);
+
   const [satellite, setSatellite] = useState(false);
   const [theme, setTheme] = useState<NavTheme>(DEFAULT_THEME);
   const [themePickerOpen, setThemePickerOpen] = useState(false);
@@ -125,6 +143,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const [nextStep, setNextStep] = useState<string>('');
   const [routing, setRouting] = useState(false);
   const [routeError, setRouteError] = useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
 
   // Restore saved theme
   useEffect(() => {
@@ -189,14 +208,17 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   // ── Init map ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    // Kick off GPS immediately — runs in parallel while map tiles load.
+    // First try a cached fix (fast), then fall back to fresh fix inside buildRoute.
+    prefetchedGPSRef.current = getGPSPosition(7000, 5000);
     const center: [number, number] = userLocation
       ? [userLocation.lng, userLocation.lat]
       : (posts[0]?.location ? [posts[0].location!.lng, posts[0].location!.lat] : [16.37, 48.21]);
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      // OpenFreeMap liberty: full vector style with street names, POIs, buildings
-      style: OFMAP_STYLE,
+      // Inline raster style: no external JSON to fetch — loads immediately.
+      style: MAP_STYLE,
       center,
       zoom: 13,
       attributionControl: { compact: true },
@@ -204,7 +226,12 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
     mapRef.current = map;
 
+    // Safety: force-clear the loading overlay after 8s in case load event misfires
+    const loadTimeout = setTimeout(() => setMapLoaded(true), 8000);
+    map.on('error', () => setMapLoaded(true));
     map.on('load', () => {
+      clearTimeout(loadTimeout);
+      setMapLoaded(true);
       // Add event-pin markers near the user/target
       const anchor = userLocation ?? (initialTarget?.location ?? posts[0]?.location);
       const valid = posts.filter(p => p.location && Number.isFinite(p.location.lat) && Number.isFinite(p.location.lng));
@@ -234,6 +261,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     });
 
     return () => {
+      clearTimeout(loadTimeout);
       if (watchIdRef.current !== null) navigator.geolocation?.clearWatch(watchIdRef.current);
       markersRef.current.forEach(m => m.remove());
       markersRef.current = [];
@@ -271,7 +299,8 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     }
   }, [theme]);
 
-  // Satellite toggle — overlay Esri imagery below vector labels
+  // Satellite toggle — overlay Esri imagery above the street raster.
+  // Route line layers are added later and will naturally sit on top.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -281,15 +310,21 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
           if (!map.getSource('satellite')) {
             map.addSource('satellite', { type: 'raster', tiles: SATELLITE_TILES, tileSize: 256 });
           }
-          // Insert below the first symbol (label) layer so street names stay visible
-          const firstSymbol = map.getStyle().layers?.find(l => l.type === 'symbol')?.id;
-          map.addLayer({ id: 'satellite-layer', type: 'raster', source: 'satellite', paint: { 'raster-opacity': 0.85 } }, firstSymbol);
+          // Insert above the base street tiles but below any route layers
+          const firstRoute = map.getLayer('route-glow') ? 'route-glow' : undefined;
+          map.addLayer({ id: 'satellite-layer', type: 'raster', source: 'satellite',
+            paint: { 'raster-opacity': 0.88 } }, firstRoute);
           satelliteLayerAddedRef.current = true;
         } else {
           map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
         }
-      } else if (satelliteLayerAddedRef.current && map.getLayer('satellite-layer')) {
-        map.setLayoutProperty('satellite-layer', 'visibility', 'none');
+        // Dim base map so satellite dominates but roads stay faintly visible
+        if (map.getLayer('carto-base')) map.setPaintProperty('carto-base', 'raster-opacity', 0.15);
+      } else {
+        if (satelliteLayerAddedRef.current && map.getLayer('satellite-layer')) {
+          map.setLayoutProperty('satellite-layer', 'visibility', 'none');
+        }
+        if (map.getLayer('carto-base')) map.setPaintProperty('carto-base', 'raster-opacity', 1);
       }
     };
     if (map.isStyleLoaded()) apply(); else map.once('load', apply);
@@ -394,9 +429,13 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     setRouting(true);
     setNextStep('Getting your location…');
 
-    // Fresh GPS first — no cached position (maximumAge: 0). This is what makes
-    // directions differ correctly between Baden, Bad Vöslau, Vienna, etc.
-    const gps = await getGPSPosition(10000);
+    // Use pre-fetched GPS if available (kicked off when map mounted, in parallel
+    // with tile loading), then fall back to a fresh fix, then to the city center.
+    const gps = prefetchedGPSRef.current
+      ? await prefetchedGPSRef.current
+      : await getGPSPosition(7000, 0);
+    // Clear the pre-fetched promise so subsequent route rebuilds get a fresh fix.
+    prefetchedGPSRef.current = null;
     const origin = gps ?? userLocation;
 
     if (!origin) {
@@ -481,6 +520,25 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   return (
     <div className="fixed inset-0 z-50" style={{ background: '#0a0a0f' }}>
       <div ref={containerRef} className="absolute inset-0" />
+
+      {/* Map loading overlay — hidden once tiles are ready */}
+      {!mapLoaded && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 pointer-events-none"
+          style={{ background: '#0a0a0f', zIndex: 10 }}>
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+            style={{ background: theme.gradient, boxShadow: `0 0 32px ${theme.accent}66` }}>
+            <Navigation size={26} color="#fff" />
+          </div>
+          <div className="flex flex-col items-center gap-1.5">
+            <div className="flex gap-1.5">
+              {[0, 1, 2].map(i => (
+                <div key={i} className="w-2 h-2 rounded-full animate-bounce" style={{ background: theme.accent, animationDelay: `${i * 0.15}s` }} />
+              ))}
+            </div>
+            <p className="text-xs font-medium" style={{ color: '#666677' }}>Loading map…</p>
+          </div>
+        </div>
+      )}
 
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-12 pb-3 pointer-events-none">
