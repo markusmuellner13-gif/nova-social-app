@@ -84,8 +84,9 @@ export async function POST(request: NextRequest) {
 
   // No DB match and no LLM key → still give a useful, honest answer for free.
   if (!apiKey) {
+    const cityHint = resolvedCity ? ` in ${resolvedCity}` : '';
     return NextResponse.json({
-      reply: `I couldn't find anything matching that ${resolvedCity ? `in ${resolvedCity}` : 'near you'} in our live listings just yet. Try a broader question like "what's on this weekend?" or "live music near me", or open the Events tab to browse everything happening locally! 🎉`,
+      reply: `Our live listings${cityHint} are still growing — I don't have a match for that yet. Try browsing the **Events tab** for what's on nearby, or ask me something like:\n• "Best rooftop bars${cityHint}?"\n• "Any markets this weekend?"\n• "Live music spots${cityHint}?" 🎉`,
       source: 'nova_brain',
     });
   }

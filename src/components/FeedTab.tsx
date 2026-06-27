@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Compass, Sparkles, RefreshCw, ChevronDown, MapPin, Loader2, SlidersHorizontal, Bell } from 'lucide-react';
+import { Compass, Sparkles, RefreshCw, ChevronDown, MapPin, Loader2, SlidersHorizontal, Bell, X } from 'lucide-react';
 import { MOCK_POSTS, SPONSORED_POSTS } from '@/data/mockData';
 import { Category, Post } from '@/types';
 import { sortFeed, getTopCategories } from '@/lib/aiEngine';
@@ -134,6 +134,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   const [injectedPosts, setInjectedPosts] = useState<Post[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [partnerCatFilter, setPartnerCatFilter] = useState<Category | null>(null);
+  const [locationBannerDismissed, setLocationBannerDismissed] = useState(false);
   const [touchStart, setTouchStart] = useState<number | null>(null);
   const [pullDistance, setPullDistance] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -566,30 +567,40 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          {/* Enable-location banner — shown until we know the user's city */}
-          {!hasCity && (
-            <div className="px-4 py-3" style={{ borderBottom: '1px solid #1a1a24' }}>
-              <div className="rounded-2xl p-4" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.15), rgba(236,72,153,0.12))', border: '1px solid rgba(139,92,246,0.25)' }}>
-                <div className="flex items-center gap-2 mb-1">
-                  <MapPin size={15} style={{ color: '#c4b5fd' }} />
-                  <span className="text-sm font-bold text-white">{t.feed.enableLocationTitle}</span>
+          {/* Enable-location banner — shown until we know the user's city or dismissed */}
+          <AnimatePresence>
+            {!hasCity && !locationBannerDismissed && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="px-4 py-3 overflow-hidden"
+                style={{ borderBottom: '1px solid #1a1a24' }}
+              >
+                <div className="rounded-2xl p-3" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.12), rgba(236,72,153,0.08))', border: '1px solid rgba(139,92,246,0.2)' }}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <MapPin size={13} style={{ color: '#c4b5fd' }} />
+                    <span className="text-xs font-bold text-white flex-1">{t.feed.enableLocationTitle}</span>
+                    <button onClick={() => setLocationBannerDismissed(true)} style={{ color: '#555566' }}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <motion.button whileTap={{ scale: 0.95 }} onClick={onOpenLocationPrompt}
+                      className="flex-1 py-2 rounded-xl text-xs font-bold text-white"
+                      style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
+                      📍 {t.settings.locationOff}
+                    </motion.button>
+                    <motion.button whileTap={{ scale: 0.95 }} onClick={onOpenCityExplorer}
+                      className="flex-1 py-2 rounded-xl text-xs font-bold"
+                      style={{ background: '#1a1a24', color: '#c4b5fd', border: '1px solid #2a2a38' }}>
+                      🏙️ {t.feed.chooseCity}
+                    </motion.button>
+                  </div>
                 </div>
-                <p className="text-xs mb-3" style={{ color: '#a3a3b5' }}>{t.feed.enableLocationDesc}</p>
-                <div className="flex gap-2">
-                  <motion.button whileTap={{ scale: 0.95 }} onClick={onOpenLocationPrompt}
-                    className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white"
-                    style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
-                    📍 {t.settings.locationOff}
-                  </motion.button>
-                  <motion.button whileTap={{ scale: 0.95 }} onClick={onOpenCityExplorer}
-                    className="flex-1 py-2.5 rounded-xl text-xs font-bold"
-                    style={{ background: '#1a1a24', color: '#c4b5fd', border: '1px solid #2a2a38' }}>
-                    🏙️ {t.feed.chooseCity}
-                  </motion.button>
-                </div>
-              </div>
-            </div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Category chips — discover mode only */}
           {activeMainTab === 'discover' && (

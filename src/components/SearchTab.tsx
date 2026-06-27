@@ -290,7 +290,7 @@ export default function SearchTab() {
                   {activeCategory && ` in ${categories.find(c => c.id === activeCategory)?.label}`}
                   {query && ` for "${query}"`}
                 </p>
-                <PostGrid posts={filteredPosts} onPostOpen={setSelectedPost} />
+                <PostGrid posts={filteredPosts} onPostOpen={setSelectedPost} query={query} onSuggestion={s => { setQuery(s); }} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -323,13 +323,31 @@ export default function SearchTab() {
   );
 }
 
-function PostGrid({ posts, onPostOpen }: { posts: Post[]; onPostOpen: (p: Post) => void }) {
+const SEARCH_SUGGESTIONS = [
+  '🎵 Live music', '🍕 Food markets', '🎨 Art exhibitions',
+  '🏃 Fitness events', '🎉 Weekend parties', '🍸 Rooftop bars',
+  '🎭 Theatre shows', '🌿 Outdoor activities',
+];
+
+function PostGrid({ posts, onPostOpen, query, onSuggestion }: { posts: Post[]; onPostOpen: (p: Post) => void; query?: string; onSuggestion?: (s: string) => void }) {
   if (posts.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 px-4">
+      <div className="flex flex-col items-center justify-center py-12 px-4">
         <div className="text-4xl mb-3">🔍</div>
-        <p className="text-sm font-semibold text-white">No posts found</p>
-        <p className="text-xs mt-1" style={{ color: '#888899' }}>Try a different search or category</p>
+        <p className="text-sm font-semibold text-white mb-1">No results{query ? ` for "${query}"` : ''}</p>
+        <p className="text-xs mb-6" style={{ color: '#888899' }}>Try one of these instead</p>
+        <div className="flex flex-wrap gap-2 justify-center">
+          {SEARCH_SUGGESTIONS.map(s => (
+            <button
+              key={s}
+              onClick={() => onSuggestion?.(s.replace(/^[^\s]+\s/, ''))}
+              className="px-3 py-1.5 rounded-full text-xs font-semibold"
+              style={{ background: '#1a1a24', color: '#c4b5fd', border: '1px solid #2a2a38' }}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
       </div>
     );
   }

@@ -435,7 +435,7 @@ export const MOCK_STORIES: Story[] = [
 export const CURRENT_USER = {
   id: 'current',
   name: 'You',
-  username: 'your.nova',
+  username: 'nova.user',
   avatar: 'https://i.pravatar.cc/150?img=33',
   bio: '✨ Discovering the world with Nova',
   followers: 1247,

@@ -8,17 +8,22 @@ import { Category, UserPreferences } from '@/types';
 import { DEFAULT_PREFERENCES } from '@/data/mockData';
 
 const INTEREST_OPTIONS: { id: Category; emoji: string; label: string; color: string }[] = [
-  { id: 'travel',    emoji: '✈️', label: 'Travel',    color: '#3b82f6' },
-  { id: 'food',      emoji: '🍕', label: 'Food',      color: '#f97316' },
-  { id: 'fashion',   emoji: '👗', label: 'Fashion',   color: '#ec4899' },
-  { id: 'sports',    emoji: '⚽', label: 'Sports',    color: '#22c55e' },
-  { id: 'art',       emoji: '🎨', label: 'Art',       color: '#a855f7' },
-  { id: 'tech',      emoji: '💻', label: 'Tech',      color: '#06b6d4' },
-  { id: 'fitness',   emoji: '💪', label: 'Fitness',   color: '#ef4444' },
-  { id: 'music',     emoji: '🎵', label: 'Music',     color: '#8b5cf6' },
-  { id: 'pets',      emoji: '🐾', label: 'Pets',      color: '#f59e0b' },
-  { id: 'lifestyle', emoji: '🌟', label: 'Lifestyle', color: '#10b981' },
-  { id: 'events',    emoji: '🎉', label: 'Events',    color: '#f43f5e' },
+  { id: 'travel',      emoji: '✈️', label: 'Travel',      color: '#3b82f6' },
+  { id: 'food',        emoji: '🍕', label: 'Food',        color: '#f97316' },
+  { id: 'music',       emoji: '🎵', label: 'Music',       color: '#8b5cf6' },
+  { id: 'events',      emoji: '🎉', label: 'Events',      color: '#f43f5e' },
+  { id: 'art',         emoji: '🎨', label: 'Art',         color: '#a855f7' },
+  { id: 'fitness',     emoji: '💪', label: 'Fitness',     color: '#ef4444' },
+  { id: 'outdoors',    emoji: '🏞️', label: 'Outdoors',   color: '#22c55e' },
+  { id: 'venues',      emoji: '🍸', label: 'Nightlife',   color: '#ec4899' },
+  { id: 'sports',      emoji: '⚽', label: 'Sports',      color: '#16a34a' },
+  { id: 'fashion',     emoji: '👗', label: 'Fashion',     color: '#db2777' },
+  { id: 'tech',        emoji: '💻', label: 'Tech',        color: '#06b6d4' },
+  { id: 'shops',       emoji: '🛍️', label: 'Shopping',   color: '#f59e0b' },
+  { id: 'pets',        emoji: '🐾', label: 'Pets',        color: '#84cc16' },
+  { id: 'sightseeing', emoji: '🏛️', label: 'Culture',    color: '#0ea5e9' },
+  { id: 'community',   emoji: '🤝', label: 'Community',  color: '#14b8a6' },
+  { id: 'lifestyle',   emoji: '🌟', label: 'Lifestyle',  color: '#10b981' },
 ];
 
 export default function Onboarding() {
