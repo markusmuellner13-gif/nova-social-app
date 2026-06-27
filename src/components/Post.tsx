@@ -294,7 +294,7 @@ export default function Post({ post, showHint = false }: Props) {
                   onLoad={i === 0 ? () => setImgLoaded(true) : undefined}
                   onError={(e) => {
                     const el = e.currentTarget;
-                    if (el.src !== fallbackImage) { el.src = fallbackImage; }
+                    if (el.src !== fallbackImage) { el.src = fallbackImage; if (i === 0) setImgLoaded(true); }
                     else if (i === 0) { setImgLoaded(true); }
                   }}
                 />
@@ -307,11 +307,8 @@ export default function Post({ post, showHint = false }: Props) {
               className="w-full h-full object-cover"
               onLoad={() => setImgLoaded(true)}
               onError={(e) => {
-                // Some sources (venue og:images, third-party CDNs) refuse
-                // hotlinking or 404 — swap in a deterministic fallback photo
-                // instead of leaving a blank frame
                 const el = e.currentTarget;
-                if (el.src !== fallbackImage) { el.src = fallbackImage; }
+                if (el.src !== fallbackImage) { el.src = fallbackImage; setImgLoaded(true); }
                 else { setImgLoaded(true); }
               }}
               onDoubleClick={handleDoubleTap}
@@ -359,8 +356,9 @@ export default function Post({ post, showHint = false }: Props) {
 
           <AnimatePresence>
             {showHint && !hintDismissed && (
-              <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                transition={{ delay: 1.5, duration: 0.4 }}
+              <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+                transition={{ delay: 2, duration: 0.4 }}
+                onAnimationComplete={() => { setTimeout(() => setHintDismissed(true), 3000); }}
                 className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full text-xs font-semibold pointer-events-none"
                 style={{ background: 'rgba(0,0,0,0.7)', color: 'white', backdropFilter: 'blur(8px)', whiteSpace: 'nowrap' }}>
                 {t.common.hintDoubleTap}

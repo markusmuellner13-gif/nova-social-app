@@ -147,7 +147,13 @@ export default function GroupsTab({ onOpenAuth }: Props) {
 
           {/* Preview group cards */}
           <div className="flex flex-col gap-3 mb-6 relative">
-            <div className="absolute inset-0 z-10 rounded-2xl" style={{ backdropFilter: 'blur(3px)', background: 'rgba(10,10,15,0.35)' }} />
+            <div className="absolute inset-0 z-10 rounded-2xl flex flex-col items-center justify-center gap-2" style={{ backdropFilter: 'blur(3px)', background: 'rgba(10,10,15,0.5)' }}>
+              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: 'rgba(139,92,246,0.2)', border: '1px solid rgba(139,92,246,0.4)' }}>
+                <LogIn size={18} style={{ color: '#a78bfa' }} />
+              </div>
+              <p className="text-sm font-bold text-white">Sign in to see your groups</p>
+              <p className="text-xs" style={{ color: '#888899' }}>Create and join groups with friends</p>
+            </div>
             {PREVIEW_GROUPS.map(g => (
               <div key={g.name} className="flex items-center gap-3 p-4 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
                 <div className="w-11 h-11 rounded-xl flex items-center justify-center text-xl flex-shrink-0" style={{ background: 'rgba(139,92,246,0.15)' }}>
@@ -172,9 +178,11 @@ export default function GroupsTab({ onOpenAuth }: Props) {
               <LogIn size={16} /> Sign in to create your group
             </motion.button>
           ) : (
-            <p className="text-xs text-center px-4" style={{ color: '#555566' }}>
-              Enable accounts by adding Supabase env vars to Vercel.
-            </p>
+            <motion.button whileTap={{ scale: 0.95 }} onClick={onOpenAuth}
+              className="flex items-center justify-center gap-2 w-full py-4 rounded-2xl text-sm font-bold text-white"
+              style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', boxShadow: '0 4px 20px rgba(139,92,246,0.4)' }}>
+              <LogIn size={16} /> Sign in to create your group
+            </motion.button>
           )}
         </div>
       </div>
