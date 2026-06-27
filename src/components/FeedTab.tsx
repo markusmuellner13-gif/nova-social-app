@@ -213,11 +213,11 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   // Curated pool for discover mode — user-created posts always; generic mock
   // posts only as a fallback when no location is known yet
   const curatedPool = useMemo(() => {
-    let pool = hasCity ? [] : [...MOCK_POSTS];
+    let pool = (hasCity && aiPosts.length > 0) ? [] : [...MOCK_POSTS];
     if (activeChipCategory) pool = pool.filter(p => p.category === activeChipCategory);
     if (sortMode === 'recent') return [...pool].sort((a, b) => b.timestamp - a.timestamp);
     return sortFeed(pool, preferences, aiProfile);
-  }, [preferences, aiProfile, activeChipCategory, sortMode, hasCity]);
+  }, [preferences, aiProfile, activeChipCategory, sortMode, hasCity, aiPosts.length]);
 
   // Events / Sport / Sightseeing tabs show ONLY real location-based data —
   // never demo posts pretending to be local events
@@ -447,7 +447,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
           </div>
 
           <div className="flex items-center gap-2">
-            {location?.enabled ? (
+            {location?.city ? (
               <motion.button whileTap={{ scale: 0.92 }} onClick={onOpenCityExplorer}
                 className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
                 style={{ background: 'rgba(139,92,246,0.1)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.2)' }}>
