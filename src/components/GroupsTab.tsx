@@ -123,27 +123,53 @@ export default function GroupsTab({ onOpenAuth }: Props) {
 
   // Not logged in state
   if (!user) {
+    const PREVIEW_GROUPS = [
+      { name: '🎵 Music Crew', members: 6, events: 3, desc: 'Concerts & festivals' },
+      { name: '🍕 Food Gang', members: 4, events: 5, desc: 'Restaurants & markets' },
+      { name: '🎨 Art Lovers', members: 8, events: 2, desc: 'Galleries & exhibitions' },
+    ];
     return (
       <div className="flex flex-col h-full">
         <div className="glass flex items-center gap-2 px-4 flex-shrink-0" style={{ height: 52, borderBottom: '1px solid #1e1e2a' }}>
           <Users size={20} style={{ color: '#8b5cf6' }} />
           <h2 className="text-base font-bold text-white">Groups</h2>
         </div>
-        <div className="flex-1 flex flex-col items-center justify-center px-8 gap-5">
-          <div className="w-20 h-20 rounded-3xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
-            <Users size={36} color="white" />
-          </div>
-          <div className="text-center">
-            <p className="text-lg font-bold text-white mb-2">Plan events with friends</p>
+        <div className="flex-1 overflow-y-auto px-4 pt-5 pb-10">
+          <div className="text-center mb-6">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-3" style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
+              <Users size={28} color="white" />
+            </div>
+            <p className="text-lg font-bold text-white mb-1">Plan events with friends</p>
             <p className="text-sm leading-relaxed" style={{ color: '#888899' }}>
-              Create a group, invite friends with a code, and build a shared wishlist of events you want to attend together.
+              Create a group, invite with a code, and build a shared wishlist of events to attend together.
             </p>
           </div>
+
+          {/* Preview group cards */}
+          <div className="flex flex-col gap-3 mb-6 relative">
+            <div className="absolute inset-0 z-10 rounded-2xl" style={{ backdropFilter: 'blur(3px)', background: 'rgba(10,10,15,0.35)' }} />
+            {PREVIEW_GROUPS.map(g => (
+              <div key={g.name} className="flex items-center gap-3 p-4 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center text-xl flex-shrink-0" style={{ background: 'rgba(139,92,246,0.15)' }}>
+                  {g.name.slice(0, 2)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-white truncate">{g.name}</p>
+                  <p className="text-xs" style={{ color: '#666677' }}>{g.desc} · {g.events} events saved</p>
+                </div>
+                <div className="flex items-center gap-1 px-2 py-1 rounded-full" style={{ background: 'rgba(139,92,246,0.12)' }}>
+                  <Users size={11} style={{ color: '#a78bfa' }} />
+                  <span className="text-xs font-semibold" style={{ color: '#a78bfa' }}>{g.members}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
           {isSupabaseEnabled ? (
             <motion.button whileTap={{ scale: 0.95 }} onClick={onOpenAuth}
-              className="flex items-center gap-2 px-6 py-3.5 rounded-2xl text-sm font-bold text-white"
-              style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
-              <LogIn size={16} /> Sign in to get started
+              className="flex items-center justify-center gap-2 w-full py-4 rounded-2xl text-sm font-bold text-white"
+              style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', boxShadow: '0 4px 20px rgba(139,92,246,0.4)' }}>
+              <LogIn size={16} /> Sign in to create your group
             </motion.button>
           ) : (
             <p className="text-xs text-center px-4" style={{ color: '#555566' }}>

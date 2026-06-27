@@ -33,11 +33,14 @@ const CATEGORY_EMOJIS: { id: Category; emoji: string }[] = [
   { id: 'events',    emoji: '🎉' },
 ];
 
-const TRENDING = [
-  '#wanderlust', '#foodie', '#ootd', '#coachella2026',
-  '#glastonbury', '#fitness', '#techlife', '#artoftheday',
-  '#musicvibes', '#catsofnova', '#wwdc2026', '#eventseason',
-];
+function buildTrending(posts: Post[]): string[] {
+  const freq: Record<string, number> = {};
+  posts.forEach(p => p.hashtags.forEach(h => { freq[h] = (freq[h] ?? 0) + 1; }));
+  return Object.entries(freq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([tag]) => tag);
+}
 
 export default function SearchTab() {
   const { t } = useLanguage();
@@ -110,6 +113,12 @@ export default function SearchTab() {
 
   // Search pool: prefer real local posts, fall back to global mock posts
   const searchPool = localHotPosts.length > 0 ? localHotPosts : MOCK_POSTS;
+
+  // Trending tags derived from actual post data — local posts first, then global
+  const trending = useMemo(
+    () => buildTrending(localHotPosts.length > 0 ? localHotPosts : MOCK_POSTS),
+    [localHotPosts]
+  );
 
   const filteredPosts = useMemo(() => {
     let results = searchPool;
@@ -235,7 +244,7 @@ export default function SearchTab() {
                     <h3 className="text-sm font-semibold text-white">Trending Now</h3>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {TRENDING.map((tag, i) => (
+                    {trending.map((tag, i) => (
                       <motion.button
                         key={tag}
                         whileTap={{ scale: 0.95 }}
