@@ -44,11 +44,26 @@ const CATEGORY_EMOJI: Record<Category, string> = {
   outdoors: '🏞️',
 };
 
-// OpenFreeMap provides free vector tiles with full street labels — no API key.
-// The liberty style is a clean, well-labelled street map.
-const OFMAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+// CartoDB Voyager raster tiles — inline style (no external JSON to fetch),
+// labels baked into tiles, very fast CDN, already in CSP. Loads near-instantly
+// on any connection, unlike vector styles that need a large JSON + fonts + sprites.
+const CARTO_TILES = [
+  'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+  'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+  'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+  'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+];
 
-// Esri satellite imagery overlaid on top of vector labels (satellite mode).
+const MAP_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    carto: { type: 'raster', tiles: CARTO_TILES, tileSize: 256, maxzoom: 19,
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © <a href="https://carto.com/attributions">CARTO</a>' },
+  },
+  layers: [{ id: 'carto-base', type: 'raster', source: 'carto' }],
+};
+
+// Esri satellite imagery overlaid on top of the street map (satellite mode).
 const SATELLITE_TILES = ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'];
 
 interface RouteStep {
@@ -202,8 +217,8 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      // OpenFreeMap liberty: full vector style with street names, POIs, buildings
-      style: OFMAP_STYLE,
+      // Inline raster style: no external JSON to fetch — loads immediately.
+      style: MAP_STYLE,
       center,
       zoom: 13,
       attributionControl: { compact: true },
@@ -211,7 +226,11 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
     mapRef.current = map;
 
+    // Safety: force-clear the loading overlay after 8s in case load event misfires
+    const loadTimeout = setTimeout(() => setMapLoaded(true), 8000);
+    map.on('error', () => setMapLoaded(true));
     map.on('load', () => {
+      clearTimeout(loadTimeout);
       setMapLoaded(true);
       // Add event-pin markers near the user/target
       const anchor = userLocation ?? (initialTarget?.location ?? posts[0]?.location);
@@ -242,6 +261,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     });
 
     return () => {
+      clearTimeout(loadTimeout);
       if (watchIdRef.current !== null) navigator.geolocation?.clearWatch(watchIdRef.current);
       markersRef.current.forEach(m => m.remove());
       markersRef.current = [];
@@ -279,7 +299,8 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     }
   }, [theme]);
 
-  // Satellite toggle — overlay Esri imagery below vector labels
+  // Satellite toggle — overlay Esri imagery above the street raster.
+  // Route line layers are added later and will naturally sit on top.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -289,15 +310,21 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
           if (!map.getSource('satellite')) {
             map.addSource('satellite', { type: 'raster', tiles: SATELLITE_TILES, tileSize: 256 });
           }
-          // Insert below the first symbol (label) layer so street names stay visible
-          const firstSymbol = map.getStyle().layers?.find(l => l.type === 'symbol')?.id;
-          map.addLayer({ id: 'satellite-layer', type: 'raster', source: 'satellite', paint: { 'raster-opacity': 0.85 } }, firstSymbol);
+          // Insert above the base street tiles but below any route layers
+          const firstRoute = map.getLayer('route-glow') ? 'route-glow' : undefined;
+          map.addLayer({ id: 'satellite-layer', type: 'raster', source: 'satellite',
+            paint: { 'raster-opacity': 0.88 } }, firstRoute);
           satelliteLayerAddedRef.current = true;
         } else {
           map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
         }
-      } else if (satelliteLayerAddedRef.current && map.getLayer('satellite-layer')) {
-        map.setLayoutProperty('satellite-layer', 'visibility', 'none');
+        // Dim base map so satellite dominates but roads stay faintly visible
+        if (map.getLayer('carto-base')) map.setPaintProperty('carto-base', 'raster-opacity', 0.15);
+      } else {
+        if (satelliteLayerAddedRef.current && map.getLayer('satellite-layer')) {
+          map.setLayoutProperty('satellite-layer', 'visibility', 'none');
+        }
+        if (map.getLayer('carto-base')) map.setPaintProperty('carto-base', 'raster-opacity', 1);
       }
     };
     if (map.isStyleLoaded()) apply(); else map.once('load', apply);
