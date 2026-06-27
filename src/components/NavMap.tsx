@@ -143,7 +143,6 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const [nextStep, setNextStep] = useState<string>('');
   const [routing, setRouting] = useState(false);
   const [routeError, setRouteError] = useState(false);
-  const [mapLoaded, setMapLoaded] = useState(false);
 
   // Restore saved theme
   useEffect(() => {
@@ -226,12 +225,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
     mapRef.current = map;
 
-    // Safety: force-clear the loading overlay after 8s in case load event misfires
-    const loadTimeout = setTimeout(() => setMapLoaded(true), 8000);
-    map.on('error', () => setMapLoaded(true));
     map.on('load', () => {
-      clearTimeout(loadTimeout);
-      setMapLoaded(true);
       // Add event-pin markers near the user/target
       const anchor = userLocation ?? (initialTarget?.location ?? posts[0]?.location);
       const valid = posts.filter(p => p.location && Number.isFinite(p.location.lat) && Number.isFinite(p.location.lng));
@@ -261,7 +255,6 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     });
 
     return () => {
-      clearTimeout(loadTimeout);
       if (watchIdRef.current !== null) navigator.geolocation?.clearWatch(watchIdRef.current);
       markersRef.current.forEach(m => m.remove());
       markersRef.current = [];
@@ -521,25 +514,6 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     <div className="fixed inset-0 z-50" style={{ background: '#0a0a0f' }}>
       <div ref={containerRef} className="absolute inset-0" />
 
-      {/* Map loading overlay — hidden once tiles are ready */}
-      {!mapLoaded && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 pointer-events-none"
-          style={{ background: '#0a0a0f', zIndex: 10 }}>
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
-            style={{ background: theme.gradient, boxShadow: `0 0 32px ${theme.accent}66` }}>
-            <Navigation size={26} color="#fff" />
-          </div>
-          <div className="flex flex-col items-center gap-1.5">
-            <div className="flex gap-1.5">
-              {[0, 1, 2].map(i => (
-                <div key={i} className="w-2 h-2 rounded-full animate-bounce" style={{ background: theme.accent, animationDelay: `${i * 0.15}s` }} />
-              ))}
-            </div>
-            <p className="text-xs font-medium" style={{ color: '#666677' }}>Loading map…</p>
-          </div>
-        </div>
-      )}
-
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-12 pb-3 pointer-events-none">
         <button onClick={onClose}
@@ -666,6 +640,25 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
                 </button>
               )}
             </div>
+
+            {/* Open in native maps for quality voice navigation */}
+            {target?.location && (
+              <div className="flex gap-2 mt-2">
+                <a
+                  href={`https://www.google.com/maps/dir/?api=1&destination=${target.location.lat},${target.location.lng}&travelmode=${profile === 'foot' ? 'walking' : 'driving'}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="flex-1 h-9 rounded-xl flex items-center justify-center gap-1.5 text-xs font-bold text-white"
+                  style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}>
+                  🗺️ Google Maps
+                </a>
+                <a
+                  href={`maps://maps.apple.com/?daddr=${target.location.lat},${target.location.lng}&dirflg=${profile === 'foot' ? 'w' : 'd'}`}
+                  className="flex-1 h-9 rounded-xl flex items-center justify-center gap-1.5 text-xs font-bold text-white"
+                  style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}>
+                  🍎 Apple Maps
+                </a>
+              </div>
+            )}
 
             {/* Step list preview */}
             {steps.length > 0 && !navigating && (
