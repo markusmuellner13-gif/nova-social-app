@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronRight, Sparkles, CheckCircle2 } from 'lucide-react';
+import { ChevronRight, Sparkles, CheckCircle2, MapPin, Loader2 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Category, UserPreferences } from '@/types';
 import { DEFAULT_PREFERENCES } from '@/data/mockData';
@@ -26,12 +26,18 @@ const INTEREST_OPTIONS: { id: Category; emoji: string; label: string; color: str
   { id: 'lifestyle',   emoji: '🌟', label: 'Lifestyle',  color: '#10b981' },
 ];
 
-export default function Onboarding() {
+interface Props {
+  onRequestLocation?: () => Promise<void>;
+  locationGranted?: boolean;
+}
+
+export default function Onboarding({ onRequestLocation, locationGranted = false }: Props) {
   const { completeOnboarding } = useApp();
-  const [screen, setScreen] = useState<0 | 1 | 2>(0);
+  const [screen, setScreen] = useState<0 | 1 | 2 | 3>(0);
   const [selected, setSelected] = useState<Set<Category>>(new Set());
   // Italy (Art. 8 GDPR / D.Lgs. 101/2018) sets the digital-consent age at 14.
   const [ageConfirmed, setAgeConfirmed] = useState(false);
+  const [locRequesting, setLocRequesting] = useState(false);
 
   function toggleInterest(cat: Category) {
     setSelected(prev => {
@@ -42,11 +48,22 @@ export default function Onboarding() {
     });
   }
 
+  async function handleRequestLocation() {
+    if (!onRequestLocation || locRequesting) return;
+    setLocRequesting(true);
+    await onRequestLocation().catch(() => { /* denied is OK */ });
+    setLocRequesting(false);
+  }
+
   function handleContinue() {
     if (screen === 0) { if (!ageConfirmed) return; setScreen(1); return; }
     if (screen === 1) {
       if (selected.size < 3) return;
       setScreen(2);
+      return;
+    }
+    if (screen === 2) {
+      setScreen(3);
       setTimeout(() => {
         const prefs = { ...DEFAULT_PREFERENCES } as Record<string, number>;
         selected.forEach(cat => { prefs[cat] = 90; });
@@ -239,8 +256,98 @@ export default function Onboarding() {
           </motion.div>
         )}
 
-        {/* Screen 2: Done */}
+        {/* Screen 2: Location permission */}
         {screen === 2 && (
+          <motion.div
+            key="location"
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -30 }}
+            transition={{ duration: 0.4 }}
+            className="flex flex-col items-center px-8 text-center w-full"
+          >
+            <motion.div
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.1, duration: 0.6, type: 'spring', stiffness: 200 }}
+              className="w-20 h-20 rounded-3xl flex items-center justify-center mb-6 shadow-2xl"
+              style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}
+            >
+              <MapPin size={36} color="white" />
+            </motion.div>
+
+            <motion.h2
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="text-2xl font-bold text-white mb-2"
+            >
+              Find what&apos;s near you
+            </motion.h2>
+
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.35 }}
+              className="text-sm leading-relaxed mb-6"
+              style={{ color: '#b0b0c8' }}
+            >
+              Allow Nova to use your location to fill your feed with events, venues, and things happening right around you — updated in real time.
+            </motion.p>
+
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5 }}
+              className="w-full space-y-3 mb-8"
+            >
+              {[
+                { icon: '📍', text: 'Events happening near you today' },
+                { icon: '🗺️', text: 'Local restaurants, venues & more' },
+                { icon: '🔔', text: 'Alerts for things starting nearby' },
+              ].map(({ icon, text }) => (
+                <div key={text} className="flex items-center gap-3 px-4 py-2.5 rounded-xl" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.15)' }}>
+                  <span style={{ fontSize: 18 }}>{icon}</span>
+                  <span className="text-sm font-medium text-left" style={{ color: '#c4b5fd' }}>{text}</span>
+                </div>
+              ))}
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.65 }}
+              className="w-full space-y-3"
+            >
+              {locationGranted ? (
+                <div className="w-full py-3.5 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold" style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', color: '#4ade80' }}>
+                  <CheckCircle2 size={18} /> Location enabled — your feed is personalised!
+                </div>
+              ) : (
+                <motion.button
+                  whileTap={{ scale: 0.97 }}
+                  onClick={handleRequestLocation}
+                  disabled={locRequesting || !onRequestLocation}
+                  className="w-full py-4 rounded-2xl text-base font-bold text-white flex items-center justify-center gap-2"
+                  style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', opacity: (locRequesting || !onRequestLocation) ? 0.7 : 1 }}
+                >
+                  {locRequesting ? <><Loader2 size={16} className="animate-spin" /> Detecting location…</> : '📍 Allow location access'}
+                </motion.button>
+              )}
+
+              <button
+                onClick={handleContinue}
+                className="w-full py-3 text-sm font-medium"
+                style={{ color: '#555566' }}
+              >
+                {locationGranted ? 'Continue →' : 'Skip for now'}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Screen 3: Done */}
+        {screen === 3 && (
           <motion.div
             key="done"
             initial={{ opacity: 0, scale: 0.8 }}
@@ -275,9 +382,9 @@ export default function Onboarding() {
       </AnimatePresence>
 
       {/* Progress dots */}
-      {screen < 2 && (
+      {screen < 3 && (
         <div className="absolute bottom-10 flex gap-2">
-          {[0, 1].map(i => (
+          {[0, 1, 2].map(i => (
             <div
               key={i}
               className="rounded-full transition-all"

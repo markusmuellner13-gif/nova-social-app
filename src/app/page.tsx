@@ -120,7 +120,7 @@ function AppShell() {
   }, []);
 
   if (!splashDone) return <SplashScreen onComplete={handleSplashComplete} />;
-  if (!state.hasOnboarded) return <Onboarding />;
+  if (!state.hasOnboarded) return <Onboarding onRequestLocation={requestLocation} locationGranted={permission === 'granted'} />;
 
   return (
     <div className="app-frame" style={{

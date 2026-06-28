@@ -341,7 +341,7 @@ export const RAW_MOCK_POSTS: Post[] = [
   },
   {
     id: 'p69', user: MOCK_USERS[11],
-    image: U('1506905925346-21bda4d32df4'),
+    image: U('1519501025264-65ba15a82390'),
     caption: 'The 20 most underrated cities in the world for 2026 — Tbilisi, Medellín, Porto, Chiang Mai, Tallinn. The places worth visiting before everyone else discovers them 🗺️',
     likes: 341000, comments: 14200, category: 'travel',
     hashtags: ['#travel', '#hiddengems', '#wanderlust', '#natgeo', '#explore'],
@@ -350,7 +350,7 @@ export const RAW_MOCK_POSTS: Post[] = [
   },
   {
     id: 'p70', user: MOCK_USERS[1],
-    image: U('1555396273-367ea4eb4db5'),
+    image: U('1559925393-8be0ec4767af'),
     caption: 'The world\'s 50 best restaurants 2026 — the full ranked list. Disfrutar, Alchemist, Mirazur, Noma 3.0 and the newcomers that shook up the global fine dining scene 🍽️🍷',
     likes: 98000, comments: 4100, category: 'food',
     hashtags: ['#food', '#restaurants', '#finedining', '#worlds50best', '#foodie'],
@@ -359,7 +359,7 @@ export const RAW_MOCK_POSTS: Post[] = [
   },
   {
     id: 'p71', user: MOCK_USERS[8],
-    image: U('1587300003388-59208cc962cb'),
+    image: U('1543466835-5d06c29be1e1'),
     caption: 'The most dog-friendly cities in the world — Amsterdam, Zurich, San Francisco, Melbourne, Stockholm. Off-leash parks, pet cafés, and vet access ranked 🐾🐕',
     likes: 54000, comments: 1900, category: 'pets',
     hashtags: ['#dogs', '#dogfriendly', '#pettravel', '#dogsofinstagram', '#petlife'],
@@ -368,7 +368,7 @@ export const RAW_MOCK_POSTS: Post[] = [
   },
   {
     id: 'p72', user: MOCK_USERS[2],
-    image: U('1574629810360-7efbbe195018'),
+    image: U('1431324155629-787776d6f5f6'),
     caption: 'UEFA Euro 2028 host cities confirmed — London, Rome, Madrid, Paris, Amsterdam, Warsaw. Stadium capacities, travel guides and what each city offers fans ⚽🔥',
     likes: 620000, comments: 28000, category: 'sports',
     hashtags: ['#euro2028', '#football', '#uefa', '#sport', '#soccer'],
