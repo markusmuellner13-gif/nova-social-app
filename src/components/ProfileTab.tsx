@@ -231,7 +231,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
     }
   }
 
-  const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? 'You';
+  const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? CURRENT_USER.username;
   const avatarUrl   = profile?.avatar_url ?? null;  // null = show gradient placeholder
 
   return (

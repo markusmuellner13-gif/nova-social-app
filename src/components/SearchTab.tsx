@@ -185,7 +185,8 @@ export default function SearchTab() {
           </div>
 
           {/* Category chips */}
-          <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
+          <div className="relative mt-3">
+          <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {categories.map(cat => {
               const isActive = activeCategory === cat.id;
               return (
@@ -205,6 +206,8 @@ export default function SearchTab() {
                 </motion.button>
               );
             })}
+          </div>
+          <div className="absolute right-0 top-0 bottom-1 w-8 pointer-events-none" style={{ background: 'linear-gradient(to right, transparent, #0a0a0f)' }} />
           </div>
         </div>
 
@@ -364,7 +367,8 @@ function PostGrid({ posts, onPostOpen, query, onSuggestion }: { posts: Post[]; o
           className="relative overflow-hidden"
           style={{ aspectRatio: '1', background: '#13131a' }}
         >
-          <img src={post.image} alt="" className="w-full h-full object-cover" loading="lazy" />
+          <img src={post.image} alt="" className="w-full h-full object-cover" loading="lazy"
+            onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0,32)}/400/400`; if (el.src !== fb) el.src = fb; }} />
           {post.isEvent && (
             <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: 'rgba(244,63,94,0.85)', color: 'white', fontSize: 9 }}>
               EVENT

@@ -6,6 +6,16 @@ import { Sparkles, Send, MapPin, Loader2 } from 'lucide-react';
 import { LocationState } from '@/types';
 import { apiUrl } from '@/lib/apiBase';
 
+function renderMarkdown(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
+}
+
 interface Message { role: 'user' | 'ai'; text: string }
 
 interface Props { location: LocationState | null }
@@ -109,7 +119,7 @@ export default function ChatTab({ location }: Props) {
                 whiteSpace: 'pre-line',
               }}
             >
-              {m.text}
+              {m.role === 'ai' ? renderMarkdown(m.text) : m.text}
             </div>
           </div>
         ))}
@@ -166,7 +176,7 @@ export default function ChatTab({ location }: Props) {
           onClick={() => send()}
           disabled={!input.trim() || loading}
           className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: input.trim() && !loading ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : '#1a1a24', opacity: input.trim() && !loading ? 1 : 0.5 }}
+          style={{ background: input.trim() && !loading ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : '#2a2a3a', opacity: input.trim() && !loading ? 1 : 0.65, border: input.trim() && !loading ? 'none' : '1px solid #3a3a4a' }}
         >
           <Send size={16} color="white" />
         </motion.button>

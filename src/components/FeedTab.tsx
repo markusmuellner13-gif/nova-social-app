@@ -213,11 +213,11 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   // Curated pool for discover mode — user-created posts always; generic mock
   // posts only as a fallback when no location is known yet
   const curatedPool = useMemo(() => {
-    let pool = (hasCity && aiPosts.length > 0) ? [] : [...MOCK_POSTS];
+    let pool = [...MOCK_POSTS];
     if (activeChipCategory) pool = pool.filter(p => p.category === activeChipCategory);
     if (sortMode === 'recent') return [...pool].sort((a, b) => b.timestamp - a.timestamp);
     return sortFeed(pool, preferences, aiProfile);
-  }, [preferences, aiProfile, activeChipCategory, sortMode, hasCity, aiPosts.length]);
+  }, [preferences, aiProfile, activeChipCategory, sortMode]);
 
   // Events / Sport / Sightseeing tabs show ONLY real location-based data —
   // never demo posts pretending to be local events
@@ -604,7 +604,8 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
 
           {/* Category chips — discover mode only */}
           {activeMainTab === 'discover' && (
-            <div className="flex gap-2 px-4 py-3 overflow-x-auto flex-shrink-0" style={{ borderBottom: '1px solid #1a1a24' }}>
+            <div className="relative flex-shrink-0" style={{ borderBottom: '1px solid #1a1a24' }}>
+            <div className="flex gap-2 px-4 py-3 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               {DISCOVER_CHIP_CATS.map(({ emoji, catKey, cat }) => {
                 const isActive = activeChipCategory === cat;
                 const label = t.categories[catKey as keyof typeof t.categories] ?? catKey;
@@ -631,6 +632,8 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
                   </motion.button>
                 );
               })}
+            </div>
+            <div className="absolute right-0 top-0 bottom-0 w-8 pointer-events-none" style={{ background: 'linear-gradient(to right, transparent, #0a0a0f)' }} />
             </div>
           )}
 
@@ -817,13 +820,25 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
           )}
 
           {/* Honest empty state — no invented events when sources are empty */}
-          {!isTabLoading && !aiLoading && activeMainTab !== 'partners' && mergedFeed.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 px-8 gap-3">
+          {!isTabLoading && !aiLoading && activeMainTab !== 'partners' && activeMainTab !== 'discover' && mergedFeed.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-16 px-8 gap-3">
               <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)' }}>
                 <MapPin size={26} style={{ color: '#a78bfa' }} />
               </div>
-              <p className="text-sm font-bold text-white text-center">{t.profile.noUpcomingEvents}</p>
-              <p className="text-xs text-center" style={{ color: '#888899' }}>{t.feed.pullRefresh}</p>
+              <p className="text-sm font-bold text-white text-center">
+                {location?.city ? `No ${activeMainTab === 'events' ? 'events' : activeMainTab === 'sightseeing' ? 'sightseeing spots' : 'sports events'} found near ${location.city} yet` : t.profile.noUpcomingEvents}
+              </p>
+              <p className="text-xs text-center" style={{ color: '#888899' }}>
+                {location?.city ? `We're growing our ${location.city} listings — check back soon!` : t.feed.pullRefresh}
+              </p>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setActiveMainTab('discover')}
+                className="mt-2 px-5 py-2 rounded-full text-xs font-bold"
+                style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', color: 'white' }}
+              >
+                Browse Discover instead
+              </motion.button>
             </div>
           )}
 
