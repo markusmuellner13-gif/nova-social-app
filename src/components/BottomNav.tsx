@@ -16,7 +16,7 @@ function NavButton({ Icon, label, isActive, onClick, badge }: {
   isActive: boolean; onClick: () => void; badge?: number;
 }) {
   return (
-    <button onClick={onClick} className="flex flex-col items-center justify-center gap-0.5 flex-1 h-full" style={{ minWidth: 0 }}>
+    <button onClick={onClick} className="flex flex-col items-center justify-center gap-0.5 flex-1 py-1" style={{ minWidth: 0 }}>
       <motion.div whileTap={{ scale: 0.8 }} className="relative flex items-center justify-center rounded-2xl transition-all"
         style={{ width: 42, height: 30, background: isActive ? 'rgba(139,92,246,0.15)' : 'transparent' }}>
         <Icon size={23} strokeWidth={isActive ? 2.2 : 1.7}
@@ -50,21 +50,15 @@ export default function BottomNav({ active, onChange }: Props) {
   ];
 
   return (
-    <nav className="glass-nav fixed bottom-0 left-0 right-0 z-40 flex items-stretch justify-around"
+    <nav className="glass-nav fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around"
       style={{
-        // The button row gets a fixed 60px of real estate; the device's
-        // safe-area inset is ADDED below that (not subtracted from it, which is
-        // what box-sizing:border-box would do to a plain fixed height — squeezing
-        // the icons so they appear to spill out of the bar). This way every
-        // button always sits fully inside the bar's field, on any phone, and the
-        // bar still hugs the bottom edge. Kept compact (52px) so the bar sits low
-        // and gives the feed more room.
-        height: 'calc(52px + env(safe-area-inset-bottom, 0px))',
+        minHeight: 'calc(48px + env(safe-area-inset-bottom, 0px))',
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        paddingTop: 4,
       }}>
       {tabs.map(({ id, Icon, label, badge, center }) =>
         center ? (
-          <button key={id} onClick={() => onChange(id)} className="flex flex-col items-center justify-center gap-0.5 flex-1 h-full" style={{ minWidth: 0 }}>
+          <button key={id} onClick={() => onChange(id)} className="flex flex-col items-center justify-center gap-0.5 flex-1 py-1" style={{ minWidth: 0 }}>
             <motion.div whileTap={{ scale: 0.85 }} className="flex items-center justify-center rounded-2xl"
               style={{ width: 44, height: 30, background: active === id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : 'linear-gradient(135deg, rgba(139,92,246,0.55), rgba(236,72,153,0.55))', boxShadow: active === id ? '0 2px 10px rgba(139,92,246,0.4)' : 'none' }}>
               <Icon size={21} color="white" strokeWidth={active === id ? 2.5 : 1.8} />

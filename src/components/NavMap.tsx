@@ -652,7 +652,8 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
                   🗺️ Google Maps
                 </a>
                 <a
-                  href={`maps://maps.apple.com/?daddr=${target.location.lat},${target.location.lng}&dirflg=${profile === 'foot' ? 'w' : 'd'}`}
+                  href={`https://maps.apple.com/?daddr=${target.location.lat},${target.location.lng}&dirflg=${profile === 'foot' ? 'w' : 'd'}`}
+                  target="_blank" rel="noopener noreferrer"
                   className="flex-1 h-9 rounded-xl flex items-center justify-center gap-1.5 text-xs font-bold text-white"
                   style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}>
                   🍎 Apple Maps

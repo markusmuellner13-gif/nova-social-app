@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, X, Hash, TrendingUp, Flame, MapPin, Loader2 } from 'lucide-react';
+import { Search, X, Hash, TrendingUp, Flame, MapPin, Loader2, Navigation2, ExternalLink } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { MOCK_POSTS, formatCount } from '@/data/mockData';
 import { Post, Category } from '@/types';
@@ -10,6 +10,8 @@ import CommentsSheet from './CommentsSheet';
 import { useLanguage } from '@/context/LanguageContext';
 import { useApp } from '@/context/AppContext';
 import { apiUrl } from '@/lib/apiBase';
+
+type MapProvider = 'nova' | 'google';
 
 const WorldMap = dynamic(() => import('./WorldMap'), {
   ssr: false,
@@ -57,6 +59,7 @@ export default function SearchTab() {
   const [navTarget, setNavTarget] = useState<Post | null>(null);
   const [localHotPosts, setLocalHotPosts] = useState<Post[]>([]);
   const [localHotLoading, setLocalHotLoading] = useState(false);
+  const [mapProvider, setMapProvider] = useState<MapProvider>('nova');
   const inputRef = useRef<HTMLInputElement>(null);
   const prevCityRef = useRef<string | null>(null);
 
@@ -216,28 +219,77 @@ export default function SearchTab() {
           <AnimatePresence mode="wait">
             {!showResults ? (
               <motion.div key="discover" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
-                {/* World Map */}
+                {/* Map section */}
                 <div className="px-4 pt-4">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
                       <span style={{ fontSize: 12 }}>🌍</span>
                     </div>
                     <h3 className="text-sm font-semibold text-white">Live Events Around the World</h3>
+
+                    {/* Provider switcher */}
+                    <div className="ml-auto flex items-center gap-1 rounded-xl p-0.5" style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}>
+                      {(['nova', 'google'] as MapProvider[]).map(p => (
+                        <button
+                          key={p}
+                          onClick={() => setMapProvider(p)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold transition-all"
+                          style={{
+                            background: mapProvider === p ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : 'transparent',
+                            color: mapProvider === p ? 'white' : '#888899',
+                          }}
+                        >
+                          {p === 'nova' ? '🗺️ Nova' : '🔵 Google'}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <WorldMap
-                    posts={globePosts}
-                    onPostOpen={setSelectedPost}
-                    focus={globeFocus}
-                    onNavigate={(p) => { setNavTarget(p); setShowNav(true); }}
-                  />
-                  <motion.button
-                    whileTap={{ scale: 0.97 }}
-                    onClick={() => { setNavTarget(null); setShowNav(true); }}
-                    className="mt-3 w-full py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold text-white"
-                    style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', boxShadow: '0 4px 16px rgba(139,92,246,0.35)' }}
-                  >
-                    🧭 Open Map &amp; Navigate
-                  </motion.button>
+
+                  {mapProvider === 'nova' ? (
+                    <>
+                      <WorldMap
+                        posts={globePosts}
+                        onPostOpen={setSelectedPost}
+                        focus={globeFocus}
+                        onNavigate={(p) => { setNavTarget(p); setShowNav(true); }}
+                      />
+                      <div className="mt-3 flex gap-2">
+                        <motion.button
+                          whileTap={{ scale: 0.97 }}
+                          onClick={() => { setNavTarget(null); setShowNav(true); }}
+                          className="flex-1 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold text-white"
+                          style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', boxShadow: '0 4px 16px rgba(139,92,246,0.35)' }}
+                        >
+                          <Navigation2 size={16} /> Navigate
+                        </motion.button>
+                        {globeFocus && (
+                          <MapsOpenButton lat={globeFocus.lat} lng={globeFocus.lng} label={location?.city} />
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <GoogleMapsEmbed
+                        lat={globeFocus?.lat ?? 48.2}
+                        lng={globeFocus?.lng ?? 16.37}
+                        zoom={location?.city ? 13 : 3}
+                        label={location?.city ?? 'World'}
+                      />
+                      <div className="mt-3 flex gap-2">
+                        <motion.button
+                          whileTap={{ scale: 0.97 }}
+                          onClick={() => { setNavTarget(null); setShowNav(true); }}
+                          className="flex-1 py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-bold text-white"
+                          style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', boxShadow: '0 4px 16px rgba(139,92,246,0.35)' }}
+                        >
+                          <Navigation2 size={16} /> Full Map
+                        </motion.button>
+                        {globeFocus && (
+                          <MapsOpenButton lat={globeFocus.lat} lng={globeFocus.lng} label={location?.city} />
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Trending */}
@@ -323,6 +375,57 @@ export default function SearchTab() {
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+// ── Map utility components ─────────────────────────────────────────────────────
+
+function GoogleMapsEmbed({ lat, lng, zoom = 13, label }: { lat: number; lng: number; zoom?: number; label?: string }) {
+  const src = `https://maps.google.com/maps?q=${lat},${lng}&z=${zoom}&output=embed&hl=en`;
+  return (
+    <div className="relative w-full overflow-hidden rounded-2xl" style={{ height: 340 }}>
+      <iframe
+        title={`Google Maps — ${label ?? 'Location'}`}
+        src={src}
+        width="100%"
+        height="100%"
+        style={{ border: 0, display: 'block' }}
+        allowFullScreen
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+      />
+    </div>
+  );
+}
+
+function MapsOpenButton({ lat, lng, label }: { lat: number; lng: number; label?: string }) {
+  const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const googleUrl = `https://maps.google.com/maps?q=${lat},${lng}`;
+  const appleUrl  = `https://maps.apple.com/?q=${lat},${lng}&sll=${lat},${lng}&z=14`;
+
+  return (
+    <div className="flex gap-2">
+      <motion.a
+        href={googleUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        whileTap={{ scale: 0.97 }}
+        className="flex items-center justify-center gap-1.5 px-3 py-3 rounded-2xl text-xs font-bold"
+        style={{ background: '#1a1a24', border: '1px solid #2a2a38', color: '#c4b5fd', textDecoration: 'none' }}
+      >
+        <ExternalLink size={13} /> Google
+      </motion.a>
+      {isIOS && (
+        <motion.a
+          href={appleUrl}
+          whileTap={{ scale: 0.97 }}
+          className="flex items-center justify-center gap-1.5 px-3 py-3 rounded-2xl text-xs font-bold"
+          style={{ background: '#1a1a24', border: '1px solid #2a2a38', color: '#c4b5fd', textDecoration: 'none' }}
+        >
+          <ExternalLink size={13} /> Apple
+        </motion.a>
+      )}
+    </div>
   );
 }
 

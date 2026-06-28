@@ -20,8 +20,8 @@ const securityHeaders = [
       "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://pagead2.googlesyndication.com https://partner.googleadservices.com https://tpc.googlesyndication.com https://challenges.cloudflare.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com data:",
-      // Cloudflare Turnstile renders its challenge in an iframe.
-      "frame-src 'self' https://challenges.cloudflare.com",
+      // Cloudflare Turnstile + Google Maps embed.
+      "frame-src 'self' https://challenges.cloudflare.com https://maps.google.com https://www.google.com",
       // Images: real venue photos come from unpredictable hosts (a venue's own
       // og:image, Google Places photos on *.googleusercontent.com, etc.), so we
       // allow any https image source. Scripts/styles/connect stay locked down.
