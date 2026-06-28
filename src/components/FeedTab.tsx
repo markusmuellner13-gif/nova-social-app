@@ -163,11 +163,15 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-fetch when location or derived category changes
+  // Re-fetch when location or derived category changes — also scroll to top
+  // and clear stale injected posts so the user sees a fresh feed instantly.
   useEffect(() => {
     if (!initialFetchDone.current) return;
     resetAI();
     adCounter.current = 0;
+    setInjectedPosts([]);
+    setShowNewBanner(false);
+    scrollRef.current?.scrollTo({ top: 0 });
     void fetchMore(aiCategory);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location?.city, aiCategory]);
@@ -210,14 +214,16 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   // location-based content (no generic mock posts from other cities)
   const hasCity = Boolean(location?.city);
 
-  // Curated pool for discover mode — user-created posts always; generic mock
-  // posts only as a fallback when no location is known yet
+  // Curated pool for discover mode — generic mock posts only when no city is
+  // known yet. Once a location is set, the feed shows ONLY real AI/location
+  // posts so users never see content from other cities.
   const curatedPool = useMemo(() => {
+    if (hasCity) return [];
     let pool = [...MOCK_POSTS];
     if (activeChipCategory) pool = pool.filter(p => p.category === activeChipCategory);
     if (sortMode === 'recent') return [...pool].sort((a, b) => b.timestamp - a.timestamp);
     return sortFeed(pool, preferences, aiProfile);
-  }, [preferences, aiProfile, activeChipCategory, sortMode]);
+  }, [hasCity, preferences, aiProfile, activeChipCategory, sortMode]);
 
   // Events / Sport / Sightseeing tabs show ONLY real location-based data —
   // never demo posts pretending to be local events
@@ -819,26 +825,32 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
             </>
           )}
 
-          {/* Honest empty state — no invented events when sources are empty */}
-          {!isTabLoading && !aiLoading && activeMainTab !== 'partners' && activeMainTab !== 'discover' && mergedFeed.length === 0 && (
+          {/* Honest empty state — no invented content when sources are empty */}
+          {!isTabLoading && !aiLoading && activeMainTab !== 'partners' && mergedFeed.length === 0 && (hasCity || activeMainTab !== 'discover') && (
             <div className="flex flex-col items-center justify-center py-16 px-8 gap-3">
               <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)' }}>
                 <MapPin size={26} style={{ color: '#a78bfa' }} />
               </div>
               <p className="text-sm font-bold text-white text-center">
-                {location?.city ? `No ${activeMainTab === 'events' ? 'events' : activeMainTab === 'sightseeing' ? 'sightseeing spots' : 'sports events'} found near ${location.city} yet` : t.profile.noUpcomingEvents}
+                {location?.city
+                  ? `No ${activeMainTab === 'events' ? 'events' : activeMainTab === 'sightseeing' ? 'sightseeing spots' : activeMainTab === 'sport' ? 'sports events' : 'content'} found near ${location.city} yet`
+                  : t.profile.noUpcomingEvents}
               </p>
               <p className="text-xs text-center" style={{ color: '#888899' }}>
-                {location?.city ? `We're growing our ${location.city} listings — check back soon!` : t.feed.pullRefresh}
+                {location?.city
+                  ? `We're growing our ${location.city} listings — pull down to refresh or check back soon!`
+                  : t.feed.pullRefresh}
               </p>
-              <motion.button
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setActiveMainTab('discover')}
-                className="mt-2 px-5 py-2 rounded-full text-xs font-bold"
-                style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', color: 'white' }}
-              >
-                Browse Discover instead
-              </motion.button>
+              {activeMainTab !== 'discover' && (
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setActiveMainTab('discover')}
+                  className="mt-2 px-5 py-2 rounded-full text-xs font-bold"
+                  style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', color: 'white' }}
+                >
+                  Browse Discover instead
+                </motion.button>
+              )}
             </div>
           )}
 
@@ -946,7 +958,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
             onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
             className="fixed left-1/2 z-30 flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold text-white shadow-xl"
             style={{
-              top: 68,
+              top: 164,
               transform: 'translateX(-50%)',
               background: 'linear-gradient(135deg, #8b5cf6, #ec4899)',
               boxShadow: '0 4px 16px rgba(139,92,246,0.45)',
