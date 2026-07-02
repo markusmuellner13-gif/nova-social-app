@@ -7,7 +7,7 @@ import {
   GroupEventComment, getGroupEventComments, addGroupEventComment, deleteGroupEventComment,
 } from '@/lib/supabase';
 import { useApp } from '@/context/AppContext';
-import { timeAgo } from '@/data/mockData';
+import { timeAgo } from '@/data/appDefaults';
 import Avatar from './Avatar';
 
 interface Props {

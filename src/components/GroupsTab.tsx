@@ -11,7 +11,7 @@ import {
   getGroupEventCommentCounts,
 } from '@/lib/supabase';
 import { Post } from '@/types';
-import { timeAgo } from '@/data/mockData';
+import { timeAgo } from '@/data/appDefaults';
 import Avatar from './Avatar';
 import GroupEventChat from './GroupEventChat';
 import GroupChat from './GroupChat';

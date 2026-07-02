@@ -13,7 +13,7 @@ import { fetchGoingCount, invalidateGoingCount } from '@/lib/goingCounts';
 import { fetchFriendsGoing } from '@/lib/friendsGoing';
 import type { FriendGoing } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
-import { formatCount, timeAgo } from '@/data/mockData';
+import { formatCount, timeAgo } from '@/data/appDefaults';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import CommentsSheet from './CommentsSheet';

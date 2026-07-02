@@ -12,7 +12,6 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ExternalLink, Plus, Minus, Locate, Navigation, Play, Pause } from 'lucide-react';
 import { Post, Category } from '@/types';
-import { formatCount } from '@/data/mockData';
 import { angularDistance } from '@/lib/geo';
 
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
@@ -368,7 +367,6 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props
                 <span className="text-xs font-semibold" style={{ color: CATEGORY_COLOR[selected.category] }}>
                   {CATEGORY_EMOJI[selected.category]} {selected.category}
                 </span>
-                <span className="text-xs" style={{ color: '#555566' }}>⭐ {formatCount(selected.likes)}</span>
               </div>
             </div>
 
