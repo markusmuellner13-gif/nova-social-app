@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronRight, Sparkles, CheckCircle2, MapPin, Loader2 } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
 import { Category, UserPreferences } from '@/types';
-import { DEFAULT_PREFERENCES } from '@/data/mockData';
+import { DEFAULT_PREFERENCES } from '@/data/appDefaults';
 
 const INTEREST_OPTIONS: { id: Category; emoji: string; label: string; color: string }[] = [
   { id: 'travel',      emoji: '✈️', label: 'Travel',      color: '#3b82f6' },

@@ -324,6 +324,55 @@ export async function getGroupGoing(groupId: string, postIds: string[]): Promise
   return out;
 }
 
+// ── Post comments (public, per feed post) ─────────────────────────────────────
+
+export interface PostComment {
+  id: string;
+  post_id: string;
+  user_id: string;
+  author_name?: string;
+  author_avatar?: string;
+  body: string;
+  created_at: string;
+}
+
+// A post's real comment thread, oldest → newest. Readable by everyone; empty
+// when Supabase isn't configured or nobody has commented yet.
+export async function getPostComments(postId: string): Promise<PostComment[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('post_comments')
+    .select('*')
+    .eq('post_id', postId)
+    .order('created_at', { ascending: true })
+    .limit(200);
+  if (error || !data) return [];
+  return data as PostComment[];
+}
+
+// Post a real comment. Returns the inserted row (so the UI can append it
+// optimistically) or null when it failed / sync is disabled.
+export async function addPostComment(
+  postId: string, userId: string, body: string,
+  authorName?: string, authorAvatar?: string,
+): Promise<PostComment | null> {
+  if (!supabase) return null;
+  const trimmed = body.trim().slice(0, 1000);
+  if (!trimmed) return null;
+  const { data, error } = await supabase
+    .from('post_comments')
+    .insert({ post_id: postId, user_id: userId, body: trimmed, author_name: authorName, author_avatar: authorAvatar })
+    .select()
+    .single();
+  if (error) { console.error('[supabase/addPostComment]', error); return null; }
+  return data as PostComment;
+}
+
+export async function deletePostComment(commentId: string): Promise<void> {
+  if (!supabase) return;
+  await supabase.from('post_comments').delete().eq('id', commentId);
+}
+
 // ── Group event discussion (chat/comments on a shared group event) ────────────
 
 export interface GroupEventComment {

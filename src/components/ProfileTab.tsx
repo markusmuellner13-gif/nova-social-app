@@ -10,7 +10,7 @@ import {
   MessageSquare, FileText, Info, ExternalLink, Phone,
   Download, UserX, Sparkles,
 } from 'lucide-react';
-import { CURRENT_USER, formatCount } from '@/data/mockData';
+import { formatCount } from '@/data/appDefaults';
 import { Category, Post } from '@/types';
 import { useApp } from '@/context/AppContext';
 import { useAuth } from '@/context/AuthContext';
@@ -231,14 +231,14 @@ export default function ProfileTab({ onOpenAuth }: Props) {
     }
   }
 
-  const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? CURRENT_USER.username;
+  const displayName = profile?.display_name ?? user?.email?.split('@')[0] ?? 'You';
   const avatarUrl   = profile?.avatar_url ?? null;  // null = show gradient placeholder
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="glass flex items-center justify-between px-4 flex-shrink-0" style={{ height: 52, borderBottom: '1px solid #1e1e2a' }}>
-        <h2 className="text-base font-bold text-white">{profile?.username ?? CURRENT_USER.username}</h2>
+        <h2 className="text-base font-bold text-white">{profile?.username ?? 'Profile'}</h2>
         <motion.button whileTap={{ scale: 0.85 }} onClick={() => setShowSettings(!showSettings)}>
           <Settings size={22} style={{ color: '#888899' }} />
         </motion.button>
@@ -677,7 +677,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
               {user && <BadgeCheck size={14} style={{ color: '#8b5cf6' }} />}
             </div>
             <p className="text-sm mt-0.5 leading-snug" style={{ color: '#b0b0c8' }}>
-              {profile?.bio ?? CURRENT_USER.bio}
+              {profile?.bio ?? '✨ Discovering what\'s happening nearby'}
             </p>
           </div>
 

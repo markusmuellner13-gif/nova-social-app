@@ -1,26 +1,27 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { X, BadgeCheck, Grid3X3 } from 'lucide-react';
-import { User, Post } from '@/types';
-import { MOCK_POSTS, formatCount } from '@/data/mockData';
+import { X, BadgeCheck, MapPin, UserPlus, UserCheck } from 'lucide-react';
+import { User } from '@/types';
 import { useApp } from '@/context/AppContext';
+import Avatar from './Avatar';
 
 interface Props {
   user: User;
   onClose: () => void;
-  onPostOpen?: (post: Post) => void;
 }
 
-export default function UserProfileCard({ user, onClose, onPostOpen }: Props) {
+// Honest source/organizer card. Feed posts come from real sources (venues,
+// organizers, ticket platforms, tourism boards) — not social accounts — so
+// this shows who they are, never invented follower counts or post grids.
+export default function UserProfileCard({ user, onClose }: Props) {
   const { isFollowed, followUser, addToast } = useApp();
   const followed = isFollowed(user.id);
-  const userPosts = MOCK_POSTS.filter(p => p.user.id === user.id).slice(0, 12);
 
   function handleFollow() {
     followUser(user.id);
     if (!followed) {
-      addToast(`Following @${user.username}`, 'success', '✅');
+      addToast(`You'll see more from ${user.name}`, 'success', '✅');
     }
   }
 
@@ -31,7 +32,7 @@ export default function UserProfileCard({ user, onClose, onPostOpen }: Props) {
       exit={{ y: '100%' }}
       transition={{ type: 'spring', stiffness: 300, damping: 35 }}
       className="fixed inset-x-0 bottom-0 z-40 flex flex-col rounded-t-3xl overflow-hidden"
-      style={{ height: '80dvh', background: '#0d0d16', borderTop: '1px solid #2a2a38' }}
+      style={{ background: '#0d0d16', borderTop: '1px solid #2a2a38' }}
     >
       {/* Drag handle */}
       <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
@@ -45,88 +46,44 @@ export default function UserProfileCard({ user, onClose, onPostOpen }: Props) {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {/* Cover gradient */}
-        <div className="h-20 w-full" style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.3), rgba(236,72,153,0.2))' }} />
-
-        {/* Avatar + info */}
-        <div className="px-4 -mt-10">
-          <div className="flex items-end justify-between mb-3">
-            <div className="story-ring flex-shrink-0">
-              <div className="bg-[#0d0d16] p-0.5 rounded-full">
-                <img src={user.avatar} alt={user.name} className="w-16 h-16 rounded-full object-cover" />
-              </div>
+      <div className="px-5 pb-10">
+        {/* Avatar + identity */}
+        <div className="flex items-center gap-4 mb-4">
+          <div className="w-16 h-16 rounded-2xl overflow-hidden flex-shrink-0" style={{ border: '1px solid #2a2a38', background: '#13131a' }}>
+            <Avatar src={user.avatar} name={user.name} size={64} className="w-full h-full rounded-2xl" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <p className="text-base font-bold text-white truncate">{user.name}</p>
+              {user.verified && <BadgeCheck size={16} className="flex-shrink-0" style={{ color: '#8b5cf6' }} />}
             </div>
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={handleFollow}
-              className="px-5 py-2 rounded-xl text-sm font-bold transition-all"
-              style={{
-                background: followed ? 'transparent' : 'linear-gradient(135deg, #8b5cf6, #ec4899)',
-                border: followed ? '1px solid #2a2a38' : 'none',
-                color: followed ? '#888899' : 'white',
-              }}
-            >
-              {followed ? 'Following' : 'Follow'}
-            </motion.button>
-          </div>
-
-          <div className="flex items-center gap-1.5 mb-1">
-            <p className="text-base font-bold text-white">{user.name}</p>
-            {user.verified && <BadgeCheck size={16} style={{ color: '#8b5cf6' }} />}
-          </div>
-          <p className="text-sm" style={{ color: '#888899' }}>@{user.username}</p>
-          <p className="text-sm mt-2 leading-snug" style={{ color: '#b0b0c8' }}>{user.bio}</p>
-
-          {/* Stats */}
-          <div className="flex gap-6 mt-4 mb-4">
-            {[
-              { label: 'Posts', value: user.posts },
-              { label: 'Followers', value: user.followers },
-              { label: 'Following', value: user.following },
-            ].map(({ label, value }) => (
-              <div key={label} className="flex flex-col items-center">
-                <span className="text-base font-bold text-white">{formatCount(value)}</span>
-                <span className="text-xs" style={{ color: '#888899' }}>{label}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Divider */}
-          <div className="flex items-center gap-2 mb-3" style={{ borderTop: '1px solid #1e1e2a', paddingTop: 12 }}>
-            <Grid3X3 size={16} style={{ color: '#888899' }} />
-            <span className="text-xs font-semibold" style={{ color: '#888899' }}>POSTS</span>
+            <p className="text-sm truncate" style={{ color: '#888899' }}>@{user.username}</p>
           </div>
         </div>
 
-        {/* Post grid */}
-        {userPosts.length > 0 ? (
-          <div className="grid grid-cols-3 gap-0.5">
-            {userPosts.map((post) => (
-              <motion.button
-                key={post.id}
-                whileTap={{ opacity: 0.7 }}
-                onClick={() => onPostOpen?.(post)}
-                className="relative overflow-hidden"
-                style={{ aspectRatio: '1', background: '#13131a' }}
-              >
-                <img src={post.image} alt="" className="w-full h-full object-cover" loading="lazy" />
-                {post.isEvent && (
-                  <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: 'rgba(236,72,153,0.85)', color: 'white', fontSize: 9 }}>
-                    EVENT
-                  </div>
-                )}
-              </motion.button>
-            ))}
-          </div>
-        ) : (
-          <div className="flex flex-col items-center py-12 px-4">
-            <Grid3X3 size={36} style={{ color: '#2a2a38' }} />
-            <p className="text-sm text-white mt-3">No posts yet</p>
-          </div>
+        {user.bio && (
+          <p className="text-sm leading-relaxed mb-4" style={{ color: '#b0b0c8' }}>{user.bio}</p>
         )}
 
-        <div style={{ height: 24 }} />
+        <div className="flex items-center gap-2 mb-5 px-3 py-2.5 rounded-xl" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.18)' }}>
+          <MapPin size={14} className="flex-shrink-0" style={{ color: '#a78bfa' }} />
+          <p className="text-xs leading-snug" style={{ color: '#a78bfa' }}>
+            Content from {user.name} shows up in your feed when it&apos;s happening near you.
+          </p>
+        </div>
+
+        <motion.button
+          whileTap={{ scale: 0.96 }}
+          onClick={handleFollow}
+          className="w-full py-3 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all"
+          style={{
+            background: followed ? 'transparent' : 'linear-gradient(135deg, #8b5cf6, #ec4899)',
+            border: followed ? '1px solid #2a2a38' : 'none',
+            color: followed ? '#888899' : 'white',
+          }}
+        >
+          {followed ? <><UserCheck size={15} /> Following</> : <><UserPlus size={15} /> Follow for more like this</>}
+        </motion.button>
       </div>
     </motion.div>
   );

@@ -1,4 +1,4 @@
-import { Post, Category, UserPreferences, AIProfile, NovaNotification, User } from '@/types';
+import { Post, Category, UserPreferences, AIProfile } from '@/types';
 
 // ── Time-of-day relevance ─────────────────────────────────────────────────────
 // The app should feel alive and aware of the moment: surface brunch spots and
@@ -64,39 +64,6 @@ export function getTopCategories(
       return bScore - aScore;
     })
     .slice(0, n);
-}
-
-const AI_NOTIFICATION_MESSAGES: Record<string, string[]> = {
-  travel: ['✈️ New destination dropping — you\'ll want to see this', 'A must-see travel post just landed in your zone'],
-  food: ['🍕 Your next favourite restaurant just posted', 'New food post that matches your taste perfectly'],
-  fashion: ['👗 Fresh fit just dropped — curated for you', 'New style post you\'re going to love'],
-  sports: ['⚽ Big play alert — new sports post for you', 'Your kind of match is going viral right now'],
-  art: ['🎨 New artwork that fits your palette perfectly', 'Fresh creative piece curated just for you'],
-  tech: ['💻 New tech post trending in your interest zone', 'Hot developer content just dropped for you'],
-  fitness: ['💪 New workout that matches your fitness vibe', 'Fresh fitness content pushing right now'],
-  music: ['🎵 New track just dropped — made for your ears', 'Fresh music content is trending for you'],
-  pets: ['🐾 You\'re going to love this new pet post', 'The cutest animal post just dropped for you'],
-  lifestyle: ['🌟 New lifestyle content curated for your vibe', 'Fresh slow-living post just dropped for you'],
-  events: ['🎉 Hot event near you — don\'t miss out', 'New event just announced matching your interests'],
-  sightseeing: ['🏛️ Unmissable landmark experience near you', 'New sightseeing post that fits your travel taste'],
-};
-
-export function generateAINotification(
-  post: Post,
-  _preferences: UserPreferences,
-  notifUser: User
-): Omit<NovaNotification, 'id'> {
-  const messages = AI_NOTIFICATION_MESSAGES[post.category] ?? ['Nova AI found new content for you'];
-  const text = messages[Math.floor(Math.random() * messages.length)];
-  return {
-    user: notifUser,
-    type: post.isEvent ? 'event' : 'ai_suggestion',
-    postImage: post.image,
-    text,
-    timestamp: Date.now(),
-    read: false,
-    postId: post.id,
-  };
 }
 
 export function learnFromInteraction(

@@ -4,11 +4,10 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, Calendar, Bell, BellOff, MapPin, TrendingUp, Star, ChevronLeft } from 'lucide-react';
 import { NovaNotification } from '@/types';
-import { timeAgo } from '@/data/mockData';
+import { timeAgo } from '@/data/appDefaults';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import CommentsSheet from './CommentsSheet';
-import { MOCK_POSTS } from '@/data/mockData';
 
 const TYPE_ICON = {
   ai_suggestion: Sparkles,
@@ -82,7 +81,13 @@ export default function NotificationsTab({ onClose }: { onClose?: () => void } =
   const read   = notifs.filter(n => n.read);
   const [openPostId, setOpenPostId] = useState<string | null>(null);
 
-  const openPost = MOCK_POSTS.find(p => p.id === openPostId);
+  // Resolve the tapped notification's post from its own snapshot first (real
+  // feed posts carry one), then from the user's stored interaction snapshots.
+  const openPost = openPostId
+    ? state.notifications.find(n => n.postId === openPostId)?.post
+      ?? state.interactionPosts.find(p => p.id === openPostId)
+      ?? null
+    : null;
 
   function requestPermission() {
     if ('Notification' in window) {

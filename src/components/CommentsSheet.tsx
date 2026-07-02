@@ -1,53 +1,70 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { motion } from 'framer-motion';
-import { X, Heart, Send, Star } from 'lucide-react';
-import { Post, Comment } from '@/types';
-import { formatCount, timeAgo } from '@/data/mockData';
+import { useState, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { X, Heart, Send, Star, Loader2, LogIn, Trash2 } from 'lucide-react';
+import { Post } from '@/types';
+import { timeAgo } from '@/data/appDefaults';
 import { useApp } from '@/context/AppContext';
+import { useAuth } from '@/context/AuthContext';
+import { getPostComments, addPostComment, deletePostComment, PostComment } from '@/lib/supabase';
+import AuthModal from './AuthModal';
+import Avatar from './Avatar';
 
 interface Props {
   post: Post;
   onClose: () => void;
 }
 
+// Real comments only: loaded from and written to the backend, signed with the
+// commenter's real profile. Nothing generated, nothing session-local.
 export default function CommentsSheet({ post, onClose }: Props) {
   const { isLiked, likePost, isSaved, savePost, addToast } = useApp();
-  const [likedComments, setLikedComments] = useState<Set<string>>(new Set());
+  const { user, profile, isSupabaseEnabled } = useAuth();
+  const [comments, setComments] = useState<PostComment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
   const [commentText, setCommentText] = useState('');
-  const [localComments, setLocalComments] = useState<Comment[]>([]);
+  const [showAuth, setShowAuth] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const liked = isLiked(post.id);
   const saved = isSaved(post.id);
 
-  function toggleCommentLike(id: string) {
-    setLikedComments(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    getPostComments(post.id)
+      .then(rows => { if (active) setComments(rows); })
+      .catch(() => {})
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [post.id]);
 
-  function submitComment() {
+  async function submitComment() {
     const text = commentText.trim();
-    if (!text) return;
-    const newComment: Comment = {
-      id: `user_${Date.now()}`,
-      user: { id: 'current', name: 'You', username: 'your.nova', avatar: 'https://i.pravatar.cc/150?img=33', bio: '', followers: 1247, following: 389, posts: 28 },
-      text,
-      timestamp: Date.now(),
-      likes: 0,
-    };
-    setLocalComments(prev => [newComment, ...prev]);
-    setCommentText('');
-    addToast('Comment posted', 'success', '💬');
+    if (!text || sending) return;
+    if (!user) { setShowAuth(true); return; }
+    setSending(true);
+    const authorName = profile?.display_name ?? profile?.username ?? user.email?.split('@')[0] ?? 'Nova user';
+    const inserted = await addPostComment(post.id, user.id, text, authorName, profile?.avatar_url ?? undefined);
+    setSending(false);
+    if (inserted) {
+      setComments(prev => [...prev, inserted]);
+      setCommentText('');
+      addToast('Comment posted', 'success', '💬');
+    } else {
+      addToast('Could not post comment — try again', 'error');
+    }
   }
 
-  // Only real comments written by this user — no generated filler
-  const allComments = localComments;
+  async function removeComment(id: string) {
+    setComments(prev => prev.filter(c => c.id !== id));
+    await deletePostComment(id);
+    addToast('Comment deleted', 'info');
+  }
 
   return (
+    <>
     <motion.div
       initial={{ y: '100%' }}
       animate={{ y: 0 }}
@@ -63,7 +80,9 @@ export default function CommentsSheet({ post, onClose }: Props) {
 
       {/* Header with close */}
       <div className="flex items-center justify-between px-4 py-2 flex-shrink-0" style={{ borderBottom: '1px solid #1e1e2a' }}>
-        <h3 className="text-base font-bold text-white">Comments</h3>
+        <h3 className="text-base font-bold text-white">
+          Comments{comments.length > 0 ? ` · ${comments.length}` : ''}
+        </h3>
         <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#1a1a24' }}>
           <X size={16} style={{ color: '#888899' }} />
         </button>
@@ -88,9 +107,7 @@ export default function CommentsSheet({ post, onClose }: Props) {
               style={{ color: liked ? '#f59e0b' : '#888899' }}
               className={liked ? 'heart-pop' : ''}
             />
-            <span className="text-xs" style={{ color: liked ? '#f59e0b' : '#555566' }}>
-              {post.likes + (liked ? 1 : 0) > 0 ? formatCount(post.likes + (liked ? 1 : 0)) : 'Like'}
-            </span>
+            <span className="text-xs" style={{ color: liked ? '#f59e0b' : '#555566' }}>{liked ? 'Loved' : 'Like'}</span>
           </button>
           <button
             onClick={() => {
@@ -111,67 +128,103 @@ export default function CommentsSheet({ post, onClose }: Props) {
 
       {/* Comments list */}
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        {allComments.length === 0 && (
-          <p className="text-center text-sm py-8" style={{ color: '#555566' }}>No comments yet. Be first!</p>
+        {loading && (
+          <div className="flex items-center justify-center gap-2 py-8">
+            <Loader2 size={16} className="animate-spin" style={{ color: '#8b5cf6' }} />
+            <span className="text-xs" style={{ color: '#555566' }}>Loading comments…</span>
+          </div>
         )}
-        {allComments.map((c) => (
+        {!loading && comments.length === 0 && (
+          <p className="text-center text-sm py-8" style={{ color: '#555566' }}>
+            No comments yet. Be first!
+          </p>
+        )}
+        {comments.map((c) => (
           <div key={c.id} className="flex items-start gap-3 mb-4">
-            <img src={c.user.avatar} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+            <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0">
+              <Avatar src={c.author_avatar ?? ''} name={c.author_name ?? '?'} size={36} className="w-full h-full rounded-full" />
+            </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-white">{c.user.username}</span>
-                <span className="text-xs" style={{ color: '#444455' }}>{timeAgo(c.timestamp)}</span>
+                <span className="text-sm font-semibold text-white">{c.author_name ?? 'Nova user'}</span>
+                <span className="text-xs" style={{ color: '#444455' }}>{timeAgo(new Date(c.created_at).getTime())}</span>
               </div>
-              <p className="text-sm mt-0.5 leading-snug" style={{ color: '#c0c0d8' }}>{c.text}</p>
+              <p className="text-sm mt-0.5 leading-snug" style={{ color: '#c0c0d8' }}>{c.body}</p>
             </div>
-            <button
-              onClick={() => toggleCommentLike(c.id)}
-              className="flex flex-col items-center gap-0.5 flex-shrink-0"
-            >
-              <Heart
-                size={16}
-                fill={likedComments.has(c.id) ? '#ec4899' : 'none'}
-                style={{ color: likedComments.has(c.id) ? '#ec4899' : '#444455' }}
-              />
-              <span className="text-xs" style={{ color: '#444455' }}>
-                {formatCount(c.likes + (likedComments.has(c.id) ? 1 : 0))}
-              </span>
-            </button>
+            {user?.id === c.user_id && (
+              <button onClick={() => removeComment(c.id)} className="flex-shrink-0 p-1" aria-label="Delete comment">
+                <Trash2 size={14} style={{ color: '#444455' }} />
+              </button>
+            )}
           </div>
         ))}
         <div style={{ height: 16 }} />
       </div>
 
-      {/* Comment input */}
+      {/* Comment input — signed-in users only, so every comment is a real person */}
       <div
         className="flex items-center gap-3 px-4 py-3 flex-shrink-0"
         style={{ borderTop: '1px solid #1e1e2a', background: '#0d0d16' }}
       >
-        <img src="https://i.pravatar.cc/150?img=33" alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
-        <div
-          className="flex-1 flex items-center gap-2 rounded-2xl px-3 py-2"
-          style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}
-        >
-          <input
-            ref={inputRef}
-            value={commentText}
-            onChange={(e) => setCommentText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') submitComment(); }}
-            placeholder="Add a comment…"
-            className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-[#444455]"
-          />
-          {commentText.trim() && (
-            <motion.button
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              whileTap={{ scale: 0.85 }}
-              onClick={submitComment}
+        {!isSupabaseEnabled ? (
+          <p className="flex-1 text-xs text-center py-1" style={{ color: '#555566' }}>
+            Comments are temporarily unavailable.
+          </p>
+        ) : user ? (
+          <>
+            <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
+              <Avatar
+                src={profile?.avatar_url ?? ''}
+                name={profile?.display_name ?? profile?.username ?? user.email ?? '?'}
+                size={32}
+                className="w-full h-full rounded-full"
+              />
+            </div>
+            <div
+              className="flex-1 flex items-center gap-2 rounded-2xl px-3 py-2"
+              style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}
             >
-              <Send size={16} style={{ color: '#a78bfa' }} />
-            </motion.button>
-          )}
-        </div>
+              <input
+                ref={inputRef}
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submitComment(); }}
+                placeholder="Add a comment…"
+                maxLength={1000}
+                className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-[#444455]"
+              />
+              {commentText.trim() && (
+                <motion.button
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  whileTap={{ scale: 0.85 }}
+                  onClick={submitComment}
+                  disabled={sending}
+                >
+                  {sending
+                    ? <Loader2 size={16} className="animate-spin" style={{ color: '#a78bfa' }} />
+                    : <Send size={16} style={{ color: '#a78bfa' }} />}
+                </motion.button>
+              )}
+            </div>
+          </>
+        ) : (
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={() => setShowAuth(true)}
+            className="flex-1 py-2.5 rounded-2xl text-sm font-bold text-white flex items-center justify-center gap-2"
+            style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}
+          >
+            <LogIn size={14} /> Sign in to join the conversation
+          </motion.button>
+        )}
       </div>
     </motion.div>
+
+    {/* Sign-in modal for commenting */}
+    <AnimatePresence>
+      {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
+    </AnimatePresence>
+    </>
   );
 }

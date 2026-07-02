@@ -2,13 +2,14 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Compass, Sparkles, RefreshCw, ChevronDown, MapPin, Loader2, SlidersHorizontal, Bell, X } from 'lucide-react';
-import { MOCK_POSTS, SPONSORED_POSTS } from '@/data/mockData';
+import { Compass, Sparkles, RefreshCw, ChevronDown, MapPin, Loader2, SlidersHorizontal, Bell, X, Store } from 'lucide-react';
+import { NOVA_AI_USER } from '@/data/appDefaults';
 import { Category, Post } from '@/types';
-import { sortFeed, getTopCategories } from '@/lib/aiEngine';
+import { getTopCategories } from '@/lib/aiEngine';
 import { parseMinPrice } from './Post';
 import { useApp } from '@/context/AppContext';
 import { useAIFeed } from '@/hooks/useAIFeed';
+import { apiUrl } from '@/lib/apiBase';
 import PostComponent from './Post';
 import { useLanguage } from '@/context/LanguageContext';
 import AdSlot from './AdSlot';
@@ -52,8 +53,6 @@ const PARTNER_CHIP_CATS: { emoji: string; label: string; cat: Category | null }[
   { emoji: '🏨',  label: 'Stays',         cat: 'travel'      },
   { emoji: '🗺️', label: 'Experiences',   cat: 'sightseeing' },
 ];
-
-const PAGE_SIZE = 10;
 
 // A post farther than this from the user is treated as a "nearby town", not part
 // of the user's own city — keeps a small town's feed from being flooded by a
@@ -116,7 +115,7 @@ interface Props {
 }
 
 export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOpenNotifications }: Props) {
-  const { state, unreadCount, learnCategory } = useApp();
+  const { state, unreadCount, learnCategory, addNotification } = useApp();
   const { t } = useLanguage();
   const { preferences, aiProfile } = state;
   const location = state.location;
@@ -129,10 +128,11 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   const [dateFilter,  setDateFilter]  = useState<DateFilter>('all');
   const [priceFilter, setPriceFilter] = useState<PriceFilter>('all');
   const [showFilters, setShowFilters] = useState(false);
-  const [visibleCurated, setVisibleCurated] = useState(PAGE_SIZE);
-  const [showNewBanner, setShowNewBanner] = useState(false);
-  const [injectedPosts, setInjectedPosts] = useState<Post[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Real PAID partner posts for the user's city (from /api/sponsored). The
+  // partners tab only ever shows these — no invented demo businesses.
+  const [sponsoredPosts, setSponsoredPosts] = useState<Post[]>([]);
+  const [sponsoredLoading, setSponsoredLoading] = useState(false);
   const [partnerCatFilter, setPartnerCatFilter] = useState<Category | null>(null);
   const [locationBannerDismissed, setLocationBannerDismissed] = useState(false);
   const [touchStart, setTouchStart] = useState<number | null>(null);
@@ -164,24 +164,31 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   }, []);
 
   // Re-fetch when location or derived category changes — also scroll to top
-  // and clear stale injected posts so the user sees a fresh feed instantly.
+  // so the user sees a fresh feed instantly.
   useEffect(() => {
     if (!initialFetchDone.current) return;
     resetAI();
     adCounter.current = 0;
-    setInjectedPosts([]);
-    setShowNewBanner(false);
     scrollRef.current?.scrollTo({ top: 0 });
     void fetchMore(aiCategory);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location?.city, aiCategory]);
 
-  // New posts banner after 30s (discover mode only)
+  // Real geo-targeted partner posts for the partners tab (paid, per-city).
   useEffect(() => {
-    if (activeMainTab !== 'discover') return;
-    const t = setTimeout(() => setShowNewBanner(true), 30_000);
-    return () => clearTimeout(t);
-  }, [activeMainTab]);
+    if (activeMainTab !== 'partners') return;
+    let cancelled = false;
+    setSponsoredLoading(true);
+    const city = location?.city ?? '';
+    fetch(apiUrl(`/api/sponsored?city=${encodeURIComponent(city)}`))
+      .then(res => (res.ok ? res.json() : null))
+      .then((data: { posts?: Post[] } | null) => {
+        if (!cancelled) setSponsoredPosts(data?.posts ?? []);
+      })
+      .catch(() => { if (!cancelled) setSponsoredPosts([]); })
+      .finally(() => { if (!cancelled) setSponsoredLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeMainTab, location?.city]);
 
   // Feature 4 — Push notification when background refresh adds matching events
   const prevAiIdsRef = useRef<Set<string>>(new Set());
@@ -199,6 +206,19 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     const match = newPosts.find(p => topCats.includes(p.category as Category));
     if (!match) return;
 
+    // In-app notification carrying the REAL post — tapping it opens that post.
+    addNotification({
+      id: `evt_${match.id}`,
+      user: NOVA_AI_USER,
+      type: match.isEvent ? 'event' : 'ai_suggestion',
+      postImage: match.image,
+      text: `New in ${location?.city ?? 'your area'}: ${match.caption.split('\n')[0].slice(0, 70)}`,
+      timestamp: Date.now(),
+      read: false,
+      postId: match.id,
+      post: match,
+    });
+
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
       try {
         new Notification('Nova — New event just listed ✨', {
@@ -210,23 +230,19 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiPosts.length]);
 
-  // Whether we know where the user is — if so, the feed shows ONLY real
-  // location-based content (no generic mock posts from other cities)
+  // Whether we know where the user is. Every tab shows ONLY real content —
+  // without a city the server falls back to IP geolocation, and if that finds
+  // nothing the feed shows an honest "pick your city" hero instead of filler.
   const hasCity = Boolean(location?.city);
 
-  // Curated pool for discover mode — generic mock posts only when no city is
-  // known yet. Once a location is set, the feed shows ONLY real AI/location
-  // posts so users never see content from other cities.
-  const curatedPool = useMemo(() => {
-    if (hasCity) return [];
-    let pool = [...MOCK_POSTS];
+  // Discover honours the chip filter and the For You / Recent toggle on the
+  // live stream itself (the blend already rotates categories server-side).
+  const discoverPosts = useMemo(() => {
+    let pool = aiPosts;
     if (activeChipCategory) pool = pool.filter(p => p.category === activeChipCategory);
     if (sortMode === 'recent') return [...pool].sort((a, b) => b.timestamp - a.timestamp);
-    return sortFeed(pool, preferences, aiProfile);
-  }, [hasCity, preferences, aiProfile, activeChipCategory, sortMode]);
-
-  // Events / Sport / Sightseeing tabs show ONLY real location-based data —
-  // never demo posts pretending to be local events
+    return pool;
+  }, [aiPosts, activeChipCategory, sortMode]);
 
   // Build merged feed depending on active tab
   const mergedFeed = useMemo(() => {
@@ -238,10 +254,10 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     let adIdx = 0;
 
     if (activeMainTab === 'partners') {
-      // Partners: sponsored posts filtered by category chip, ad every 3
+      // Partners: REAL paid sponsored posts for this city, filtered by chip
       const filtered = partnerCatFilter
-        ? SPONSORED_POSTS.filter(p => p.category === partnerCatFilter)
-        : SPONSORED_POSTS;
+        ? sponsoredPosts.filter(p => p.category === partnerCatFilter)
+        : sponsoredPosts;
       filtered.forEach((post, i) => {
         if (i > 0 && i % 3 === 0) items.push({ type: 'ad', index: adIdx++ });
         items.push({ type: 'post', post });
@@ -250,23 +266,10 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     }
 
     if (activeMainTab === 'discover') {
-      // Original weave: 2 curated → 1 AI → repeat, with ads
-      const curated = [...injectedPosts, ...curatedPool.slice(0, visibleCurated)];
-      let ci = 0; let ai = 0; let slot = 0;
-      const totalAI = aiPosts.length;
-      const totalCur = curated.length;
-
-      while (ci < totalCur || ai < totalAI) {
-        for (let k = 0; k < 2 && ci < totalCur; k++, ci++, slot++) {
-          if (adIndex(slot)) items.push({ type: 'ad', index: adIdx++ });
-          items.push({ type: 'post', post: curated[ci] });
-        }
-        if (ai < totalAI) {
-          slot++;
-          if (adIndex(slot)) items.push({ type: 'ad', index: adIdx++ });
-          items.push({ type: 'post', post: aiPosts[ai++] });
-        }
-      }
+      discoverPosts.forEach((post, slot) => {
+        if (adIndex(slot)) items.push({ type: 'ad', index: adIdx++ });
+        items.push({ type: 'post', post });
+      });
       return items;
     }
 
@@ -310,7 +313,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     }
 
     return items;
-  }, [activeMainTab, aiPosts, injectedPosts, curatedPool, visibleCurated, dateFilter, priceFilter, partnerCatFilter, hasCity, location?.city]);
+  }, [activeMainTab, aiPosts, discoverPosts, sponsoredPosts, dateFilter, priceFilter, partnerCatFilter, hasCity, location?.city]);
 
   // Infinite scroll + scroll-position tracking
   const handleScroll = useCallback(() => {
@@ -325,8 +328,6 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
       resetAI();
       adCounter.current = 0;
       void fetchMore(aiCategory);
-      setInjectedPosts([]);
-      setVisibleCurated(PAGE_SIZE);
     }
     prevScrollYRef.current = top;
 
@@ -335,13 +336,10 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     // user keeps a deep buffer and almost never waits on a spinner.
     const nearBottom = el.scrollHeight - top - el.clientHeight < 2400;
     if (!nearBottom) return;
-    if (activeMainTab === 'discover' && visibleCurated < curatedPool.length) {
-      setVisibleCurated(c => c + PAGE_SIZE);
-    }
     if (activeMainTab !== 'partners' && aiHasMore && !aiLoading) {
       void fetchMore(aiCategory);
     }
-  }, [visibleCurated, curatedPool.length, aiHasMore, aiLoading, fetchMore, aiCategory, resetAI, activeMainTab, showScrollTop]);
+  }, [aiHasMore, aiLoading, fetchMore, aiCategory, resetAI, activeMainTab, showScrollTop]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -367,8 +365,6 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
       adCounter.current = 0;
       void fetchMore(aiCategory);
       setTimeout(() => {
-        setInjectedPosts([]);
-        setVisibleCurated(PAGE_SIZE);
         setIsRefreshing(false);
         scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       }, 900);
@@ -378,12 +374,6 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     }
   }, [pullDistance, resetAI, fetchMore, aiCategory]);
 
-  function handleNewPostsBanner() {
-    setShowNewBanner(false);
-    setInjectedPosts(curatedPool.slice(0, 4));
-    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
   function handleMainTabChange(tab: MainTab) {
     if (tab === activeMainTab) return;
     // Learn from which section the user opens (events / sights / sport).
@@ -392,9 +382,6 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     else if (tab === 'sport') learnCategory('sports');
     setActiveMainTab(tab);
     setActiveChipCategory(null);
-    setVisibleCurated(PAGE_SIZE);
-    setInjectedPosts([]);
-    setShowNewBanner(false);
     setDateFilter('all');
     setPriceFilter('all');
     setShowFilters(false);
@@ -426,7 +413,9 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
-  const isTabLoading = activeMainTab !== 'partners' && aiLoading && mergedFeed.length === 0;
+  const isTabLoading = activeMainTab === 'partners'
+    ? sponsoredLoading && mergedFeed.length === 0
+    : aiLoading && mergedFeed.length === 0;
 
   // Skeleton is a FALLBACK, not a default: only reveal it if the first content
   // hasn't arrived within a short grace period. Cached or fast responses (the
@@ -532,22 +521,6 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
           })}
         </div>
 
-        {/* New posts banner */}
-        <AnimatePresence>
-          {showNewBanner && (
-            <motion.button
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 40, opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              onClick={handleNewPostsBanner}
-              className="flex items-center justify-center gap-2 w-full text-sm font-semibold overflow-hidden flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.25), rgba(236,72,153,0.2))', color: '#c4b5fd', borderBottom: '1px solid rgba(139,92,246,0.2)' }}
-            >
-              <Sparkles size={14} /> {t.feed.newContent}
-            </motion.button>
-          )}
-        </AnimatePresence>
-
         {/* Pull-to-refresh indicator */}
         <AnimatePresence>
           {(pullDistance > 10 || isRefreshing) && (
@@ -622,7 +595,6 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
                     onClick={() => {
                       const next = isActive ? null : cat;
                       setActiveChipCategory(next);
-                      setVisibleCurated(PAGE_SIZE);
                       // Opening a category is an implicit interest signal — let
                       // Nova quietly learn from what the user actually browses.
                       if (next) learnCategory(next);
@@ -823,6 +795,55 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
               </div>
               <FeedSkeleton count={4} />
             </>
+          )}
+
+          {/* No-city hero — the honest cold-start state: pick where you are and
+              the feed fills with real local content. Never demo filler. */}
+          {!isTabLoading && !aiLoading && activeMainTab === 'discover' && !hasCity && mergedFeed.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 px-8 gap-4">
+              <div className="w-20 h-20 rounded-3xl flex items-center justify-center"
+                style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.2), rgba(236,72,153,0.15))', border: '1px solid rgba(139,92,246,0.3)' }}>
+                <span style={{ fontSize: 38 }}>🌍</span>
+              </div>
+              <p className="text-lg font-bold text-white text-center">What&apos;s happening near you?</p>
+              <p className="text-sm text-center leading-relaxed" style={{ color: '#888899', maxWidth: 280 }}>
+                Nova shows real events, concerts, food spots and things to do around you — tell us where you are to start.
+              </p>
+              <div className="flex flex-col gap-2.5 w-full max-w-xs mt-2">
+                <motion.button whileTap={{ scale: 0.96 }} onClick={onOpenLocationPrompt}
+                  className="w-full py-3 rounded-2xl text-sm font-bold text-white flex items-center justify-center gap-2"
+                  style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', boxShadow: '0 4px 20px rgba(139,92,246,0.4)' }}>
+                  <MapPin size={15} /> Use my location
+                </motion.button>
+                <motion.button whileTap={{ scale: 0.96 }} onClick={onOpenCityExplorer}
+                  className="w-full py-3 rounded-2xl text-sm font-bold flex items-center justify-center gap-2"
+                  style={{ background: '#1a1a24', color: '#c4b5fd', border: '1px solid #2a2a38' }}>
+                  🏙️ {t.feed.chooseCity}
+                </motion.button>
+              </div>
+            </div>
+          )}
+
+          {/* Partners empty state — honest: no paid partners here yet, so pitch
+              local businesses instead of showing invented ones. */}
+          {!isTabLoading && activeMainTab === 'partners' && !sponsoredLoading && mergedFeed.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 px-8 gap-4">
+              <div className="w-16 h-16 rounded-3xl flex items-center justify-center"
+                style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.3)' }}>
+                <Store size={30} style={{ color: '#f59e0b' }} />
+              </div>
+              <p className="text-base font-bold text-white text-center">
+                No partner offers{location?.city ? ` in ${location.city}` : ''} yet
+              </p>
+              <p className="text-sm text-center leading-relaxed" style={{ color: '#888899', maxWidth: 280 }}>
+                Local restaurants, bars, hotels and experiences can promote themselves here — geo-targeted to people exploring{location?.city ? ` ${location.city}` : ' their city'}.
+              </p>
+              <motion.button whileTap={{ scale: 0.96 }} onClick={() => window.open('/business', '_blank')}
+                className="mt-1 px-6 py-3 rounded-2xl text-sm font-bold"
+                style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)', color: '#0a0a0f' }}>
+                ✨ List your business
+              </motion.button>
+            </div>
           )}
 
           {/* Honest empty state — no invented content when sources are empty */}

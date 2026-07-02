@@ -2,8 +2,8 @@
 
 import React, { createContext, useContext, useReducer, useEffect, useRef, useCallback } from 'react';
 import { AppPersistedState, UserPreferences, NovaNotification, Post, Toast, LocationState, Reminder, Category } from '@/types';
-import { DEFAULT_PREFERENCES, MOCK_NOTIFICATIONS, MOCK_POSTS } from '@/data/mockData';
-import { learnFromInteraction, learnFromBrowse, generateAINotification, getTopCategories } from '@/lib/aiEngine';
+import { DEFAULT_PREFERENCES, welcomeNotification } from '@/data/appDefaults';
+import { learnFromInteraction, learnFromBrowse } from '@/lib/aiEngine';
 import { upsertInteraction, deleteInteraction } from '@/lib/supabase';
 
 // Module-level user ID for Supabase sync — set by AppShell when auth state changes
@@ -80,6 +80,13 @@ async function decryptLoad(): Promise<AppPersistedState | null> {
   }
 }
 
+// Notifications older app versions pre-seeded or auto-generated from demo
+// content (ids n1…n8 / ai_<timestamp>). Real notifications only ever come from
+// live feed posts now, so stored demo ones are dropped on load.
+function isLegacyDemoNotification(n: NovaNotification): boolean {
+  return /^(n\d+|ai_\d+)$/.test(n.id);
+}
+
 function migrateState(raw: Partial<AppPersistedState>): AppPersistedState {
   const interactionPosts = raw.interactionPosts ?? [];
   // Self-heal: only keep liked/saved/going ids that resolve to a stored post
@@ -102,7 +109,7 @@ function migrateState(raw: Partial<AppPersistedState>): AppPersistedState {
       lastActive: raw.aiProfile?.lastActive ?? Date.now(),
       sessionCount: (raw.aiProfile?.sessionCount ?? 0) + 1,
     },
-    notifications: raw.notifications ?? MOCK_NOTIFICATIONS,
+    notifications: (raw.notifications ?? [welcomeNotification()]).filter(n => !isLegacyDemoNotification(n)),
     location: raw.location ?? null,
     locationEnabled: raw.locationEnabled ?? false,
     hasSeenLocationPrompt: raw.hasSeenLocationPrompt ?? false,
@@ -124,7 +131,7 @@ const DEFAULT_STATE: AppPersistedState = {
   reminders: [],
   hasOnboarded: false,
   aiProfile: { categoryEngagement: {}, totalInteractions: 0, lastActive: Date.now(), sessionCount: 1 },
-  notifications: MOCK_NOTIFICATIONS,
+  notifications: [welcomeNotification()],
   location: null,
   locationEnabled: false,
   hasSeenLocationPrompt: false,
@@ -297,6 +304,7 @@ interface AppContextValue {
   removeReminder: (postId: string) => void;
   setPreferences: (prefs: UserPreferences) => void;
   learnCategory: (category: Category) => void;
+  addNotification: (notif: NovaNotification) => void;
   markAllRead: () => void;
   markRead: (id: string) => void;
   completeOnboarding: (prefs: UserPreferences) => void;
@@ -325,7 +333,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, DEFAULT_STATE);
   const [toasts, setToasts] = React.useState<Toast[]>([]);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const aiTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadedRef = useRef(false);
 
   // Load persisted state on mount
@@ -346,54 +353,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [state]);
 
-  // AI periodic notification engine
+  // Ask for notification permission once, shortly after launch. Notifications
+  // themselves only ever fire for REAL content: new feed events (FeedTab),
+  // reminders (below), and the server push digest — never invented activity.
   useEffect(() => {
-    // Request notification permission after 5s
     const permTimer = setTimeout(() => {
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission();
       }
     }, 5000);
-
-    // Generate AI notifications every 3 minutes
-    aiTimerRef.current = setInterval(() => {
-      const topCats = getTopCategories(state.preferences, state.aiProfile, 3);
-      const topCat = topCats[Math.floor(Math.random() * topCats.length)];
-      const candidatePosts = MOCK_POSTS.filter(
-        p => p.category === topCat &&
-          !state.notifications.some(n => n.postId === p.id && n.type === 'ai_suggestion')
-      );
-      if (candidatePosts.length === 0) return;
-
-      const randomPost = candidatePosts[Math.floor(Math.random() * candidatePosts.length)];
-      const notifUser = randomPost.user;
-      const generated = generateAINotification(randomPost, state.preferences, notifUser);
-      const notif: NovaNotification = {
-        ...generated,
-        id: `ai_${Date.now()}`,
-        type: randomPost.isEvent ? 'event' : 'ai_suggestion',
-      };
-
-      dispatch({ type: 'ADD_NOTIFICATION', notif });
-
-      // Browser notification
-      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-        try {
-          new Notification('Nova — New for you ✨', {
-            body: notif.text,
-            icon: '/favicon.ico',
-            badge: '/favicon.ico',
-          });
-        } catch { /* permission revoked mid-session */ }
-      }
-    }, 3 * 60 * 1000);
-
-    return () => {
-      clearTimeout(permTimer);
-      if (aiTimerRef.current) clearInterval(aiTimerRef.current);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.preferences, state.aiProfile]);
+    return () => clearTimeout(permTimer);
+  }, []);
 
   // Reminder scheduler — re-runs whenever reminders change
   useEffect(() => {
@@ -483,6 +453,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     removeReminder: (postId) => dispatch({ type: 'REMOVE_REMINDER', postId }),
     setPreferences: (prefs) => dispatch({ type: 'SET_PREFERENCES', prefs }),
     learnCategory: (category) => dispatch({ type: 'LEARN_CATEGORY', category }),
+    addNotification: (notif) => dispatch({ type: 'ADD_NOTIFICATION', notif }),
     markAllRead: () => dispatch({ type: 'MARK_ALL_READ' }),
     markRead: (id) => dispatch({ type: 'MARK_READ', id }),
     completeOnboarding: (prefs) => dispatch({ type: 'COMPLETE_ONBOARDING', prefs }),

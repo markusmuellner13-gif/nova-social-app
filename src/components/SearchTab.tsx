@@ -4,7 +4,6 @@ import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, Hash, TrendingUp, Flame, MapPin, Loader2, Navigation2, ExternalLink } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import { MOCK_POSTS, formatCount } from '@/data/mockData';
 import { Post, Category } from '@/types';
 import CommentsSheet from './CommentsSheet';
 import { useLanguage } from '@/context/LanguageContext';
@@ -109,19 +108,18 @@ export default function SearchTab() {
 
   useEffect(() => { void fetchLocalHot(); }, [fetchLocalHot]);
 
-  const globePosts = mapPosts.length > 0 ? mapPosts : MOCK_POSTS;
+  // Real live events only — while the worldwide feed loads the globe just shows
+  // the map itself, never placeholder pins.
+  const globePosts = mapPosts;
   const globeFocus = location
     ? { lat: location.lat, lng: location.lng }
     : null;
 
-  // Search pool: prefer real local posts, fall back to global mock posts
-  const searchPool = localHotPosts.length > 0 ? localHotPosts : MOCK_POSTS;
+  // Search pool: only real posts for the user's area
+  const searchPool = localHotPosts;
 
-  // Trending tags derived from actual post data — local posts first, then global
-  const trending = useMemo(
-    () => buildTrending(localHotPosts.length > 0 ? localHotPosts : MOCK_POSTS),
-    [localHotPosts]
-  );
+  // Trending tags derived from actual local post data
+  const trending = useMemo(() => buildTrending(localHotPosts), [localHotPosts]);
 
   const filteredPosts = useMemo(() => {
     let results = searchPool;
@@ -292,7 +290,8 @@ export default function SearchTab() {
                   )}
                 </div>
 
-                {/* Trending */}
+                {/* Trending — only when there's real local data to derive it from */}
+                {trending.length > 0 && (
                 <div className="px-4 mt-6">
                   <div className="flex items-center gap-2 mb-3">
                     <TrendingUp size={16} style={{ color: '#8b5cf6' }} />
@@ -316,6 +315,7 @@ export default function SearchTab() {
                     ))}
                   </div>
                 </div>
+                )}
 
                 {/* Hot posts grid — location-aware */}
                 <div className="mt-6 mb-2">
@@ -333,7 +333,7 @@ export default function SearchTab() {
                     {localHotLoading && <Loader2 size={12} style={{ color: '#8b5cf6', marginLeft: 'auto' }} className="animate-spin" />}
                   </div>
                   <PostGrid
-                    posts={localHotPosts.length > 0 ? localHotPosts.slice(0, 18) : MOCK_POSTS.slice(0, 18)}
+                    posts={localHotPosts.slice(0, 18)}
                     onPostOpen={setSelectedPost}
                   />
                 </div>
@@ -477,9 +477,6 @@ function PostGrid({ posts, onPostOpen, query, onSuggestion }: { posts: Post[]; o
               EVENT
             </div>
           )}
-          <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity" style={{ background: 'rgba(0,0,0,0.45)' }}>
-            <span className="text-white text-xs font-semibold">⭐ {formatCount(post.likes)}</span>
-          </div>
         </motion.button>
       ))}
     </div>

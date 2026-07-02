@@ -112,6 +112,9 @@ export interface NovaNotification {
   timestamp: number;
   read: boolean;
   postId?: string;
+  // Full snapshot of the real feed post the notification points at, so tapping
+  // it can open the post even after the live feed has moved on.
+  post?: Post;
 }
 
 export interface AIProfile {
