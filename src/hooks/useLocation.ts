@@ -103,7 +103,18 @@ async function reverseGeocode(lat: number, lng: number): Promise<GeoResult> {
   if (nom) return nom;
   const bdc = await geocodeBigDataCloud(lat, lng);
   if (bdc) return bdc;
+  // 'Unknown City' is an internal failure sentinel, never a real place — it
+  // must not be stored as the user's city (a truthy string makes `hasCity`
+  // checks think we know where they are, so the app would show a permanent
+  // "No content found near Unknown City" instead of retrying or asking).
   return { city: 'Unknown City', country: 'Unknown', countryCode: '' };
+}
+
+// Strip the 'Unknown City' failure sentinel so it never leaks into app state
+// as if it were a real, resolved place. Coordinates are kept — the feed still
+// sends real lat/lng and lets the server attempt its own (independent) geocode.
+function sanitizeGeo(geo: GeoResult): GeoResult {
+  return geo.city === 'Unknown City' ? { ...geo, city: '' } : geo;
 }
 
 // Never persist a failed geocode — a cached 'Unknown City' would label every
@@ -189,14 +200,17 @@ export function useLocation(): UseLocationReturn {
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const { latitude: lat, longitude: lng } = pos.coords;
-        const geo = await reverseGeocode(lat, lng);
+        const geo = sanitizeGeo(await reverseGeocode(lat, lng));
         const loc: LocationState = { lat, lng, ...geo, enabled: true };
         setLocation(loc);
         setPermission('granted');
         persistLocation(loc);
       },
       () => { /* silent fail */ },
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+      // maximumAge kept short so a reopen in a new city (after travel) always
+      // gets an actually-current fix instead of reusing a stale one — the
+      // whole point of this call is to correct a possibly-wrong cached city.
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 }
     );
   }
 
@@ -212,7 +226,7 @@ export function useLocation(): UseLocationReturn {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           const { latitude: lat, longitude: lng } = pos.coords;
-          const geo = await reverseGeocode(lat, lng);
+          const geo = sanitizeGeo(await reverseGeocode(lat, lng));
           const loc: LocationState = { lat, lng, ...geo, enabled: true };
           setLocation(loc);
           setPermission('granted');

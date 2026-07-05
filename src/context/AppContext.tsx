@@ -240,6 +240,10 @@ function reducer(state: AppPersistedState, action: Action): AppPersistedState {
       return { ...state, aiProfile: learnFromBrowse(state.aiProfile, action.category) };
 
     case 'ADD_NOTIFICATION':
+      // Same event/post can trigger this from more than one code path (feed
+      // refresh + push, or a re-fired effect) — de-dupe by id so it never
+      // shows the same notification two or three times in the list.
+      if (state.notifications.some(n => n.id === action.notif.id)) return state;
       return {
         ...state,
         notifications: [action.notif, ...state.notifications].slice(0, 50),

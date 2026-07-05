@@ -269,7 +269,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                 { icon: BadgeCheck, label: t.settings.requestVerification, action: () => { addToast(t.settings.verificationSent, 'success'); setShowSettings(false); } },
                 {
                   icon: state.locationEnabled ? MapPin : MapPinOff,
-                  label: state.locationEnabled ? `${t.settings.locationOn}: ${state.location?.city ?? 'On'}` : t.settings.locationOff,
+                  label: state.locationEnabled ? `${t.settings.locationOn}: ${state.location?.city || 'On'}` : t.settings.locationOff,
                   action: () => {
                     setLocationEnabled(!state.locationEnabled);
                     addToast(state.locationEnabled ? t.settings.locationDisabled : t.settings.locationEnabled, 'info', '📍');

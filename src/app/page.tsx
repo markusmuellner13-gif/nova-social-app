@@ -22,7 +22,7 @@ import { setFriendsGoingUser } from '@/lib/friendsGoing';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import Onboarding from '@/components/Onboarding';
 import { useLocation } from '@/hooks/useLocation';
-import { initNotifications, subscribeToPush, setAppBadge, clearAppBadge } from '@/lib/notifications';
+import { initNotifications, subscribeToPush, setAppBadge, clearAppBadge, dismissActiveNotifications } from '@/lib/notifications';
 import { getTopCategories } from '@/lib/aiEngine';
 import { LocationState, Post } from '@/types';
 
@@ -42,6 +42,25 @@ function AppShell() {
   // Register the service worker once. Safe no-op when unsupported.
   useEffect(() => {
     void initNotifications();
+  }, []);
+
+  // Clear any lingering OS notification banners whenever the app is opened or
+  // brought to the foreground — not just when the user taps a notification
+  // directly. Without this, reading a post from inside the app leaves the
+  // banner sitting in the notification tray/lock-screen indefinitely.
+  useEffect(() => {
+    function handleForeground() {
+      if (document.visibilityState === 'visible') {
+        void dismissActiveNotifications();
+      }
+    }
+    handleForeground();
+    document.addEventListener('visibilitychange', handleForeground);
+    window.addEventListener('focus', handleForeground);
+    return () => {
+      document.removeEventListener('visibilitychange', handleForeground);
+      window.removeEventListener('focus', handleForeground);
+    };
   }, []);
 
   // Subscribe to web push with the user's city so the daily digest can send
@@ -138,7 +157,7 @@ function AppShell() {
             exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: 'easeInOut' }}
             style={{ position: 'absolute', inset: 0 }}>
             <ErrorBoundary>
-              {activeTab === 'feed'    && <FeedTab onOpenLocationPrompt={() => setShowLocationPrompt(true)} onOpenCityExplorer={() => setShowCityExplorer(true)} onOpenNotifications={() => setShowNotifications(true)} />}
+              {activeTab === 'feed'    && <FeedTab onOpenLocationPrompt={() => setShowLocationPrompt(true)} onOpenCityExplorer={() => setShowCityExplorer(true)} onOpenNotifications={() => setShowNotifications(true)} locationLoading={permission === 'loading'} />}
               {activeTab === 'explore' && <SearchTab />}
               {activeTab === 'groups'  && <GroupsTab onOpenAuth={() => setShowAuth(true)} />}
               {activeTab === 'chat'    && <ChatTab location={state.location} />}
@@ -160,7 +179,7 @@ function AppShell() {
             exit={{ opacity: 0, x: 24 }}
             transition={{ duration: 0.2, ease: 'easeOut' }}
             className="fixed inset-0 z-40"
-            style={{ background: '#0a0a0f' }}
+            style={{ background: '#0a0a0f', paddingTop: 'env(safe-area-inset-top, 0px)' }}
           >
             <NotificationsTab onClose={() => setShowNotifications(false)} />
           </motion.div>

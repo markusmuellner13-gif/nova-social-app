@@ -106,9 +106,9 @@ export default function CityExplorer({ currentCity, onSelectCity, onClose }: Pro
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#0a0a0f' }}>
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#0a0a0f', paddingTop: 'env(safe-area-inset-top, 0px)' }}>
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 pt-14 pb-4" style={{ borderBottom: '1px solid #1e1e2a' }}>
+      <div className="flex items-center gap-3 px-4 pt-4 pb-4" style={{ borderBottom: '1px solid #1e1e2a' }}>
         <div className="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
           <Search size={16} style={{ color: '#666677', flexShrink: 0 }} />
           <input

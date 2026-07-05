@@ -167,7 +167,7 @@ export default function ChatTab({ location }: Props) {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-            placeholder={`What's on in ${location?.city ?? 'your city'}?`}
+            placeholder={`What's on in ${location?.city || 'your city'}?`}
             className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-[#444455]"
           />
         </div>
