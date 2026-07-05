@@ -271,7 +271,7 @@ export default function SearchTab() {
                         lat={globeFocus?.lat ?? 48.2}
                         lng={globeFocus?.lng ?? 16.37}
                         zoom={location?.city ? 13 : 3}
-                        label={location?.city ?? 'World'}
+                        label={location?.city || 'World'}
                       />
                       <div className="mt-3 flex gap-2">
                         <motion.button

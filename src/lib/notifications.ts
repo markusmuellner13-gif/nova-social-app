@@ -105,6 +105,21 @@ export function clearAppBadge(): void {
   setAppBadge(0);
 }
 
+// Close every currently-displayed OS notification banner. The service worker
+// only closes a notification when the user taps it (notificationclick) — if
+// they instead just open/foreground the app another way, the banner is left
+// sitting in the tray/lock-screen forever. Call this whenever the app comes
+// to the foreground so opening it any way always clears stale banners.
+export async function dismissActiveNotifications(): Promise<void> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+  try {
+    const reg = swRegistration ?? await navigator.serviceWorker.getRegistration();
+    if (!reg) return;
+    const shown = await reg.getNotifications();
+    shown.forEach(n => n.close());
+  } catch { /* unsupported or SW not ready */ }
+}
+
 // Show a notification immediately via the SW (preferred) or the page API.
 export async function showLocalNotification(title: string, body: string, url = '/'): Promise<void> {
   const granted = await ensureNotificationPermission();

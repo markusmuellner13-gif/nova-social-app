@@ -112,9 +112,14 @@ interface Props {
   onOpenLocationPrompt: () => void;
   onOpenCityExplorer: () => void;
   onOpenNotifications: () => void;
+  // True while the device is still resolving GPS/cached location. The very
+  // first feed fetch waits for this to clear so it never fires with no
+  // location and falls back to an IP-guessed (or hardcoded-default) city
+  // when the user's real location was about to arrive a moment later.
+  locationLoading: boolean;
 }
 
-export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOpenNotifications }: Props) {
+export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOpenNotifications, locationLoading }: Props) {
   const { state, unreadCount, learnCategory, addNotification } = useApp();
   const { t } = useLanguage();
   const { preferences, aiProfile } = state;
@@ -155,13 +160,17 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     return undefined;
   }, [activeMainTab, activeChipCategory]);
 
-  // Initial fetch
+  // Initial fetch — held back while the device is still resolving location so
+  // it never fires location-less (server falls back to IP-geo, or a hardcoded
+  // default when even that is unavailable) a moment before the user's real
+  // GPS city arrives. Once location finishes resolving (granted, denied, or
+  // no permission at all), fire immediately with whatever we now know.
   useEffect(() => {
-    if (initialFetchDone.current) return;
+    if (initialFetchDone.current || locationLoading) return;
     initialFetchDone.current = true;
     void fetchMore(aiCategory);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [locationLoading]);
 
   // Re-fetch when location or derived category changes — also scroll to top
   // so the user sees a fresh feed instantly.
@@ -212,7 +221,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
       user: NOVA_AI_USER,
       type: match.isEvent ? 'event' : 'ai_suggestion',
       postImage: match.image,
-      text: `New in ${location?.city ?? 'your area'}: ${match.caption.split('\n')[0].slice(0, 70)}`,
+      text: `New in ${location?.city || 'your area'}: ${match.caption.split('\n')[0].slice(0, 70)}`,
       timestamp: Date.now(),
       read: false,
       postId: match.id,
@@ -722,9 +731,9 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
                 <>
                   <Sparkles size={13} style={{ color: '#8b5cf6' }} />
                   <span className="text-xs font-bold" style={{ color: '#a78bfa' }}>
-                    {activeMainTab === 'events' && `${t.feed.eventsNear} ${location?.city ?? 'you'}`}
-                    {activeMainTab === 'sightseeing' && `${t.feed.sightseeingNear} ${location?.city ?? 'you'}`}
-                    {activeMainTab === 'sport' && `${t.feed.sportNear} ${location?.city ?? 'you'}`}
+                    {activeMainTab === 'events' && `${t.feed.eventsNear} ${location?.city || 'you'}`}
+                    {activeMainTab === 'sightseeing' && `${t.feed.sightseeingNear} ${location?.city || 'you'}`}
+                    {activeMainTab === 'sport' && `${t.feed.sportNear} ${location?.city || 'you'}`}
                   </span>
                   {activeMainTab !== 'sightseeing' && (
                     <span className="text-xs ml-2" style={{ color: '#444455' }}>{t.feed.sortedByDate}</span>

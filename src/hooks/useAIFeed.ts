@@ -313,7 +313,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     const cat = category ?? 'events';
     categoryRef.current = cat;
 
-    const city   = location?.city ?? 'nearby';
+    const city   = location?.city || 'nearby';
     // Tier 0 = the place's adaptive local ring (district for a town, metro for a
     // city); deeper tiers expand outward to nearby towns and beyond.
     const radius = radiusTierRef.current === 0
