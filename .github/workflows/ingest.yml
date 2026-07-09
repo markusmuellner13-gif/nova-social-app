@@ -29,7 +29,12 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Worst case: 8 fast-tier calls + 10 main calls + 1 towns call, each up to
+    # ~90s (curl -m 90) = ~19 min. 15 min was too tight and got the job killed
+    # by GitHub's own timeout mid-run (conclusion: cancelled) whenever slices
+    # ran slow — that's what triggered the failure email. Give it real headroom
+    # while still finishing before the next run fires 30 min later.
+    timeout-minutes: 25
     steps:
       - name: Refresh time-sensitive content (fast tier — every run)
         env:
