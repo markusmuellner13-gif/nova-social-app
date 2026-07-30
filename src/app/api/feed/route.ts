@@ -15,6 +15,7 @@ import { eventsCacheKey, cacheTtl, cacheGet, cacheSet } from '@/lib/serverCache'
 import { dbReadEnabled, queryEventsNear, queryEventsByCountry } from '@/lib/eventsDb';
 import { aiBudgetExceeded, noteAiCall } from '@/lib/aiBudget';
 import { assessQuality, qualityFloorFor } from '@/lib/brain/quality';
+import { mergeDuplicates } from '@/lib/brain/curator';
 
 export const maxDuration = 60;
 
@@ -308,6 +309,23 @@ export async function GET(request: NextRequest) {
           // through to the live data that has its own. Events legitimately come
           // from farther away, so they keep the simple count gate.
           const isPlaceCat = OSM_CATEGORIES.has(cat) || cat === 'food' || cat === 'sightseeing';
+
+          // A place category must serve PLACES. Earlier ingest sweeps stored
+          // event rows under place categories (the feed used to blend events
+          // into them), so the Venues tab was being served Tokio Hotel and
+          // Autechre straight from the DB — the same lie the live path was
+          // fixed for, one layer down. Dated events filed under "venues" or
+          // "hotels" are dropped here rather than shown.
+          if (isPlaceCat && cat !== 'sightseeing') {
+            dbPosts = dbPosts.filter(p => !p.isEvent);
+          }
+
+          // The DB accumulates the same event across ingest runs and sources.
+          // Nova Brain's curator already merges these on the way IN; this
+          // catches what earlier sweeps stored before it existed, so nobody
+          // sees "Michael Patrick Kelly" three times in one page.
+          dbPosts = mergeDuplicates(dbPosts).merged;
+
           const nearestKm = dbPosts.length
             ? Math.min(...dbPosts.map(p => haversineKm(lat, lng, p.location?.lat ?? 0, p.location?.lng ?? 0)))
             : Infinity;
