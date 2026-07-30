@@ -18,17 +18,28 @@ interface NavTheme {
   routeWidth: number;
   square: boolean;
   user: string;
-  mapFilter: string;
+  // GPU raster paint values (MapLibre ranges), not CSS filter strings — a
+  // canvas-wide CSS filter re-composites the whole surface every frame, which is
+  // what made panning stutter. saturation/contrast are -1..1, hueRotate is
+  // degrees, brightness is the raster brightness ceiling 0..1.
+  saturation: number;
+  contrast: number;
+  hueRotate: number;
+  brightness: number;
   pixelated: boolean;
 }
 
 const NAV_THEMES: NavTheme[] = [
-  { id: 'nova',      label: 'Nova',      emoji: '🟣', accent: '#8b5cf6', gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)', route: '#8b5cf6', routeGlow: '#c4b5fd', routeWidth: 6, square: false, user: '#3b82f6', mapFilter: 'brightness(0.85) contrast(1.1)', pixelated: false },
-  { id: 'minecraft', label: 'Minecraft', emoji: '🟩', accent: '#5ab552', gradient: 'linear-gradient(135deg,#5ab552,#3b7a36)', route: '#7ed957', routeGlow: '#b6f09c', routeWidth: 8, square: true,  user: '#8b5a2b', mapFilter: 'contrast(1.15) saturate(1.35) brightness(0.88)', pixelated: true },
-  { id: 'neon',      label: 'Cyberpunk', emoji: '🟦', accent: '#22d3ee', gradient: 'linear-gradient(135deg,#22d3ee,#d946ef)', route: '#22d3ee', routeGlow: '#f0abfc', routeWidth: 6, square: false, user: '#f0abfc', mapFilter: 'hue-rotate(150deg) saturate(1.7) contrast(1.1) brightness(0.75)', pixelated: false },
-  { id: 'candy',     label: 'Candy',     emoji: '🍬', accent: '#fb7185', gradient: 'linear-gradient(135deg,#fb7185,#f472b6)', route: '#fb7185', routeGlow: '#fbcfe8', routeWidth: 7, square: false, user: '#f472b6', mapFilter: 'saturate(1.3) brightness(0.9) hue-rotate(-12deg)', pixelated: false },
+  { id: 'nova',      label: 'Nova',      emoji: '🟣', accent: '#8b5cf6', gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)', route: '#8b5cf6', routeGlow: '#c4b5fd', routeWidth: 6, square: false, user: '#3b82f6', saturation: 0,    contrast: 0.1,  hueRotate: 0,   brightness: 0.92, pixelated: false },
+  { id: 'minecraft', label: 'Minecraft', emoji: '🟩', accent: '#5ab552', gradient: 'linear-gradient(135deg,#5ab552,#3b7a36)', route: '#7ed957', routeGlow: '#b6f09c', routeWidth: 8, square: true,  user: '#8b5a2b', saturation: 0.35, contrast: 0.15, hueRotate: 0,   brightness: 0.9,  pixelated: true },
+  { id: 'neon',      label: 'Cyberpunk', emoji: '🟦', accent: '#22d3ee', gradient: 'linear-gradient(135deg,#22d3ee,#d946ef)', route: '#22d3ee', routeGlow: '#f0abfc', routeWidth: 6, square: false, user: '#f0abfc', saturation: 0.7,  contrast: 0.1,  hueRotate: 150, brightness: 0.8,  pixelated: false },
+  { id: 'candy',     label: 'Candy',     emoji: '🍬', accent: '#fb7185', gradient: 'linear-gradient(135deg,#fb7185,#f472b6)', route: '#fb7185', routeGlow: '#fbcfe8', routeWidth: 7, square: false, user: '#f472b6', saturation: 0.3,  contrast: 0,    hueRotate: -12, brightness: 0.94, pixelated: false },
 ];
 const DEFAULT_THEME = NAV_THEMES[0];
+
+// Pins are drawn by the GPU now, so this can be generous — the old cap of 80
+// existed because each pin was a DOM node being repositioned every frame.
+const PIN_LIMIT = 400;
 
 const CATEGORY_COLOR: Record<Category, string> = {
   travel: '#3b82f6', food: '#f97316', fashion: '#ec4899', sports: '#22c55e', art: '#a855f7',
@@ -120,7 +131,8 @@ function getGPSPosition(timeoutMs = 7000, maximumAge = 0): Promise<{ lat: number
 export default function NavMap({ posts, userLocation, initialTarget, onClose }: Props) {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const markersRef = useRef<maplibregl.Marker[]>([]);
+  // Posts backing the GPU pin layer, indexed by the feature's `idx` property.
+  const pinPostsRef = useRef<Post[]>([]);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const stepsRef = useRef<RouteStep[]>([]);
@@ -143,6 +155,9 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const [nextStep, setNextStep] = useState<string>('');
   const [routing, setRouting] = useState(false);
   const [routeError, setRouteError] = useState(false);
+  // Style + pin layers are up; theme/satellite effects wait for this so they
+  // never try to paint a layer that doesn't exist yet.
+  const [mapReady, setMapReady] = useState(false);
 
   // Restore saved theme
   useEffect(() => {
@@ -226,38 +241,103 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     mapRef.current = map;
 
     map.on('load', () => {
-      // Add event-pin markers near the user/target
+      // ── Pins as a GPU layer, not DOM markers ──────────────────────────────
+      // Every maplibregl.Marker is a real DOM element that MapLibre must
+      // reposition on EVERY frame of every pan and zoom. Eighty of them was the
+      // single biggest reason this map felt sticky. A GeoJSON source drawn by
+      // the GPU costs effectively nothing to move, so we can show every nearby
+      // pin and still pan at full frame rate.
       const anchor = userLocation ?? (initialTarget?.location ?? posts[0]?.location);
       const valid = posts.filter(p => p.location && Number.isFinite(p.location.lat) && Number.isFinite(p.location.lng));
-      const nearbyPosts = (!anchor || valid.length <= 80)
+      const nearbyPosts = (!anchor || valid.length <= PIN_LIMIT)
         ? valid
         : valid
             .map(p => ({ p, d: metresBetween(anchor.lat, anchor.lng, p.location!.lat, p.location!.lng) }))
             .sort((a, b) => a.d - b.d)
-            .slice(0, 80)
+            .slice(0, PIN_LIMIT)
             .map(x => x.p);
 
-      for (const p of nearbyPosts) {
-        if (!p.location) continue;
-        const el = document.createElement('button');
-        const color = CATEGORY_COLOR[p.category] ?? '#8b5cf6';
-        el.style.cssText = `width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:${color};border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.5);cursor:pointer;display:flex;align-items:center;justify-content:center;`;
-        const inner = document.createElement('span');
-        inner.textContent = CATEGORY_EMOJI[p.category] ?? '📍';
-        inner.style.cssText = 'transform:rotate(45deg);font-size:13px;line-height:1;';
-        el.appendChild(inner);
-        el.onclick = (e) => { e.stopPropagation(); setTarget(p); };
-        markersRef.current.push(
-          new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([p.location!.lng, p.location!.lat]).addTo(map)
-        );
+      pinPostsRef.current = nearbyPosts;
+      map.addSource('pins', {
+        type: 'geojson',
+        data: {
+          type: 'FeatureCollection',
+          features: nearbyPosts.map((p, i) => ({
+            type: 'Feature' as const,
+            id: i,
+            geometry: { type: 'Point' as const, coordinates: [p.location!.lng, p.location!.lat] },
+            properties: {
+              idx: i,
+              color: CATEGORY_COLOR[p.category] ?? '#8b5cf6',
+              emoji: CATEGORY_EMOJI[p.category] ?? '📍',
+            },
+          })),
+        },
+      });
+      map.addLayer({
+        id: 'pins-circle',
+        type: 'circle',
+        source: 'pins',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 6, 14, 11, 18, 15],
+          'circle-color': ['get', 'color'],
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#ffffff',
+          'circle-opacity': 0.95,
+        },
+      });
+      // Emoji as GPU IMAGES, not text. A symbol layer's `text-field` needs an
+      // SDF glyph endpoint the inline raster style doesn't have (and SDF renders
+      // emoji monochrome anyway). Rasterising each category emoji once into a
+      // small texture gives real colour emoji, costs nothing to draw, and keeps
+      // the whole pin layer on the GPU.
+      const emojis = [...new Set(nearbyPosts.map(p => CATEGORY_EMOJI[p.category] ?? '📍'))];
+      for (const emoji of emojis) {
+        const id = `emoji-${emoji}`;
+        if (map.hasImage(id)) continue;
+        const size = 48;
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = size;
+        const ctx = cv.getContext('2d');
+        if (!ctx) continue;
+        ctx.font = `${Math.round(size * 0.72)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(emoji, size / 2, size / 2 + 1);
+        map.addImage(id, ctx.getImageData(0, 0, size, size), { pixelRatio: 3 });
       }
+      // Only once pins are big enough to read one — below that they stay dots.
+      map.addLayer({
+        id: 'pins-emoji',
+        type: 'symbol',
+        source: 'pins',
+        minzoom: 13,
+        layout: {
+          'icon-image': ['concat', 'emoji-', ['get', 'emoji']],
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 13, 0.7, 18, 1],
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+        },
+      });
+
+      const openPin = (e: maplibregl.MapLayerMouseEvent) => {
+        const idx = e.features?.[0]?.properties?.idx;
+        const p = typeof idx === 'number' ? pinPostsRef.current[idx] : undefined;
+        if (p) setTarget(p);
+      };
+      map.on('click', 'pins-circle', openPin);
+      map.on('click', 'pins-emoji', openPin);
+      for (const layer of ['pins-circle', 'pins-emoji']) {
+        map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
+        map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
+      }
+
+      setMapReady(true);
       if (initialTarget) setTarget(initialTarget);
     });
 
     return () => {
       if (watchIdRef.current !== null) navigator.geolocation?.clearWatch(watchIdRef.current);
-      markersRef.current.forEach(m => m.remove());
-      markersRef.current = [];
       map.remove();
       mapRef.current = null;
       satelliteLayerAddedRef.current = false;
@@ -266,16 +346,27 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Apply theme filter to map canvas
+  // ── Theme tint, done on the GPU ────────────────────────────────────────────
+  // This used to set a CSS `filter` on the WebGL canvas. A canvas-wide CSS
+  // filter forces the compositor to re-process the whole surface on EVERY
+  // frame, so simply having a theme selected (and the default one has a filter)
+  // made panning stutter. MapLibre's raster paint properties do the same job
+  // inside the shader, where it is free.
   useEffect(() => {
     const canvas = containerRef.current?.querySelector('canvas');
     if (canvas) {
-      canvas.style.filter = theme.mapFilter;
+      canvas.style.filter = '';
       canvas.style.imageRendering = theme.pixelated ? 'pixelated' : 'auto';
-      canvas.style.transition = 'filter 0.3s ease';
     }
     const map = mapRef.current;
     if (map?.isStyleLoaded()) {
+      for (const layer of ['carto-base', 'satellite-layer']) {
+        if (!map.getLayer(layer)) continue;
+        map.setPaintProperty(layer, 'raster-saturation', theme.saturation);
+        map.setPaintProperty(layer, 'raster-contrast', theme.contrast);
+        map.setPaintProperty(layer, 'raster-hue-rotate', theme.hueRotate);
+        map.setPaintProperty(layer, 'raster-brightness-max', theme.brightness);
+      }
       if (map.getLayer('route-line')) {
         map.setPaintProperty('route-line', 'line-color', theme.route);
         map.setPaintProperty('route-line', 'line-width', theme.routeWidth);
@@ -290,7 +381,9 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
       el.style.boxShadow = `0 0 0 6px ${theme.user}40`;
       el.style.borderRadius = theme.square ? '3px' : '50%';
     }
-  }, [theme]);
+    // `mapReady` re-runs this once the style and layers exist, so a theme picked
+    // before the map finished loading still gets applied.
+  }, [theme, mapReady, satellite]);
 
   // Satellite toggle — overlay Esri imagery above the street raster.
   // Route line layers are added later and will naturally sit on top.

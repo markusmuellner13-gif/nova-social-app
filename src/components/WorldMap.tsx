@@ -125,22 +125,51 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate, state =
     (e.target as Element).setPointerCapture?.(e.pointerId);
   }, []);
 
+  // A touch screen fires pointermove up to ~120 times a second, and every
+  // rotation change reprojects the whole globe — countries and all pins. Setting
+  // state per event meant several full reprojections per frame, which is what
+  // made dragging feel heavy. We accumulate the movement in a ref and flush it
+  // once per animation frame, so the globe does exactly one reprojection per
+  // frame no matter how chatty the pointer is. Motion is identical; the work is
+  // a fraction.
+  const pendingDragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const dragRafRef = useRef<number | null>(null);
+
+  const flushDrag = useCallback(() => {
+    dragRafRef.current = null;
+    const pending = pendingDragRef.current;
+    if (!pending) return;
+    pendingDragRef.current = null;
+    const sensitivity = 0.32 / zoom;
+    setRotation(([lng, lat]) => [
+      lng + pending.dx * sensitivity,
+      Math.max(-90, Math.min(90, lat - pending.dy * sensitivity)),
+    ]);
+  }, [zoom]);
+
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!draggingRef.current || !lastPosRef.current) return;
     const dx = e.clientX - lastPosRef.current.x;
     const dy = e.clientY - lastPosRef.current.y;
     if (Math.abs(dx) > 2 || Math.abs(dy) > 2) movedRef.current = true;
     lastPosRef.current = { x: e.clientX, y: e.clientY };
-    const sensitivity = 0.32 / zoom;
-    setRotation(([lng, lat]) => [
-      lng + dx * sensitivity,
-      Math.max(-90, Math.min(90, lat - dy * sensitivity)),
-    ]);
-  }, [zoom]);
+
+    const pending = pendingDragRef.current;
+    pendingDragRef.current = pending ? { dx: pending.dx + dx, dy: pending.dy + dy } : { dx, dy };
+    if (dragRafRef.current === null) dragRafRef.current = requestAnimationFrame(flushDrag);
+  }, [flushDrag]);
 
   const endDrag = useCallback(() => {
     draggingRef.current = false;
     lastPosRef.current = null;
+    // Apply whatever hadn't been flushed yet so the globe never stops a few
+    // pixels short of where the finger left it.
+    if (dragRafRef.current !== null) { cancelAnimationFrame(dragRafRef.current); dragRafRef.current = null; }
+    flushDrag();
+  }, [flushDrag]);
+
+  useEffect(() => () => {
+    if (dragRafRef.current !== null) cancelAnimationFrame(dragRafRef.current);
   }, []);
 
   const onWheel = useCallback((e: React.WheelEvent) => {
