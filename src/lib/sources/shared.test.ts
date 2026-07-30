@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   slugify, haversineKm, withDistance, dedupePosts, dropExpired,
-  proxyImage, picsumUrl, todayStr, ensureUniqueImages, type ApiPost,
+  proxyImage, picsumUrl, todayStr, ensureUniqueImages, makeUser, type ApiPost,
 } from './shared';
 
 // Minimal ApiPost factory so tests stay readable.
@@ -85,18 +85,31 @@ describe('dropExpired', () => {
 });
 
 describe('proxyImage', () => {
-  it('proxies rate-limited image hosts', () => {
-    expect(proxyImage('https://images.unsplash.com/photo-1')).toMatch(/^\/api\/image-proxy\?url=/);
-  });
-  it('leaves other hosts (and empty) unchanged', () => {
+  // Sources now store the ORIGINAL absolute URL; proxying + resizing happens at
+  // render time (PostImage → /api/image-proxy?w=…), so stored posts work
+  // unchanged in the native shell and existing DB rows get the new pipeline too.
+  it('stores the original absolute url, unchanged', () => {
+    expect(proxyImage('https://images.unsplash.com/photo-1')).toBe('https://images.unsplash.com/photo-1');
     expect(proxyImage('https://s1.ticketm.net/x.jpg')).toBe('https://s1.ticketm.net/x.jpg');
     expect(proxyImage('')).toBe('');
   });
 });
 
 describe('picsumUrl', () => {
-  it('produces a deterministic, sanitised seed url', () => {
-    expect(picsumUrl('Rome Events!')).toBe('https://picsum.photos/seed/rome_events_/1080/1350');
+  it('produces a deterministic, sanitised seed url at card resolution', () => {
+    expect(picsumUrl('Rome Events!')).toBe('https://picsum.photos/seed/rome_events_/1440/1800');
+  });
+});
+
+describe('makeUser', () => {
+  it('keeps accented names readable in the handle', () => {
+    // Previously "Grünbergstraße" became "gr.nbergstra.e" — every non-ASCII
+    // letter was replaced by a dot.
+    expect(makeUser('Grünbergstraße').username).toBe('grunbergstrasse');
+    expect(makeUser('Café Größenwahn').username).toBe('cafe.grossenwahn');
+  });
+  it('does not leave leading or trailing separators', () => {
+    expect(makeUser('!!Bar 42!!').username).toBe('bar.42');
   });
 });
 

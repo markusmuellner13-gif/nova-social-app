@@ -9,6 +9,7 @@ import { getTopCategories } from '@/lib/aiEngine';
 import { parseMinPrice } from './Post';
 import { useApp } from '@/context/AppContext';
 import { useAIFeed } from '@/hooks/useAIFeed';
+import { initBrain, rankPosts, setBrainContext, flushBrain } from '@/lib/brain/client';
 import { apiUrl } from '@/lib/apiBase';
 import PostComponent from './Post';
 import { useLanguage } from '@/context/LanguageContext';
@@ -125,11 +126,14 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   const { preferences, aiProfile } = state;
   const location = state.location;
 
-  const { posts: aiPosts, loading: aiLoading, hasMore: aiHasMore, fetchMore, reset: resetAI } = useAIFeed(location);
+  const { posts: aiPosts, loading: aiLoading, hasMore: aiHasMore, fetchMore, reset: resetAI, emptyReason } = useAIFeed(location);
 
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('discover');
   const [activeChipCategory, setActiveChipCategory] = useState<Category | null>(null);
   const [sortMode, setSortMode] = useState<'for_you' | 'recent'>('for_you');
+  // Bumped once the shared model has been fetched, so the first "For You" render
+  // after the weights arrive re-ranks with them.
+  const [brainTick, setBrainTick] = useState(0);
   const [dateFilter,  setDateFilter]  = useState<DateFilter>('all');
   const [priceFilter, setPriceFilter] = useState<PriceFilter>('all');
   const [showFilters, setShowFilters] = useState(false);
@@ -171,6 +175,23 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     void fetchMore(aiCategory);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationLoading]);
+
+  // ── Nova Brain ────────────────────────────────────────────────────────────
+  // Pull the shared ranking weights once per session and hand the brain what the
+  // app already knows about this user's tastes. Everything below is fail-soft:
+  // if the model never arrives, the feed keeps the server's ordering.
+  useEffect(() => {
+    void initBrain().then(() => setBrainTick(t => t + 1));
+    // Flush any queued training samples when the app is backgrounded, which is
+    // when a session usually ends on mobile.
+    const onHide = () => { if (document.visibilityState === 'hidden') void flushBrain(); };
+    document.addEventListener('visibilitychange', onHide);
+    return () => { document.removeEventListener('visibilitychange', onHide); void flushBrain(); };
+  }, []);
+
+  useEffect(() => {
+    setBrainContext({ categoryAffinity: state.preferences as unknown as Record<string, number> });
+  }, [state.preferences]);
 
   // Re-fetch when location or derived category changes — also scroll to top
   // so the user sees a fresh feed instantly.
@@ -250,8 +271,12 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     let pool = aiPosts;
     if (activeChipCategory) pool = pool.filter(p => p.category === activeChipCategory);
     if (sortMode === 'recent') return [...pool].sort((a, b) => b.timestamp - a.timestamp);
-    return pool;
-  }, [aiPosts, activeChipCategory, sortMode]);
+    // "For You" is where Nova Brain's trained ranker takes over. It returns the
+    // pool untouched until the model has actually learned something, so a fresh
+    // install still gets the server's soonest-first ordering rather than the
+    // opinions of a model that has seen nothing.
+    return rankPosts(pool, location?.localKm ?? 20);
+  }, [aiPosts, activeChipCategory, sortMode, location?.localKm, brainTick]);
 
   // Build merged feed depending on active tab
   const mergedFeed = useMemo(() => {
@@ -862,16 +887,33 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
                 <MapPin size={26} style={{ color: '#a78bfa' }} />
               </div>
               <p className="text-sm font-bold text-white text-center">
-                {location?.city
-                  ? `No ${activeMainTab === 'events' ? 'events' : activeMainTab === 'sightseeing' ? 'sightseeing spots' : activeMainTab === 'sport' ? 'sports events' : 'content'} found near ${location.city} yet`
-                  : t.profile.noUpcomingEvents}
+                {emptyReason === 'places_unavailable'
+                  ? "Couldn't reach the places service"
+                  : location?.city
+                    ? `No ${activeMainTab === 'events' ? 'events' : activeMainTab === 'sightseeing' ? 'sightseeing spots' : activeMainTab === 'sport' ? 'sports events' : 'content'} found near ${location.city} yet`
+                    : t.profile.noUpcomingEvents}
               </p>
               <p className="text-xs text-center" style={{ color: '#888899' }}>
-                {location?.city
-                  ? `We're growing our ${location.city} listings — pull down to refresh or check back soon!`
-                  : t.feed.pullRefresh}
+                {/* An outage and a genuinely quiet area are different things, and
+                    saying so is the difference between a broken-feeling app and
+                    an honest one. */}
+                {emptyReason === 'places_unavailable'
+                  ? 'Our map data provider is not responding right now. Your other tabs still work — try again in a moment.'
+                  : location?.city
+                    ? `We're growing our ${location.city} listings — pull down to refresh or check back soon!`
+                    : t.feed.pullRefresh}
               </p>
-              {activeMainTab !== 'discover' && (
+              {emptyReason === 'places_unavailable' && (
+                <motion.button
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => { resetAI(); void fetchMore(aiCategory); }}
+                  className="mt-2 px-5 py-2 rounded-full text-xs font-bold"
+                  style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)', color: 'white' }}
+                >
+                  Try again
+                </motion.button>
+              )}
+              {activeMainTab !== 'discover' && emptyReason !== 'places_unavailable' && (
                 <motion.button
                   whileTap={{ scale: 0.95 }}
                   onClick={() => setActiveMainTab('discover')}

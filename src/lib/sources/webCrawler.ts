@@ -19,6 +19,7 @@
 
 import { ApiPost, makeUser, picsumUrl, slugify, todayStr, haversineKm, fetchOgImage, proxyImage } from './shared';
 import { validateBatch } from '@/lib/eventValidation';
+import { sameLabel, dedupeAddressParts } from './eventbrite';
 
 // The schema.org Event subtypes we treat as real events.
 const EVENT_TYPES = new Set([
@@ -444,15 +445,25 @@ function toApiPost(
   } catch { /* keep TBC */ }
 
   const venue = ev.venue || evCity;
-  const addr = [ev.street, evCity].filter(Boolean).join(', ');
+  // Crawled pages repeat themselves constantly — the venue name is often also
+  // the street, and the city appears in both. Left alone this produced labels
+  // like "METAStadt Open Air, METAStadt Open Air, Vienna, WI, Austria, Vienna".
+  const addr = dedupeAddressParts([ev.street, evCity], venue);
   const price = ev.price || 'See website';
   const url = ev.url || `https://allevents.in/${slugify(searchCity)}`;
   const host = (() => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'nova'; } })();
   const desc = ev.description || `${ev.name} in ${evCity}.`;
+  // Some listings put a URL in the organizer field. A raw URL makes a terrible
+  // display name and an unreadable @handle ("https.allevents.in.org.concert…"),
+  // so fall back to the venue whenever the organiser doesn't look like a name.
+  const organizerRaw = (ev.organizer ?? '').trim();
+  const organizer = (!organizerRaw || /^https?:\/\/|^www\.|\//.test(organizerRaw))
+    ? venue
+    : organizerRaw;
 
   return {
     id: `nova_${slugify(ev.name).slice(0, 28)}_${rawDate}_${idx}`,
-    user: makeUser(ev.organizer || venue, host),
+    user: makeUser(organizer, host),
     image: ev.image || picsumUrl(`nova_${searchCity}_${category}_${idx}`),
     caption: `${desc.slice(0, 320)}\n\n📅 ${dateStr}${time ? ` · ${time}` : ''}\n📍 ${venue}${addr ? `, ${addr}` : ''}\n🎟️ ${price}\n🔗 Tickets & info: ${url}`,
     likes: 0,
@@ -460,14 +471,14 @@ function toApiPost(
     category: category === 'discover' ? 'events' : category,
     hashtags: [`#${evCity.replace(/\s/g, '')}`, `#${category}`, '#nova', '#local'],
     timestamp: Date.now() - Math.random() * 7_200_000,
-    location: { name: `${venue}, ${evCity}`, lat, lng },
+    location: { name: sameLabel(venue, evCity) ? evCity : `${venue}, ${evCity}`, lat, lng },
     saved: false, liked: false,
     isEvent: true, isAIGenerated: false,
     eventDate: `${dateStr}${time ? ` · ${time}` : ''}`,
     eventDateRaw: rawDate,
     eventVenue: `${venue}${addr ? `, ${addr}` : ''}`,
     eventUrl: url,
-    organizer: ev.organizer || venue,
+    organizer,
     price,
   };
 }

@@ -67,6 +67,8 @@ interface Props {
   focus?: { lat: number; lng: number } | null;
   /** When provided, the popup's Directions button opens the in-app map/nav. */
   onNavigate?: (post: Post) => void;
+  /** Load state of the worldwide feed, so an empty globe can explain itself. */
+  state?: 'loading' | 'ready' | 'unavailable';
 }
 
 const BASE_SCALE = 220;       // orthographic radius at zoom = 1
@@ -79,7 +81,7 @@ const HEIGHT = 420;
 // centre of the visible hemisphere, then most popular), so the cap is invisible.
 const MAX_PINS = 120;
 
-export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props) {
+export default function WorldMap({ posts, onPostOpen, focus, onNavigate, state = 'ready' }: Props) {
   const [selected, setSelected] = useState<Post | null>(null);
   const [zoom, setZoom] = useState(1.15);
   // Rotation: the visible centre of the globe sits at lon=-rotate[0], lat=-rotate[1]
@@ -334,7 +336,11 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate }: Props
         className="absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-semibold pointer-events-none"
         style={{ background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.3)' }}
       >
-        🌍 {posts.length.toLocaleString()} live events
+        {posts.length > 0
+          ? `🌍 ${posts.length.toLocaleString()} live events`
+          : state === 'loading'
+            ? '🌍 Loading live events…'
+            : '🌍 Live map unavailable right now'}
       </div>
 
       {/* Hint */}

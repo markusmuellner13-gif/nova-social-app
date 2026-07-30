@@ -240,7 +240,7 @@ export async function fetchGooglePlacePhoto(name: string, lat: number, lng: numb
       const d = await findRes.json() as { candidates?: { photos?: { photo_reference?: string }[] }[] };
       const ref = d.candidates?.[0]?.photos?.[0]?.photo_reference;
       if (ref) {
-        const photoUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${ref}&key=${key}`;
+        const photoUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1600&photo_reference=${ref}&key=${key}`;
         const photoRes = await fetch(photoUrl, { redirect: 'manual', signal: AbortSignal.timeout(3000) });
         result = photoRes.headers.get('location');
       }
@@ -259,7 +259,7 @@ function osmTagImage(tags: Record<string, string>): string | null {
   const commons = tags.wikimedia_commons ?? tags['image:wikimedia'] ?? '';
   if (commons.startsWith('File:')) {
     const file = commons.slice('File:'.length);
-    return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=900`;
+    return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=1600`;
   }
   return null;
 }

@@ -9,6 +9,7 @@ import CommentsSheet from './CommentsSheet';
 import { useLanguage } from '@/context/LanguageContext';
 import { useApp } from '@/context/AppContext';
 import { apiUrl } from '@/lib/apiBase';
+import { postImageUrl } from '@/lib/imageUrl';
 
 type MapProvider = 'nova' | 'google';
 
@@ -62,7 +63,10 @@ export default function SearchTab() {
   const inputRef = useRef<HTMLInputElement>(null);
   const prevCityRef = useRef<string | null>(null);
 
-  // Real, live events worldwide for the globe map
+  // Real, live events worldwide for the globe map. We track the load state so a
+  // globe that genuinely has no pins can say WHY ("couldn't reach the live map")
+  // instead of sitting there claiming "0 live events", which reads as broken.
+  const [mapState, setMapState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   useEffect(() => {
     let cancelled = false;
     fetch(apiUrl('/api/map'))
@@ -70,9 +74,10 @@ export default function SearchTab() {
       .then((data: { posts?: Post[] } | null) => {
         if (cancelled) return;
         const real = data?.posts ?? [];
-        if (real.length > 0) setMapPosts(real);
+        if (real.length > 0) { setMapPosts(real); setMapState('ready'); }
+        else setMapState('unavailable');
       })
-      .catch(() => { /* keep fallback */ });
+      .catch(() => { if (!cancelled) setMapState('unavailable'); });
     return () => { cancelled = true; };
   }, []);
 
@@ -247,6 +252,7 @@ export default function SearchTab() {
                     <>
                       <WorldMap
                         posts={globePosts}
+                        state={mapState}
                         onPostOpen={setSelectedPost}
                         focus={globeFocus}
                         onNavigate={(p) => { setNavTarget(p); setShowNav(true); }}
@@ -470,7 +476,7 @@ function PostGrid({ posts, onPostOpen, query, onSuggestion }: { posts: Post[]; o
           className="relative overflow-hidden"
           style={{ aspectRatio: '1', background: '#13131a' }}
         >
-          <img src={post.image} alt="" className="w-full h-full object-cover" loading="lazy"
+          <img src={postImageUrl(post.image, 480)} alt="" className="w-full h-full object-cover" loading="lazy"
             onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0,32)}/400/400`; if (el.src !== fb) el.src = fb; }} />
           {post.isEvent && (
             <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: 'rgba(244,63,94,0.85)', color: 'white', fontSize: 9 }}>

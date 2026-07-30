@@ -15,6 +15,7 @@ import { timeAgo } from '@/data/appDefaults';
 import Avatar from './Avatar';
 import GroupEventChat from './GroupEventChat';
 import GroupChat from './GroupChat';
+import { postImageUrl } from '@/lib/imageUrl';
 
 interface Props {
   onOpenAuth: () => void;
@@ -123,10 +124,14 @@ export default function GroupsTab({ onOpenAuth }: Props) {
 
   // Not logged in state
   if (!user) {
-    const PREVIEW_GROUPS = [
-      { name: '🎵 Music Crew', members: 6, events: 3, desc: 'Concerts & festivals' },
-      { name: '🍕 Food Gang', members: 4, events: 5, desc: 'Restaurants & markets' },
-      { name: '🎨 Art Lovers', members: 8, events: 2, desc: 'Galleries & exhibitions' },
+    // What a group DOES, not invented groups with invented member counts. The
+    // old version rendered three fake groups ("Music Crew · 6 members") behind a
+    // blur — indistinguishable from real data to anyone who looked, and exactly
+    // the kind of fake social signal the rest of the app was cleaned of.
+    const HOW_IT_WORKS = [
+      { icon: '👥', title: 'Create a group', desc: 'Name it, get a join code' },
+      { icon: '🔗', title: 'Invite your friends', desc: 'They join with the code — no search needed' },
+      { icon: '📅', title: 'Build a shared plan', desc: 'Save events together and see who is going' },
     ];
     return (
       <div className="flex flex-col h-full">
@@ -145,27 +150,19 @@ export default function GroupsTab({ onOpenAuth }: Props) {
             </p>
           </div>
 
-          {/* Preview group cards */}
-          <div className="flex flex-col gap-3 mb-6 relative">
-            <div className="absolute inset-0 z-10 rounded-2xl flex flex-col items-center justify-center gap-2" style={{ backdropFilter: 'blur(3px)', background: 'rgba(10,10,15,0.5)' }}>
-              <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: 'rgba(139,92,246,0.2)', border: '1px solid rgba(139,92,246,0.4)' }}>
-                <LogIn size={18} style={{ color: '#a78bfa' }} />
-              </div>
-              <p className="text-sm font-bold text-white">Sign in to see your groups</p>
-              <p className="text-xs" style={{ color: '#888899' }}>Create and join groups with friends</p>
-            </div>
-            {PREVIEW_GROUPS.map(g => (
-              <div key={g.name} className="flex items-center gap-3 p-4 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
+          {/* How groups work — real explanation, no invented groups */}
+          <div className="flex flex-col gap-3 mb-6">
+            {HOW_IT_WORKS.map((s, i) => (
+              <div key={s.title} className="flex items-center gap-3 p-4 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
                 <div className="w-11 h-11 rounded-xl flex items-center justify-center text-xl flex-shrink-0" style={{ background: 'rgba(139,92,246,0.15)' }}>
-                  {g.name.slice(0, 2)}
+                  {s.icon}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-white truncate">{g.name}</p>
-                  <p className="text-xs" style={{ color: '#666677' }}>{g.desc} · {g.events} events saved</p>
+                  <p className="text-sm font-bold text-white truncate">{s.title}</p>
+                  <p className="text-xs" style={{ color: '#666677' }}>{s.desc}</p>
                 </div>
-                <div className="flex items-center gap-1 px-2 py-1 rounded-full" style={{ background: 'rgba(139,92,246,0.12)' }}>
-                  <Users size={11} style={{ color: '#a78bfa' }} />
-                  <span className="text-xs font-semibold" style={{ color: '#a78bfa' }}>{g.members}</span>
+                <div className="flex items-center justify-center w-6 h-6 rounded-full flex-shrink-0" style={{ background: 'rgba(139,92,246,0.12)' }}>
+                  <span className="text-xs font-bold" style={{ color: '#a78bfa' }}>{i + 1}</span>
                 </div>
               </div>
             ))}
@@ -383,7 +380,7 @@ export default function GroupsTab({ onOpenAuth }: Props) {
                     <div key={ge.id} className="rounded-2xl overflow-hidden" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
                       {post.image && (
                         <div className="w-full" style={{ height: 160 }}>
-                          <img src={post.image as string} alt="" className="w-full h-full object-cover" />
+                          <img src={postImageUrl(post.image as string, 480)} alt="" className="w-full h-full object-cover" loading="lazy" />
                         </div>
                       )}
                       <div className="p-3">
