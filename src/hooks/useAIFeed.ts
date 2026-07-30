@@ -89,6 +89,43 @@ function writeCache(city: string, category: string, posts: Post[], page: number,
   } catch { /* storage full */ }
 }
 
+// ── Cross-page / cross-category dedupe ───────────────────────────────────────
+// The server dedupes within one response, but the client stitches together many
+// responses: the discover blend rotates through ~18 categories, tourism and
+// sponsored results merge in separately, and the same real-world event is often
+// listed twice by the same source under different ids (two Eventbrite listings
+// for one concert). Matching on `id` alone therefore let visible duplicates
+// through — the same card twice in the feed and twice in the trending rail.
+// We key on what actually identifies an event to a human: its title plus its
+// date (or its venue, for places).
+function contentKey(p: Post): string {
+  // NFD strips accents, but ß is not decomposed by it — without the explicit
+  // map, "Größenwahn" and "Grossenwahn" hash differently and the duplicate slips
+  // through. Same for the other non-decomposing Latin letters.
+  const title = (p.caption?.split('\n')[0] ?? '')
+    .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/ß/g, 'ss').replace(/ø/g, 'o').replace(/æ/g, 'ae').replace(/ð/g, 'd').replace(/þ/g, 'th')
+    .replace(/[^a-z0-9]/g, '').slice(0, 44);
+  if (!title) return `id:${p.id}`;
+  const when = p.eventDateRaw ?? p.location?.name?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? '';
+  return `${title}|${when}`;
+}
+
+/** Append `incoming` to `existing`, dropping anything already shown. */
+export function mergeUnique(existing: Post[], incoming: Post[]): Post[] {
+  const ids = new Set(existing.map(p => p.id));
+  const keys = new Set(existing.map(contentKey));
+  const fresh: Post[] = [];
+  for (const p of incoming) {
+    const k = contentKey(p);
+    if (ids.has(p.id) || keys.has(k)) continue;
+    ids.add(p.id);
+    keys.add(k);
+    fresh.push(p);
+  }
+  return fresh.length ? [...existing, ...fresh] : existing;
+}
+
 // Remove events whose date has already passed
 function filterExpired(posts: Post[]): Post[] {
   const today = new Date().toISOString().split('T')[0];
@@ -100,7 +137,7 @@ function filterExpired(posts: Post[]): Post[] {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface FeedResponse { posts?: Post[]; hasMore?: boolean; city?: string }
+interface FeedResponse { posts?: Post[]; hasMore?: boolean; city?: string; reason?: string }
 
 interface UseAIFeedReturn {
   posts: Post[];
@@ -111,6 +148,10 @@ interface UseAIFeedReturn {
   // Index into `posts` where results from BEYOND the user's city (expanded
   // radius — nearby towns) begin. null while everything shown is still local.
   nearbyStartIndex: number | null;
+  // Why the last page came back empty, when the server could tell us. Lets the
+  // UI say "we couldn't reach the places service" (and offer a retry) instead of
+  // the misleading "there's nothing here".
+  emptyReason: string | null;
 }
 
 export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
@@ -118,6 +159,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [nearbyStartIndex, setNearbyStartIndex] = useState<number | null>(null);
+  const [emptyReason, setEmptyReason] = useState<string | null>(null);
   const nearbyStartRef = useRef<number | null>(null);
 
   const pageRef       = useRef(0);
@@ -197,10 +239,11 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       const fresh = filterExpired(data.posts ?? []);
       if (!fresh.length) return;
       setPosts(prev => {
-        const existingIds = new Set(prev.map(p => p.id));
-        const newOnes = fresh.filter(p => !existingIds.has(p.id));
-        if (!newOnes.length) return prev;
-        const merged = filterExpired([...newOnes, ...prev]);
+        // Background refresh PREPENDS genuinely new posts, so build the merge the
+        // other way round and keep the same content-level dedupe.
+        const combined = mergeUnique(fresh, prev);
+        if (combined.length === prev.length) return prev;
+        const merged = filterExpired(combined);
         writeCache(city, category, merged, pageRef.current, radiusTierRef.current);
         return merged;
       });
@@ -225,10 +268,8 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
         const tourismPosts = filterExpired(data?.posts ?? []);
         if (!tourismPosts.length) return;
         setPosts(prev => {
-          const existingIds = new Set(prev.map(p => p.id));
-          const fresh = tourismPosts.filter(p => !existingIds.has(p.id));
-          if (!fresh.length) return prev;
-          const merged = [...prev, ...fresh];
+          const merged = mergeUnique(prev, tourismPosts);
+          if (merged === prev) return prev;
           writeCache(city, categoryRef.current, merged, pageRef.current, radiusTierRef.current);
           return merged;
         });
@@ -335,9 +376,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
         const newPosts = filterExpired(data?.posts ?? []);
         if (newPosts.length > 0) {
           setPosts(prev => {
-            const existingIds = new Set(prev.map(p => p.id));
-            const fresh = newPosts.filter(p => !existingIds.has(p.id));
-            const merged = [...prev, ...fresh];
+            const merged = mergeUnique(prev, newPosts);
             writeCache(city, 'discover', merged, 0, 0);
             return merged;
           });
@@ -365,15 +404,13 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
 
     const merge = (newPosts: Post[], nextPage: number) => {
       setPosts(prev => {
-        const existingIds = new Set(prev.map(p => p.id));
-        const fresh = newPosts.filter(p => !existingIds.has(p.id));
+        const merged = mergeUnique(prev, newPosts);
         // First time we append results from an EXPANDED radius (beyond the
         // city), remember where the "nearby towns" section begins.
-        if (radiusTierRef.current > 0 && nearbyStartRef.current === null && prev.length > 0 && fresh.length > 0) {
+        if (radiusTierRef.current > 0 && nearbyStartRef.current === null && prev.length > 0 && merged.length > prev.length) {
           nearbyStartRef.current = prev.length;
           setNearbyStartIndex(prev.length);
         }
-        const merged = [...prev, ...fresh];
         writeCache(city, cat, merged, nextPage, radiusTierRef.current);
         return merged;
       });
@@ -383,6 +420,9 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       const data = await fetchFeedPage(location, cat, pageRef.current, radius, days);
       const newPosts = filterExpired(data?.posts ?? []);
       const apiHasMore = data?.hasMore !== false;
+      // Remember WHY a page was empty (e.g. the places service was unreachable)
+      // so the empty state can be honest and offer a retry.
+      setEmptyReason(newPosts.length === 0 ? (data?.reason ?? null) : null);
 
       if (newPosts.length > 0) {
         merge(newPosts, pageRef.current + 1);
@@ -449,10 +489,11 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     blendStepRef.current  = 0;
     nearbyStartRef.current = null;
     setNearbyStartIndex(null);
+    setEmptyReason(null);
     prefetchRef.current.clear();
     tourismFetchedRef.current.clear();
     sponsoredFetchedRef.current.clear();
   }, []);
 
-  return { posts, loading, hasMore, fetchMore, reset, nearbyStartIndex };
+  return { posts, loading, hasMore, fetchMore, reset, nearbyStartIndex, emptyReason };
 }

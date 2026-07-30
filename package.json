@@ -18,7 +18,8 @@
     "cap:add:ios": "npx cap add ios",
     "cap:assets": "npx @capacitor/assets generate --iconBackgroundColor '#0a0a0f' --iconBackgroundColorDark '#0a0a0f' --splashBackgroundColor '#0a0a0f' --splashBackgroundColorDark '#0a0a0f'",
     "cap:open:android": "npx cap open android",
-    "cap:open:ios": "npx cap open ios"
+    "cap:open:ios": "npx cap open ios",
+    "dev:env": "vercel dev"
   },
   "dependencies": {
     "@capacitor/cli": "^8.4.0",
@@ -35,6 +36,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-simple-maps": "^3.0.0",
+    "sharp": "^0.35.3",
     "web-push": "^3.6.7"
   },
   "devDependencies": {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbWriteEnabled, upsertEvents, purgeExpiredEvents, postToRow } from '@/lib/eventsDb';
 import { validateBatch } from '@/lib/eventValidation';
 import { recordSourceYield } from '@/lib/sourceStats';
+import { curate, recordCuration, prewarmImages, type CurationReport } from '@/lib/brain/curator';
 import type { ApiPost } from '@/lib/sources/shared';
 
 export const maxDuration = 60; // Hobby plan cap; the route self-limits to ~45s and resumes via ?offset
@@ -184,6 +185,11 @@ export async function GET(request: NextRequest) {
   let ingested = 0;
   let rejected = 0;
   let processed = 0;
+  // Nova Brain's curation pass: how much was merged away as duplicate or dropped
+  // as filler, and how many image renders we warmed for the accepted posts.
+  let curatedOut = 0;
+  let prewarmed = 0;
+  const curationReports: CurationReport[] = [];
   const errors: string[] = [];
   // Accumulate per-source accept/reject so the learning layer knows which
   // sources actually deliver good data.
@@ -203,23 +209,36 @@ export async function GET(request: NextRequest) {
       const data = await res.json() as { posts?: ApiPost[] };
       const raw = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
 
-      // QUALITY GATE — only validated, real, correctly-located events are stored.
+      // GATE 1 — structural validity: real date, real coordinates, not spam.
       const { valid, rejected: rej } = validateBatch(raw, { cityLat: lat, cityLng: lng, maxKm: 120 });
       rejected += rej;
 
-      // Tally per-source accept/reject for the learning layer.
+      // GATE 2 — Nova Brain's curator: merge listings that are the same
+      // real-world thing arriving from different sources, then drop the filler
+      // that is technically valid but not worth a user's screen. The bar adapts
+      // to how much this area actually has, so a small town is never emptied out.
+      const { kept: curated, report } = curate(valid);
+      curatedOut += report.mergedDuplicates + report.droppedLowQuality;
+      curationReports.push(report);
+
+      // Tally per-source accept/reject for the learning layer — measured against
+      // what SURVIVED curation, so a source that floods us with valid-but-thin
+      // listings is scored down, not rewarded for volume.
       const bySource: Record<string, { raw: number; ok: number }> = {};
-      for (const p of raw)   (bySource[sourceOf(p.id)] ??= { raw: 0, ok: 0 }).raw++;
-      for (const p of valid) (bySource[sourceOf(p.id)] ??= { raw: 0, ok: 0 }).ok++;
+      for (const p of raw)     (bySource[sourceOf(p.id)] ??= { raw: 0, ok: 0 }).raw++;
+      for (const p of curated) (bySource[sourceOf(p.id)] ??= { raw: 0, ok: 0 }).ok++;
       for (const [s, v] of Object.entries(bySource)) {
         (srcYield[s] ??= { a: 0, r: 0 });
         srcYield[s].a += v.ok;
         srcYield[s].r += v.raw - v.ok;
       }
 
-      if (valid.length) {
-        const rows = valid.map(p => postToRow(p, sourceOf(p.id), country));
+      if (curated.length) {
+        const rows = curated.map(p => postToRow(p, sourceOf(p.id), country));
         ingested += await upsertEvents(rows);
+        // Warm the image renders for what we just stored, so the first real
+        // visitor gets a cached photo rather than paying the cold resize.
+        prewarmed += await prewarmImages(curated, origin).catch(() => 0);
       }
       processed++;
     } catch (err) {
@@ -231,13 +250,17 @@ export async function GET(request: NextRequest) {
   const done = i >= work.length;
   await purgeExpiredEvents().catch(() => {}); // cheap single DELETE; run every time
 
+  // Feed curation outcomes into the source-reliability learner too, so the
+  // engine gradually favours the sources whose listings actually survive.
+  await Promise.all(curationReports.map(r => recordCuration(r).catch(() => {})));
+
   // Persist what we learned about each source this run (gated/no-op w/o Redis).
   await Promise.all(Object.entries(srcYield).map(([s, y]) =>
     recordSourceYield(s, y.a, Math.max(0, y.r)).catch(() => {})
   ));
 
   return NextResponse.json({
-    ok: true, tier: tier ?? 'all', ingested, rejected, processed, offset, nextOffset: done ? null : i,
+    ok: true, tier: tier ?? 'all', ingested, rejected, curatedOut, prewarmed, processed, offset, nextOffset: done ? null : i,
     total: work.length, done, errors: errors.slice(0, 8),
   });
 }

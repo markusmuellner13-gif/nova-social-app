@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     const ref = c.photos?.[0]?.photo_reference;
     if (ref) {
       const photoRes = await fetch(
-        `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=${ref}&key=${key}`,
+        `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1600&photo_reference=${ref}&key=${key}`,
         { redirect: 'manual', signal: AbortSignal.timeout(3000) }
       ).catch(() => null);
       photo = photoRes?.headers.get('location') ?? '';

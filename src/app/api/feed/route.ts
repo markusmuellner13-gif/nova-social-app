@@ -14,6 +14,7 @@ import { crawlCityEvents } from '@/lib/sources/webCrawler';
 import { eventsCacheKey, cacheTtl, cacheGet, cacheSet } from '@/lib/serverCache';
 import { dbReadEnabled, queryEventsNear, queryEventsByCountry } from '@/lib/eventsDb';
 import { aiBudgetExceeded, noteAiCall } from '@/lib/aiBudget';
+import { assessQuality, qualityFloorFor } from '@/lib/brain/quality';
 
 export const maxDuration = 60;
 
@@ -158,7 +159,62 @@ async function wikipediaPosts(
 // places nearest-first, then interleave so the feed mixes events and places.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function rankAndMix(posts: ApiPost[], count: number): ApiPost[] {
+// Categories where the user is asking "what should I SEE here?" — the answer is
+// the cathedral, the palace, the museum, not a dated walking tour that happens
+// to be filed under sightseeing. Eventbrite lists a lot of guided tours, and
+// because they carry a date they used to outrank every actual landmark, so the
+// Sightseeing tab opened on tours rather than sights. These categories lead with
+// places and keep the dated experiences underneath.
+const PLACES_FIRST = new Set(['sightseeing', 'travel']);
+
+// How long we wait for the parallel source fan-out before serving what we have.
+// The fast APIs (Ticketmaster/Eventbrite/SeatGeek) answer well under 2s; the
+// slow ones (Overpass, Wikipedia) can take 25s on a cold area.
+const SOURCE_DEADLINE_MS = 8_000;
+// …but a fast answer is only better if it's a GOOD answer. If the quick sources
+// came back nearly empty we keep waiting, because for a small town the slow
+// sources ARE the content — cutting them off to save eight seconds would trade
+// the app's whole promise for a snappier empty feed.
+const SOURCE_PATIENT_MS = 22_000;
+
+type SourceResult = { source: string; posts: ApiPost[]; hasMore: boolean };
+
+/**
+ * Resolve every task, but stop waiting once we have enough to serve.
+ *
+ * Unfinished tasks are NOT cancelled — they keep running and populate the Redis
+ * and DB caches, so nothing they found is lost; they simply stop blocking this
+ * response. `enough` is the point at which more results stop being worth more
+ * waiting.
+ */
+async function settleWithDeadline(
+  tasks: Promise<SourceResult>[], ms: number, enough = 0, patientMs = ms
+): Promise<SourceResult[]> {
+  if (tasks.length === 0) return [];
+  const done: SourceResult[] = [];
+  let settled = 0;
+  const pending = tasks.map(t =>
+    t.then(r => { done.push(r); }).catch(() => { /* per-task catch already logs */ })
+      .finally(() => { settled++; })
+  );
+  const all = Promise.all(pending);
+
+  const count = () => done.reduce((n, r) => n + r.posts.length, 0);
+  const deadline = new Promise<void>(resolve => setTimeout(resolve, ms));
+  await Promise.race([all, deadline]);
+
+  // Everything finished, or we already have plenty — serve now.
+  if (settled === tasks.length || count() >= enough) return done;
+
+  // Sparse so far: give the slow sources the rest of their budget.
+  await Promise.race([
+    all,
+    new Promise<void>(resolve => setTimeout(resolve, Math.max(0, patientMs - ms))),
+  ]);
+  return done;
+}
+
+function rankAndMix(posts: ApiPost[], count: number, category = ''): ApiPost[] {
   const events = posts.filter(p => p.isEvent)
     .sort((a, b) => {
       const da = a.eventDateRaw ?? '9999';
@@ -171,6 +227,17 @@ function rankAndMix(posts: ApiPost[], count: number): ApiPost[] {
 
   const mixed: ApiPost[] = [];
   let e = 0, pl = 0;
+
+  if (PLACES_FIRST.has(category)) {
+    // 3 sights, then 1 dated experience.
+    while (mixed.length < count && (e < events.length || pl < places.length)) {
+      for (let k = 0; k < 3 && pl < places.length && mixed.length < count; k++) mixed.push(places[pl++]);
+      if (e < events.length && mixed.length < count) mixed.push(events[e++]);
+      if (pl >= places.length) while (e < events.length && mixed.length < count) mixed.push(events[e++]);
+    }
+    return mixed;
+  }
+
   while (mixed.length < count && (e < events.length || pl < places.length)) {
     // 3 events, then 1 place
     for (let k = 0; k < 3 && e < events.length && mixed.length < count; k++) mixed.push(events[e++]);
@@ -300,6 +367,12 @@ async function computeFeed(request: NextRequest) {
   const pexelsKey   = process.env.PEXELS_API_KEY;
 
   // ── Pure place categories: OSM is the single source ───────────────────────
+  // "Hotels" must mean hotels. These categories describe PLACES, and the only
+  // source that knows a town's real places is OpenStreetMap. When Overpass is
+  // slow or down we used to fall through to the generic event sources, so the
+  // Hotels, Venues and Outdoors tabs all filled up with the same unrelated
+  // parties — the app quietly lying about what it found. Now a place category
+  // only ever returns places, and says so honestly when it has none.
   if (OSM_CATEGORIES.has(category)) {
     try {
       const { posts, hasMore } = await osmPosts(lat, lng, city, category, page, radius, count, unsplashKey, pexelsKey);
@@ -310,14 +383,39 @@ async function computeFeed(request: NextRequest) {
           { headers: PLACE_CACHE }
         );
       }
-      // Deep pages legitimately run dry — that's the end of the list
-      if (page > 0) {
-        return NextResponse.json({ posts: [], city, country, sources: ['osm'], hasMore: false }, { headers: PLACE_CACHE });
-      }
-      // Page 0 empty → fall through to AI search / fallback below
+      // Genuinely nothing of this kind nearby — an honest empty page, not a
+      // pile of unrelated events.
+      return NextResponse.json(
+        { posts: [], city, country, sources: ['osm'], hasMore: false, reason: 'no_places_nearby' },
+        { headers: PLACE_CACHE }
+      );
     } catch (err) {
       console.error('[feed/osm]', err);
-      // Overpass down → fall through so the feed is never blank
+      // Overpass unreachable. Try our own DB, which holds places ingested for
+      // this area earlier — still real places of the right kind. Only if that is
+      // empty too do we report the outage, so the client can offer a retry
+      // instead of showing the wrong content.
+      try {
+        if (dbReadEnabled && (lat || lng)) {
+          const dbPlaces = await queryEventsNear({
+            lat, lng, radiusKm: Math.max(radius, 25), category,
+            afterIso: new Date().toISOString(), limit: count, offset: page * count,
+          });
+          if (dbPlaces.length > 0) {
+            return NextResponse.json(
+              {
+                posts: ensureUniqueImages(withDistance(dbPlaces, lat, lng)),
+                city, country, sources: ['db'], hasMore: dbPlaces.length >= count,
+              },
+              { headers: { 'Cache-Control': 'no-store', 'x-nova-cache': 'DB' } }
+            );
+          }
+        }
+      } catch { /* DB unavailable too */ }
+      return NextResponse.json(
+        { posts: [], city, country, sources: [], hasMore: false, reason: 'places_unavailable' },
+        { status: 200, headers: { 'Cache-Control': 'no-store' } }
+      );
     }
   }
 
@@ -379,7 +477,13 @@ async function computeFeed(request: NextRequest) {
     );
   }
 
-  const results = await Promise.all(tasks);
+  // Don't let the slowest source hold up the whole page. Overpass in particular
+  // can take 25s on a cold area, and `Promise.all` made every user wait for it
+  // even when Ticketmaster and Eventbrite had already answered in under a
+  // second. We take whatever has resolved by the soft deadline and return that;
+  // the stragglers still finish and land in the Redis/DB cache, so the next page
+  // (and the next visitor) gets them. Nothing is lost — only the waiting.
+  const results = await settleWithDeadline(tasks, SOURCE_DEADLINE_MS, count, SOURCE_PATIENT_MS);
   let pool = dropExpired(dedupePosts(results.flatMap(r => r.posts)));
   const sources = results.filter(r => r.posts.length > 0).map(r => r.source);
   let anyMore = results.some(r => r.hasMore);
@@ -435,11 +539,24 @@ async function computeFeed(request: NextRequest) {
   // farther than asked; we drop those here. Posts without coordinates are kept
   // (they were generated for the requested city and can't be range-checked).
   const located = withDistance(pool, lat, lng);
-  const local = located.filter(p => p.distanceKm == null || p.distanceKm <= radius);
+  let local = located.filter(p => p.distanceKm == null || p.distanceKm <= radius);
+
+  // Nova Brain's quality gate, applied live as well as at ingest — otherwise a
+  // city we haven't ingested yet still shows the filler (empty captions, stock
+  // photos, no venue) that the curator would have dropped.
+  //
+  // The guard matters more than the gate: we only drop filler when doing so
+  // still leaves a full page. A quiet town keeps everything it has, because a
+  // thin real listing beats an empty feed and this app's promise is coverage.
+  if (local.length > count) {
+    const floor = qualityFloorFor(local.length);
+    const good = local.filter(p => assessQuality(p).score >= floor);
+    if (good.length >= count) local = good;
+  }
 
   // No invented events: if every real source is empty, return an honest empty
   // page — the client shows a clear "no events found" state instead
-  let final = rankAndMix(local, count * 2);
+  let final = rankAndMix(local, count * 2, category);
 
   // Cold-start cushion: tiny towns can have nothing within radius even after
   // expansion. Rather than a dead feed, fall back to upcoming events anywhere in

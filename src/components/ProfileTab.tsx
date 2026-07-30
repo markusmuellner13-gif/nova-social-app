@@ -22,6 +22,7 @@ import {
   exportMyData, deleteMyAppData, getSession,
 } from '@/lib/supabase';
 import { apiUrl } from '@/lib/apiBase';
+import { postImageUrl } from '@/lib/imageUrl';
 
 const ALL_LOCALES = Object.keys(LOCALE_NAMES) as Locale[];
 
@@ -850,7 +851,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             {likedPosts.map((post, i) => (
               <motion.div key={post.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
                 className="relative overflow-hidden" style={{ aspectRatio: '1', background: '#13131a' }}>
-                <img src={post.image} alt="" className="w-full h-full object-cover object-center" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
+                <img src={postImageUrl(post.image, 480)} alt="" loading="lazy" className="w-full h-full object-cover object-center" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
                 <div className="absolute top-1 right-1">
                   <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
                     <Star size={10} fill="#f59e0b" style={{ color: '#f59e0b' }} />
@@ -874,7 +875,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             {savedPosts.map((post, i) => (
               <motion.div key={post.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
                 className="relative overflow-hidden" style={{ aspectRatio: '1', background: '#13131a' }}>
-                <img src={post.image} alt="" className="w-full h-full object-cover object-center" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
+                <img src={postImageUrl(post.image, 480)} alt="" loading="lazy" className="w-full h-full object-cover object-center" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
                 {post.isEvent && (
                   <div className="absolute bottom-0 left-0 right-0 py-0.5 text-center font-bold"
                     style={{ background: 'rgba(244,63,94,0.85)', color: 'white', fontSize: 9 }}>
@@ -919,7 +920,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                     <motion.div key={event.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
                       className="flex gap-3 p-3 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38', opacity: isPast ? 0.55 : 1 }}>
                       <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
-                        <img src={event.image} alt="" className="w-full h-full object-cover object-center" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${event.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
+                        <img src={postImageUrl(event.image, 480)} alt="" loading="lazy" className="w-full h-full object-cover object-center" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${event.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-white truncate">{event.caption.split('\n')[0].slice(0, 50)}</p>
@@ -969,7 +970,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                   return (
                     <div key={event.id} className="flex gap-3 p-4 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
                       <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
-                        <img src={event.image} alt="" className="w-full h-full object-cover object-center" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${event.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
+                        <img src={postImageUrl(event.image, 480)} alt="" loading="lazy" className="w-full h-full object-cover object-center" onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${event.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`; if (el.src !== fb) el.src = fb; }} />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-white truncate">{event.caption.split('\n')[0].slice(0, 50)}</p>

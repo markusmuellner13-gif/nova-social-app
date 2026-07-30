@@ -20,6 +20,8 @@ import CommentsSheet from './CommentsSheet';
 import UserProfileCard from './UserProfileCard';
 import InviteSheet from './InviteSheet';
 import Avatar from './Avatar';
+import PostImage, { clampAspect } from './PostImage';
+import { recordInteraction } from '@/lib/brain/client';
 
 interface Props {
   post: PostType;
@@ -72,6 +74,9 @@ export default function Post({ post, showHint = false }: Props) {
   const [expanded,     setExpanded]     = useState(false);
   const [imgLoaded,    setImgLoaded]    = useState(false);
   const [slide,        setSlide]        = useState(0);
+  // The card frame takes the shape of its photo (clamped to the feed's range),
+  // so posters are shown whole instead of being cropped into a fixed 4:5 box.
+  const [aspect,       setAspect]       = useState<number | null>(null);
   const [hintDismissed, setHintDismissed] = useState(false);
   const [showReminderSheet, setShowReminderSheet] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
@@ -119,6 +124,36 @@ export default function Post({ post, showHint = false }: Props) {
     if (post.isSponsored) trackEvent('impression', post.id);
   }, [post.isSponsored, post.id]);
 
+  // ── Nova Brain: the negative signal ───────────────────────────────────────
+  // A model trained only on likes learns that everything is good. What makes it
+  // discriminate is knowing what people SAW and ignored. We count an impression
+  // only once the card has been genuinely on screen for a moment — a post that
+  // flew past during a fast scroll was never really shown, and scoring it as
+  // rejected would teach the model the wrong thing.
+  const articleRef = useRef<HTMLElement | null>(null);
+  const impressionSent = useRef(false);
+  useEffect(() => {
+    const el = articleRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const io = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting && entry.intersectionRatio > 0.6) {
+        if (!timer && !impressionSent.current) {
+          timer = setTimeout(() => {
+            impressionSent.current = true;
+            recordInteraction(post, 'impression');
+            io.disconnect();
+          }, 1200);
+        }
+      } else if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    }, { threshold: [0, 0.6, 1] });
+    io.observe(el);
+    return () => { if (timer) clearTimeout(timer); io.disconnect(); };
+  }, [post]);
+
   // ── Countdown for saved events ────────────────────────────────────────────
   const countdown = saved && post.isEvent ? daysUntil(post.eventDateRaw) : null;
 
@@ -129,28 +164,35 @@ export default function Post({ post, showHint = false }: Props) {
   };
 
   // ── Handlers ──────────────────────────────────────────────────────────────
+  // Every one of these also trains Nova Brain. Only a positive action is
+  // reported here — the "seen and scrolled past" negative comes from the
+  // impression observer below, so the model learns from both what people take
+  // and what they leave.
   const handleLike = useCallback(() => {
     likePost(post);
-    if (!liked) addToast('Loved it ⭐', 'success');
+    if (!liked) { recordInteraction(post, 'like'); addToast('Loved it ⭐', 'success'); }
   }, [liked, likePost, post, addToast]);
 
   const handleSave = useCallback(() => {
     savePost(post);
-    if (!saved) addToast('Saved to collection 🔖', 'success');
+    if (!saved) { recordInteraction(post, 'save'); addToast('Saved to collection 🔖', 'success'); }
   }, [saved, savePost, post, addToast]);
 
   const handleGoing = useCallback(() => {
     goPost(post);
     // Drop the cached aggregate so any other instance refetches the fresh count.
     invalidateGoingCount(post.id);
-    if (!going) addToast(t.common.goingLabel, 'success');
+    if (!going) { recordInteraction(post, 'going'); addToast(t.common.goingLabel, 'success'); }
     else addToast('Removed from going', 'info');
   }, [going, goPost, post, addToast, t.common.goingLabel]);
 
   // Feature 5/6 — Open the invite/share sheet: a rich, link-previewable Nova page
   // (/e/<id>) sent through WhatsApp/Telegram/X/Email/SMS or the OS share sheet.
   // This is the core growth loop — every invite is a friend brought in.
-  const handleShare = useCallback(() => setShowInvite(true), []);
+  const handleShare = useCallback(() => {
+    recordInteraction(post, 'share');
+    setShowInvite(true);
+  }, [post]);
 
   const handleDoubleTap = useCallback(() => {
     if (!liked) likePost(post);
@@ -186,13 +228,12 @@ export default function Post({ post, showHint = false }: Props) {
   // Swipeable gallery when the post carries multiple real photos; otherwise just
   // the single image (most posts).
   const gallery = post.images && post.images.length > 1 ? post.images : [post.image];
-  const fallbackImage = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32)}/600/750`;
 
   return (
     <>
       {/* content-visibility keeps off-screen posts unrendered — the feed stays
           smooth no matter how long the endless scroll gets */}
-      <article className="w-full" style={{ borderBottom: '1px solid #1e1e2a', contentVisibility: 'auto', containIntrinsicSize: 'auto 900px' } as React.CSSProperties}>
+      <article ref={articleRef} className="w-full" style={{ borderBottom: '1px solid #1e1e2a', contentVisibility: 'auto', containIntrinsicSize: 'auto 900px' } as React.CSSProperties}>
 
         {/* Feature 6 — Countdown badge on saved events */}
         {countdown !== null && (
@@ -274,7 +315,14 @@ export default function Post({ post, showHint = false }: Props) {
         </div>
 
         {/* Image */}
-        <div className="relative w-full" style={{ aspectRatio: '4/5', background: '#13131a' }}>
+        <div
+          className="relative w-full"
+          style={{
+            aspectRatio: aspect ? `${clampAspect(aspect)}` : '4/5',
+            background: '#13131a',
+            transition: 'aspect-ratio 0.25s ease',
+          }}
+        >
           {!imgLoaded && <div className="absolute inset-0 shimmer" />}
           {gallery.length > 1 ? (
             <div
@@ -284,33 +332,25 @@ export default function Post({ post, showHint = false }: Props) {
               style={{ opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.3s' }}
             >
               {gallery.map((src, i) => (
-                <img
+                <PostImage
                   key={i}
                   src={src}
                   alt={post.caption}
-                  loading={i === 0 ? 'eager' : 'lazy'}
-                  className="h-full object-cover flex-shrink-0 snap-center"
+                  priority={i === 0}
+                  onLoaded={i === 0 ? () => setImgLoaded(true) : undefined}
+                  onAspect={i === 0 ? setAspect : undefined}
+                  className="flex-shrink-0 snap-center"
                   style={{ minWidth: '100%' }}
-                  onLoad={i === 0 ? () => setImgLoaded(true) : undefined}
-                  onError={(e) => {
-                    const el = e.currentTarget;
-                    if (el.src !== fallbackImage) { el.src = fallbackImage; if (i === 0) setImgLoaded(true); }
-                    else if (i === 0) { setImgLoaded(true); }
-                  }}
                 />
               ))}
             </div>
           ) : (
-            <img
+            <PostImage
               src={post.image}
               alt={post.caption}
-              className="w-full h-full object-cover"
-              onLoad={() => setImgLoaded(true)}
-              onError={(e) => {
-                const el = e.currentTarget;
-                if (el.src !== fallbackImage) { el.src = fallbackImage; setImgLoaded(true); }
-                else { setImgLoaded(true); }
-              }}
+              priority
+              onLoaded={() => setImgLoaded(true)}
+              onAspect={setAspect}
               onDoubleClick={handleDoubleTap}
               style={{ opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.3s' }}
             />
@@ -501,7 +541,7 @@ export default function Post({ post, showHint = false }: Props) {
                 <a href={post.eventUrl} target="_blank" rel="noopener noreferrer"
                   className="flex items-center justify-center gap-2 flex-1 py-2.5 rounded-xl text-sm font-bold text-white"
                   style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}
-                  onClick={e => e.stopPropagation()}>
+                  onClick={e => { e.stopPropagation(); recordInteraction(post, 'ticket_click'); }}>
                   <ExternalLink size={14} />
                   {t.common.getTickets}
                 </a>

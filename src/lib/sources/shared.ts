@@ -42,10 +42,23 @@ export function fallbackAvatar(name: string) {
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=${colors[name.charCodeAt(0) % colors.length]}&color=fff&size=80&bold=true`;
 }
 
-export function logoUrl(domain: string) { return `https://logo.clearbit.com/${domain}`; }
+// Clearbit's free logo API was retired — logo.clearbit.com no longer resolves,
+// so every organiser avatar was a dead request that fell through to the letter
+// avatar anyway. Google's favicon service is still up and needs no key; the
+// Avatar component falls back to a gradient monogram if it 404s.
+export function logoUrl(domain: string) {
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
+}
 
 export function makeUser(name: string, domain?: string) {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '.').slice(0, 30);
+  // Strip diacritics before slugifying, otherwise "Grünbergstraße" turns into
+  // the unreadable handle "gr.nbergstra.e" (every non-ASCII letter became a dot).
+  const slug = name
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/ß/gi, 'ss').replace(/ø/gi, 'o').replace(/æ/gi, 'ae').replace(/ð/gi, 'd').replace(/þ/gi, 'th')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '')
+    .slice(0, 30);
   return {
     id: `org_${slug}`,
     name,
@@ -62,7 +75,7 @@ export function makeUser(name: string, domain?: string) {
 // High-res 4:5 portrait. Bumped from 600×750 → 1080×1350 so event cards look
 // crisp on modern high-DPI phones.
 export function picsumUrl(seed: string) {
-  return `https://picsum.photos/seed/${seed.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 32)}/1080/1350`;
+  return `https://picsum.photos/seed/${seed.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 32)}/1440/1800`;
 }
 
 // Pull the real, high-quality hero image a page advertises to social crawlers
@@ -98,17 +111,16 @@ export async function fetchOgImage(pageUrl: string, timeoutMs = 4500): Promise<s
   } catch { return null; }
 }
 
-// Route rate-limited image sources (Unsplash, Pexels, Wikipedia) through our
-// CDN-cached proxy so repeated views are served from edge cache, not the origin API.
+// Sources now store the ORIGINAL absolute image URL. Proxying, resolution
+// upgrading and resizing all happen at render time (`PostImage` → the sized
+// /api/image-proxy), which means:
+//   • the same stored post works on the web and inside the native shell, where a
+//     root-relative "/api/…" URL would point at the Capacitor bundle, not the API;
+//   • every row already in the events DB gets the new high-res pipeline for free,
+//     with no re-ingestion;
+//   • share/OG previews get a real absolute URL instead of a relative one.
+// Kept as a function so the call sites (and their intent) stay unchanged.
 export function proxyImage(url: string): string {
-  if (!url) return url;
-  if (
-    url.includes('images.unsplash.com') ||
-    url.includes('images.pexels.com')   ||
-    url.includes('upload.wikimedia.org')
-  ) {
-    return `/api/image-proxy?url=${encodeURIComponent(url)}`;
-  }
   return url;
 }
 
@@ -181,7 +193,7 @@ async function fetchUnsplashImage(query: string, key: string): Promise<string | 
     const base = d.urls?.raw ?? d.urls?.regular;
     if (!base) return null;
     const sep = base.includes('?') ? '&' : '?';
-    return `${base}${sep}auto=format&fit=crop&w=1080&h=1350&q=85&crop=faces,entropy`;
+    return `${base}${sep}auto=format&fit=crop&w=1440&h=1800&q=85&crop=faces,entropy`;
   } catch { return null; }
 }
 
@@ -212,7 +224,7 @@ async function fetchPexelsImage(query: string, key: string, seed?: string): Prom
     if (!base) return null;
     // Pexels supports ?w=&h=&fit=crop via their CDN
     const sep = base.includes('?') ? '&' : '?';
-    return `${base}${sep}w=1080&h=1350&fit=crop`;
+    return `${base}${sep}w=1440&h=1800&fit=crop`;
   } catch { return null; }
 }
 

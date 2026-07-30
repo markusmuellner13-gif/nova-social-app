@@ -65,12 +65,24 @@ export async function GET(request: NextRequest) {
 
   // Fire the daily "events near you" push digest as a sub-step (keeps us to two
   // Vercel cron entries). Best-effort + gated — no-ops without VAPID keys.
+  const cronHeaders = secret ? { Authorization: `Bearer ${secret}` } : undefined;
   let pushResult: unknown = null;
   try {
-    const headers = secret ? { Authorization: `Bearer ${secret}` } : undefined;
-    const pres = await fetch(`${origin}/api/cron/push`, { headers, signal: AbortSignal.timeout(55000) });
+    const pres = await fetch(`${origin}/api/cron/push`, { headers: cronHeaders, signal: AbortSignal.timeout(55000) });
     pushResult = await pres.json().catch(() => null);
   } catch { /* push digest is best-effort */ }
 
-  return NextResponse.json({ ok: true, warmed, total: CITIES.length * CATEGORIES.length, push: pushResult, errors: errors.slice(0, 10) });
+  // Nova Brain's maintenance + self-report pass, chained here for the same
+  // reason as the push digest: the Hobby plan caps how many cron entries we get,
+  // and this job is cheap.
+  let brainResult: unknown = null;
+  try {
+    const bres = await fetch(`${origin}/api/cron/brain`, { headers: cronHeaders, signal: AbortSignal.timeout(30000) });
+    brainResult = await bres.json().catch(() => null);
+  } catch { /* best-effort */ }
+
+  return NextResponse.json({
+    ok: true, warmed, total: CITIES.length * CATEGORIES.length,
+    push: pushResult, brain: brainResult, errors: errors.slice(0, 10),
+  });
 }

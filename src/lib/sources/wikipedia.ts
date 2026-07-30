@@ -17,6 +17,11 @@ export interface WikiSummary {
   description?: string;
   extract?: string;
   thumbnail?: { source: string };
+  // The full-resolution source of that thumbnail. `thumbnail` is only ~330px
+  // wide — nowhere near enough for a full-bleed card on a modern phone — while
+  // `originalimage` is the real photo (often 2000–4000px). We lead with the
+  // original and let the image proxy render it down to the size actually needed.
+  originalimage?: { source: string; width?: number; height?: number };
   content_urls?: { desktop?: { page?: string } };
 }
 
@@ -50,6 +55,15 @@ const TRANSIT_NOISE = [
   // Administrative-area articles aren't "a sight" — drop the Bezirk/county/etc.
   ' district', '(district)', 'municipality', 'province of', 'prefecture',
   'metropolitan area', 'administrative', 'cadastral', 'statutory city',
+  // Historical events and abstract topics. Wikipedia geotags these because the
+  // battle/treaty happened at those coordinates, so GeoSearch happily returns
+  // "Siege of Vienna" and "Timeline of Vienna" as things near you — but you
+  // cannot go and look at a siege. Real monuments commemorating them have their
+  // own articles ("Heldenplatz", "Pummerin") and are unaffected.
+  'siege of', 'battle of', 'timeline of', 'history of', 'treaty of',
+  'congress of', 'massacre', 'uprising', 'revolution of', 'election',
+  'archdiocese', 'diocese of', 'demographics', 'economy of', 'culture of',
+  'outline of', 'index of', 'bibliography',
 ];
 
 // A handful of stations ARE world-class sightseeing — cathedrals of transit.
@@ -151,10 +165,14 @@ export async function fetchWikipediaImages(title: string, max = 6): Promise<stri
       const fileTitle = (it.title ?? '').toLowerCase();
       // Skip vector logos, icons, maps, flags and other non-photo chrome.
       if (/\.svg|icon|logo|symbol|flag|map|locator|wiki|commons-|edit-|seal|coat[_ ]of[_ ]arms/i.test(fileTitle)) continue;
-      const src = it.srcset?.[0]?.src;
+      // srcset is ordered smallest-first (1× then 2×). Take the LARGEST entry
+      // Wikimedia actually publishes — the old code took `[0]` (the 1× render,
+      // often 500px) and then blindly rewrote the width to 800px, which 400s for
+      // every file whose original is narrower than that. That is why sightseeing
+      // galleries were silently falling back to random stock photos.
+      const src = (it.srcset ?? []).at(-1)?.src ?? it.srcset?.[0]?.src;
       if (!src) continue;
-      let full = src.startsWith('//') ? `https:${src}` : src;
-      full = full.replace(/\/\d+px-/, '/800px-'); // request a larger render
+      const full = src.startsWith('//') ? `https:${src}` : src;
       const key = full.split('/').pop() ?? full;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -199,7 +217,7 @@ export async function fetchCommonsImagesByWikidata(qid: string, max = 6): Promis
       seen.add(key);
       // Special:FilePath redirects to upload.wikimedia.org and is served fine as
       // a plain <img> src (CSP allows https: images); consistent with osmTagImage.
-      urls.push(`https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=900`);
+      urls.push(`https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=1600`);
     };
 
     // P18 — the entity's designated image(s).
@@ -230,7 +248,8 @@ export async function wikiToPost(
   poi: WikiGeoResult, summary: WikiSummary | null, desc: string, city: string,
   unsplashKey?: string, pexelsKey?: string
 ): Promise<ApiPost> {
-  const wikiImg = summary?.thumbnail?.source;
+  // Prefer the article's ORIGINAL photo over the 330px REST thumbnail.
+  const wikiImg = summary?.originalimage?.source ?? summary?.thumbnail?.source;
   const wikiUrl = summary?.content_urls?.desktop?.page
     ?? `https://en.wikipedia.org/wiki/${encodeURIComponent(poi.title.replace(/ /g, '_'))}`;
 
@@ -254,7 +273,15 @@ export async function wikiToPost(
     user: makeUser(poi.title),
     image,
     images,
-    caption: `${desc}\n\n🏛️ ${summary?.description ?? 'Landmark'}\n📍 ${poi.title}, ${city}\n📏 ${Math.round(poi.dist)}m from centre\n🔗 Learn more: ${wikiUrl}`,
+    // A card whose first line is blank reads as broken, and some Wikipedia
+    // articles genuinely have no extract. Fall back through the article's own
+    // one-line description to the title itself, so there is always a headline.
+    caption: `${
+      desc?.trim()
+      || summary?.extract?.trim()
+      || (summary?.description ? `${poi.title} — ${summary.description}` : '')
+      || `${poi.title}, a landmark in ${city}.`
+    }\n\n🏛️ ${summary?.description ?? 'Landmark'}\n📍 ${poi.title}, ${city}\n📏 ${Math.round(poi.dist)}m from centre\n🔗 Learn more: ${wikiUrl}`,
     likes: 0,
     comments: 0,
     category: 'sightseeing',

@@ -69,6 +69,30 @@ const EB_CATEGORY_SLUGS: Record<string, string> = {
   discover:    'events',
 };
 
+// ── Address tidying ──────────────────────────────────────────────────────────
+// Loose comparison of two location labels ("Grünbergstraße" vs "Grünbergstrasse",
+// "Wien" vs "wien") so we can spot the same place named twice.
+export function sameLabel(a?: string | null, b?: string | null): boolean {
+  const norm = (s: string) => s.toLowerCase().normalize('NFD')
+    .replace(/[̀-ͯ]/g, '').replace(/ß/g, 'ss').replace(/[^a-z0-9]/g, '');
+  if (!a || !b) return false;
+  const x = norm(a), y = norm(b);
+  return Boolean(x) && Boolean(y) && (x === y || x.includes(y) || y.includes(x));
+}
+
+/** Join address parts, skipping any that repeat the venue or an earlier part. */
+export function dedupeAddressParts(parts: (string | undefined | null)[], venue?: string): string {
+  const kept: string[] = [];
+  for (const raw of parts) {
+    const part = raw?.trim();
+    if (!part) continue;
+    if (sameLabel(part, venue)) continue;
+    if (kept.some(k => sameLabel(part, k))) continue;
+    kept.push(part);
+  }
+  return kept.join(', ');
+}
+
 export async function fetchEventbriteEvents(
   city: string, country: string, lat: number, lng: number, count: number,
   category = 'events', page = 0
@@ -112,7 +136,14 @@ export async function fetchEventbriteEvents(
     const venue   = ev.location?.name ?? city;
     // Real city of the venue from the structured data — not the search city
     const evCity  = ev.location?.address?.addressLocality || city;
-    const addr    = [ev.location?.address?.streetAddress, ev.location?.address?.addressLocality].filter(Boolean).join(', ');
+    // Eventbrite often names a venue after the street it is on, so naively
+    // joining name + street + locality produced labels that stutter:
+    // "Grünbergstraße, Grünbergstraße, Wien". Drop any part already covered by
+    // an earlier one.
+    const addr = dedupeAddressParts([
+      ev.location?.address?.streetAddress,
+      ev.location?.address?.addressLocality,
+    ], venue);
     const rawDate = (ev.startDate ?? '').slice(0, 10);
     const time    = (ev.startDate ?? '').length > 10 ? (ev.startDate ?? '').slice(11, 16) : '';
     const image   = (Array.isArray(ev.image) ? ev.image[0] : ev.image) || picsumUrl(`eb_${city}_${page}_${i}`);
@@ -133,7 +164,7 @@ export async function fetchEventbriteEvents(
       category: category === 'discover' ? 'events' : category,
       hashtags: [`#${evCity.replace(/\s/g, '')}`, '#events', '#nova', '#local'],
       timestamp: now - Math.random() * 7_200_000,
-      location: { name: `${venue}, ${evCity}`, lat, lng },
+      location: { name: sameLabel(venue, evCity) ? evCity : `${venue}, ${evCity}`, lat, lng },
       saved: false, liked: false,
       isEvent: true, isAIGenerated: false,
       eventDate: `${dateStr}${time ? ` · ${time}` : ''}`,

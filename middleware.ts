@@ -19,13 +19,19 @@ import { Redis } from '@upstash/redis';
 // hit from rotating provider IPs, so IP throttling would wrongly block them.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Tier = 'ai' | 'write' | 'read';
+type Tier = 'ai' | 'write' | 'read' | 'asset';
 
 // Requests allowed per minute, per IP, per tier.
 const TIER_LIMITS: Record<Tier, number> = {
   ai:    20,   // /api/chat, /api/feed, /api/events — paid upstreams
   write: 15,   // /api/business/checkout, /api/account/*, /api/push/* — mutations
-  read:  60,   // /api/geocode, /api/track, /api/image-proxy, /api/sponsored — cheap
+  read:  60,   // /api/geocode, /api/track, /api/sponsored — cheap
+  // /api/image-proxy serves the photos themselves: one feed screen is dozens of
+  // requests and a scroll session is hundreds, all idempotent and served from the
+  // CDN after the first hit. The read tier's 60/min would throttle a normal user's
+  // own images, so assets get their own generous ceiling — still bounded, so the
+  // endpoint can't be used as an open resizing service.
+  asset: 600,
 };
 
 const WINDOW_MS = 60_000; // 1 minute
@@ -39,6 +45,7 @@ function isExcluded(pathname: string): boolean {
 }
 
 function tierFor(pathname: string): Tier {
+  if (pathname.startsWith('/api/image-proxy')) return 'asset';
   if (
     pathname.startsWith('/api/chat') ||
     pathname.startsWith('/api/feed') ||
@@ -64,6 +71,7 @@ try {
       ai:    new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.ai,    '1 m'), prefix: '@nova/rl/ai',    analytics: false }),
       write: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.write, '1 m'), prefix: '@nova/rl/write', analytics: false }),
       read:  new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.read,  '1 m'), prefix: '@nova/rl/read',  analytics: false }),
+      asset: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.asset, '1 m'), prefix: '@nova/rl/asset', analytics: false }),
     };
   }
 } catch {
