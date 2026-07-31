@@ -299,8 +299,12 @@ export async function GET(request: NextRequest) {
   const noStore = searchParams.get('fresh') === '1';
 
   const rawCatKey = searchParams.get('category') ?? 'events';
+  // A visitor and a local get different ORDERINGS of the same city, so they must
+  // not share a cache entry — otherwise whoever asks first decides what everyone
+  // else sees.
+  const isVisiting = searchParams.get('visiting') === '1';
   const key = eventsCacheKey({
-    category: VALID_CATEGORIES.has(rawCatKey) ? rawCatKey : 'events',
+    category: `${VALID_CATEGORIES.has(rawCatKey) ? rawCatKey : 'events'}${isVisiting ? ':v' : ''}`,
     city:   (searchParams.get('city') || '').slice(0, 60),
     lat:    parseFloat(searchParams.get('lat') || '0'),
     lng:    parseFloat(searchParams.get('lng') || '0'),
@@ -369,12 +373,18 @@ export async function GET(request: NextRequest) {
           const dbIsLocalEnough = !isPlaceCat || nearestKm <= 12;
 
           if (dbPosts.length >= 4 && dbIsLocalEnough) {
+            // Stamp the user-relative distance so the client can split a small
+            // town's own events from a bigger neighbour's (stored distanceKm is
+            // relative to the ingest centroid, not this user).
+            let dbFinal = withDistance(dbPosts, lat, lng);
+            // …then apply the same visitor rule the live path uses. Without this
+            // the DB path served Barcelona's restaurants nearest-first even to
+            // someone planning a trip — which is how Burger King, McDonald's and
+            // KFC ended up leading the list again.
+            if (isVisiting) dbFinal = rankForVisitor(dbFinal);
             const payload = {
-              // Stamp the user-relative distance so the client can split a small
-              // town's own events from a bigger neighbour's (stored distanceKm is
-              // relative to the ingest centroid, not this user). ensureUniqueImages
-              // guarantees no two cards share a photo.
-              posts: ensureUniqueImages(withDistance(dbPosts, lat, lng)),
+              // ensureUniqueImages guarantees no two cards share a photo.
+              posts: ensureUniqueImages(dbFinal),
               city: searchParams.get('city') || '',
               country: searchParams.get('country') || '',
               sources: ['db'], hasMore: dbPosts.length >= count,
