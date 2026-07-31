@@ -173,3 +173,31 @@ describe('buildTripBriefing', () => {
     expect(b).not.toMatch(/Green space/);
   });
 });
+
+describe('rankForVisitor — chains are a hard tier, not a soft penalty', () => {
+  // Regression test for the real production failure: every Barcelona restaurant
+  // scored within 0.05 of every other (all stock photos, all only an OSM link),
+  // so a scoring penalty was swallowed by the distance tie-breaker and
+  // McDonald's/KFC came straight back to the top.
+  const flat = (name: string, distanceKm: number) => post({
+    id: `osm_${name}`, organizer: name, category: 'restaurants', isEvent: false,
+    caption: `A local go-to in Barcelona, ${name} serves up food.\n\nshort`,
+    image: 'https://images.pexels.com/photos/1/x.jpg',
+    eventUrl: 'https://www.openstreetmap.org/node/1',
+    distanceKm,
+  });
+
+  it('puts every independent above every chain, however close the chain is', () => {
+    const ranked = rankForVisitor([
+      flat("McDonald's", 0.1), flat('KFC', 0.2), flat('Burger King', 0.3),
+      flat('Central Rambla', 4), flat('El Parador de Sant Just', 8),
+    ]).map(p => p.organizer);
+    expect(ranked.slice(0, 2)).toEqual(['Central Rambla', 'El Parador de Sant Just']);
+    expect(ranked.slice(-3)).toEqual(["McDonald's", 'KFC', 'Burger King']);
+  });
+
+  it('still uses distance to order within a tier', () => {
+    const ranked = rankForVisitor([flat('B', 9), flat('A', 1)]).map(p => p.organizer);
+    expect(ranked).toEqual(['A', 'B']);
+  });
+});
