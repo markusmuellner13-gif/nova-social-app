@@ -53,8 +53,17 @@ const TRANSIT_NOISE = [
   'post office', 'electoral', 'constituency', 'census-designated',
   'list of', '(disambiguation)', 'roundhouse', 'marshalling yard',
   // Administrative-area articles aren't "a sight" — drop the Bezirk/county/etc.
+  // These are geotagged at the city centre, so they crowd out real landmarks:
+  // a trip briefing for Rome was opening with "Municipio I", "Municipio XII"
+  // and "Metropolitan City of Rome Capital" before any actual sight.
+  // Multilingual, because Wikipedia titles come back in the local language.
   ' district', '(district)', 'municipality', 'province of', 'prefecture',
-  'metropolitan area', 'administrative', 'cadastral', 'statutory city',
+  'metropolitan area', 'metropolitan city', 'administrative', 'cadastral', 'statutory city',
+  'municipio', 'comune di', 'circoscrizione', 'frazione',
+  'arrondissement', 'communauté de communes', 'canton of',
+  'distrito', 'municipio de', 'comarca', 'gemeinde', 'ortsteil', 'stadtbezirk',
+  'gemeente', 'deelgemeente', 'borough of', 'civil parish', 'ward of',
+  'regional unit', 'subprefecture', 'administrative region',
   // Historical events and abstract topics. Wikipedia geotags these because the
   // battle/treaty happened at those coordinates, so GeoSearch happily returns
   // "Siege of Vienna" and "Timeline of Vienna" as things near you — but you
@@ -93,9 +102,25 @@ export function isSettlementArticle(description: string | null | undefined): boo
   return SETTLEMENT_DESC.test(description) && !SIGHT_DESC.test(description);
 }
 
+// An article about something that HAPPENED rather than somewhere you can go.
+// Wikipedia geotags these at the place they happened, so a sightseeing search
+// for Rome offered "Fall of Rome (1849)" and "1932 UCI Road World
+// Championships" as things to visit — and the crowd advice then recommended
+// them as quieter alternatives, which is nonsense.
+//   • a title starting with a year        → "1932 UCI Road World Championships"
+//   • a title ending in a bare year        → "Fall of Rome (1849)"
+//   • named recurring sporting occasions
+const HISTORICAL_EVENT = /^\s*\d{3,4}[\s–-]|\(\d{4}\)\s*$|\b(championships?|olympic|world cup|grand prix|expo \d|festival of \d|congress \d)\b/i;
+
+// Historical polities and episodes. Same problem, different flavour: Wikipedia
+// geotags "Principality of Catalonia" and "¡Cu-Cut! incident" in Barcelona, and
+// a tourist cannot visit either of them.
+const HISTORICAL_ENTITY = /\b(principality|kingdom of|republic of|duchy|county of|crown of|dynasty|incident|affair|scandal|crisis|revolt|riot|rebellion|conspiracy|plot of|proclamation|manifesto)\b/i;
+
 export function isWorthSightseeing(title: string, city?: string): boolean {
   const t = title.toLowerCase();
   if (FAMOUS_STATIONS.some(f => t.includes(f))) return true;
+  if (HISTORICAL_EVENT.test(title) || HISTORICAL_ENTITY.test(title)) return false;
   if (TRANSIT_NOISE.some(n => t.includes(n))) return false;
   // The article ABOUT the town/district itself ("Baden", "Baden bei Wien",
   // "Baden, Lower Austria") is not a sight inside that town — drop it. We only

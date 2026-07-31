@@ -9,6 +9,7 @@ import {
 import { assessQuality, qualityFloorFor, filterByQuality } from './quality';
 import { curate, mergeDuplicates } from './curator';
 import type { ApiPost } from '@/lib/sources/shared';
+import { parseTripQuery } from './trip';
 
 function post(o: Partial<ApiPost> = {}): ApiPost {
   return {
@@ -274,5 +275,52 @@ describe('curator', () => {
     const many = Array.from({ length: 40 }, (_, i) => post({ id: `eb_${i}`, caption: `Event ${i}\n\nA description long enough to pass the bar comfortably here.` }));
     const { kept } = curate(many);
     expect(kept.length).toBeLessThanOrEqual(many.length);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The brain must keep doing ALL of its jobs. Trip planning was added as a FIFTH
+// responsibility, not a replacement — this guards against a future change
+// quietly dropping one of the other four.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('Nova Brain still does every job', () => {
+  it('JOB 1 — manages the database: merges duplicates and purges filler', () => {
+    const dupes = [post({ id: 'eb_1' }), post({ id: 'eb_2' })];
+    expect(mergeDuplicates(dupes).removed).toBe(1);
+    const { report } = curate([...dupes, post({ id: 'osm_3', image: '', caption: 'Hi', location: { name: '', lat: 0, lng: 0 } })]);
+    expect(report.mergedDuplicates).toBeGreaterThan(0);
+    expect(report.droppedLowQuality + report.mergedDuplicates).toBeGreaterThan(0);
+  });
+
+  it('JOB 2 — manages post creation: scores quality and adapts the bar to supply', () => {
+    expect(assessQuality(post()).score).toBeGreaterThan(0.7);
+    expect(qualityFloorFor(500)).toBeGreaterThan(qualityFloorFor(5));
+  });
+
+  it('JOB 3 — manages the algorithm: trains from engagement and ranks', () => {
+    const x = extractFeatures(post({ distanceKm: 1 }), ctx);
+    const before = score(emptyModel(), x);
+    let m = emptyModel();
+    for (let i = 0; i < 50; i++) m = train(m, x, 1, 1);
+    expect(score(m, x)).toBeGreaterThan(before);
+    expect(rank([post(), post({ id: 'b' })], () => x, p => p.category, m)).toHaveLength(2);
+  });
+
+  it('JOB 4 — learns which sources are worth trusting', () => {
+    // recordCuration feeds sourceStats; the report it consumes must carry
+    // per-source accept/drop counts for that loop to have anything to learn from.
+    const { report } = curate([post({ id: 'eb_1' }), post({ id: 'osm_2', category: 'restaurants', isEvent: false })]);
+    expect(Object.keys(report.bySource).length).toBeGreaterThan(0);
+    for (const s of Object.values(report.bySource)) {
+      expect(typeof s.kept).toBe('number');
+      expect(typeof s.dropped).toBe('number');
+    }
+  });
+
+  it('JOB 5 (new) — plans a trip, without disturbing the others', () => {
+    const q = parseTripQuery('going to Rome in three weeks');
+    expect(q.isTrip).toBe(true);
+    // …and an ordinary local question still falls through to the normal path.
+    expect(parseTripQuery("what's on tonight?").isTrip).toBe(false);
   });
 });

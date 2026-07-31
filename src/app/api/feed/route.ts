@@ -16,6 +16,8 @@ import { dbReadEnabled, queryEventsNear, queryEventsByCountry } from '@/lib/even
 import { aiBudgetExceeded, noteAiCall } from '@/lib/aiBudget';
 import { assessQuality, qualityFloorFor } from '@/lib/brain/quality';
 import { mergeDuplicates } from '@/lib/brain/curator';
+import { persistInBackground } from '@/lib/brain/persist';
+import { rankForVisitor } from '@/lib/brain/prominence';
 
 export const maxDuration = 60;
 
@@ -167,6 +169,41 @@ async function wikipediaPosts(
 // Sightseeing tab opened on tours rather than sights. These categories lead with
 // places and keep the dated experiences underneath.
 const PLACES_FIRST = new Set(['sightseeing', 'travel']);
+
+/**
+ * Places for this area from our own database.
+ *
+ * Returns null when we don't hold enough to serve a good page, so the caller
+ * falls through to a live fetch. Only genuinely LOCAL rows count: a town must
+ * not be handed a bigger neighbour's restaurants just because they're in the
+ * table. Events filed under a place category by older ingest sweeps are dropped.
+ */
+async function placesFromDb(
+  category: string, lat: number, lng: number, radius: number,
+  count: number, page: number, visiting: boolean
+): Promise<{ posts: ApiPost[]; hasMore: boolean } | null> {
+  if (!dbReadEnabled || (!lat && !lng)) return null;
+  try {
+    const rows = await queryEventsNear({
+      lat, lng, radiusKm: Math.max(radius, 25), category,
+      afterIso: new Date().toISOString(), limit: count * 2, offset: page * count,
+    });
+    const places = mergeDuplicates(rows.filter(p => !p.isEvent)).merged;
+    if (places.length < 4) return null;
+    const nearest = Math.min(...places.map(p =>
+      haversineKm(lat, lng, p.location?.lat ?? 0, p.location?.lng ?? 0)));
+    if (!(nearest <= 12)) return null;
+
+    let placed = withDistance(places, lat, lng);
+    if (visiting) placed = rankForVisitor(placed);
+    return {
+      posts: ensureUniqueImages(placed.slice(0, count)),
+      hasMore: places.length > count,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // How long we wait for the parallel source fan-out before serving what we have.
 // The fast APIs (Ticketmaster/Eventbrite/SeatGeek) answer well under 2s; the
@@ -371,6 +408,10 @@ async function computeFeed(request: NextRequest) {
   const days    = Math.max(7, Math.min(180, parseInt(searchParams.get('days')  || '60', 10)));
   const rawCat  = searchParams.get('category') ?? 'events';
   const category = VALID_CATEGORIES.has(rawCat) ? rawCat : 'events';
+  // Set by the client when the city was hand-picked in the City Explorer rather
+  // than resolved from GPS — i.e. the user is planning a visit, not standing
+  // there. It changes what "best" means: notable over near.
+  const visiting = searchParams.get('visiting') === '1';
 
   // Explicit coords → IP geolocation (free Vercel headers) → Vienna default;
   // plus the city guard so posts are never labelled "Unknown City"
@@ -392,44 +433,44 @@ async function computeFeed(request: NextRequest) {
   // parties — the app quietly lying about what it found. Now a place category
   // only ever returns places, and says so honestly when it has none.
   if (OSM_CATEGORIES.has(category)) {
+    // Our own database first. Once a city has been fetched even once, this is
+    // where its places come from — about a second instead of twenty, and it
+    // keeps working when Overpass doesn't (which, measured, is often).
+    const dbFirst = await placesFromDb(category, lat, lng, radius, count, page, visiting);
+    if (dbFirst) {
+      return NextResponse.json(
+        { posts: dbFirst.posts, city, country, sources: ['db'], hasMore: dbFirst.hasMore },
+        { headers: { 'Cache-Control': 'no-store', 'x-nova-cache': 'DB' } }
+      );
+    }
     try {
       const { posts, hasMore } = await osmPosts(lat, lng, city, category, page, radius, count, unsplashKey, pexelsKey);
       if (posts.length > 0) {
-        const final = ensureUniqueImages(withDistance(posts, lat, lng));
+        let placed = withDistance(posts, lat, lng);
+        // A visitor wants what's WORTH going to; a local wants what's CLOSE.
+        // Nearest-first is why "where to eat in Barcelona" answered McDonald's.
+        if (visiting) placed = rankForVisitor(placed);
+        const final = ensureUniqueImages(placed);
+        // Write-through: the first visitor to a city pays Overpass's 20 seconds
+        // once; everyone after is served from Postgres in about a second, and
+        // the tab keeps working even when Overpass is down.
+        persistInBackground(final, { city, country, lat, lng, isPlaceCategory: true });
         return NextResponse.json(
           { posts: final, city, country, sources: ['osm'], hasMore },
           { headers: PLACE_CACHE }
         );
       }
-      // Genuinely nothing of this kind nearby — an honest empty page, not a
-      // pile of unrelated events.
+      // Overpass answered, with nothing. Genuinely no places of this kind
+      // nearby — an honest empty page, not a pile of unrelated events.
       return NextResponse.json(
         { posts: [], city, country, sources: ['osm'], hasMore: false, reason: 'no_places_nearby' },
         { headers: PLACE_CACHE }
       );
     } catch (err) {
       console.error('[feed/osm]', err);
-      // Overpass unreachable. Try our own DB, which holds places ingested for
-      // this area earlier — still real places of the right kind. Only if that is
-      // empty too do we report the outage, so the client can offer a retry
-      // instead of showing the wrong content.
-      try {
-        if (dbReadEnabled && (lat || lng)) {
-          const dbPlaces = await queryEventsNear({
-            lat, lng, radiusKm: Math.max(radius, 25), category,
-            afterIso: new Date().toISOString(), limit: count, offset: page * count,
-          });
-          if (dbPlaces.length > 0) {
-            return NextResponse.json(
-              {
-                posts: ensureUniqueImages(withDistance(dbPlaces, lat, lng)),
-                city, country, sources: ['db'], hasMore: dbPlaces.length >= count,
-              },
-              { headers: { 'Cache-Control': 'no-store', 'x-nova-cache': 'DB' } }
-            );
-          }
-        }
-      } catch { /* DB unavailable too */ }
+      // Overpass unreachable and the DB had nothing for this area either, so we
+      // report the outage rather than showing the wrong content. The client
+      // offers a retry.
       return NextResponse.json(
         { posts: [], city, country, sources: [], hasMore: false, reason: 'places_unavailable' },
         { status: 200, headers: { 'Cache-Control': 'no-store' } }
@@ -575,6 +616,9 @@ async function computeFeed(request: NextRequest) {
   // No invented events: if every real source is empty, return an honest empty
   // page — the client shows a clear "no events found" state instead
   let final = rankAndMix(local, count * 2, category);
+  // Same rule for the blended categories: someone planning a trip to Rome wants
+  // the Pantheon before the nearest sandwich bar.
+  if (visiting) final = rankForVisitor(final);
 
   // Cold-start cushion: tiny towns can have nothing within radius even after
   // expansion. Rather than a dead feed, fall back to upcoming events anywhere in
@@ -592,9 +636,20 @@ async function computeFeed(request: NextRequest) {
     } catch { /* fall back to empty */ }
   }
 
+  const finalPosts = ensureUniqueImages(final);
+
+  // Everything we just computed live goes into our own database, so the next
+  // person asking about this city — through the feed, the chatbot or the trip
+  // planner — is answered from Postgres instead of re-hitting every upstream.
+  // This is how coverage grows: every visit to a new city seeds it.
+  persistInBackground(finalPosts, {
+    city, country, lat, lng,
+    isPlaceCategory: OSM_CATEGORIES.has(category) || category === 'food' || category === 'sightseeing',
+  });
+
   return NextResponse.json(
     {
-      posts: ensureUniqueImages(final),
+      posts: finalPosts,
       city, country, sources,
       hasMore: anyMore || final.length >= count,
       page,

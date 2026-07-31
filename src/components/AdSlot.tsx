@@ -33,42 +33,15 @@ export default function AdSlot({ slotId, format = 'auto', index = 0 }: Props) {
     } catch { /* already initialised */ }
   }, [resolvedSlot]);
 
-  // ── Placeholder shown before AdSense is configured ──────────────────────
-  if (!CLIENT_ID || !resolvedSlot) {
-    return (
-      <div
-        className="ad-slot-placeholder"
-        style={{
-          width: '100%',
-          minHeight: 90,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'rgba(26,26,36,0.6)',
-          borderTop: '1px solid #1e1e2a',
-          borderBottom: '1px solid #1e1e2a',
-          gap: 4,
-          padding: '12px 0',
-        }}
-        aria-label="Advertisement"
-      >
-        <span style={{ fontSize: 10, color: '#444455', letterSpacing: '0.08em', fontWeight: 600 }}>
-          ADVERTISEMENT
-        </span>
-        <div
-          style={{
-            width: '90%',
-            height: 60,
-            borderRadius: 12,
-            background: 'linear-gradient(90deg, #1a1a24 25%, #252530 50%, #1a1a24 75%)',
-            backgroundSize: '200% 100%',
-            animation: 'shimmer 1.8s infinite',
-          }}
-        />
-      </div>
-    );
-  }
+  // No ad network configured yet → render NOTHING.
+  //
+  // This used to draw an "ADVERTISEMENT" box with a shimmering grey rectangle
+  // inside it. Scrolling the feed produced five of them in a row — empty slots
+  // for ads that don't exist, taking up space and making a finished app look
+  // unfinished. An App Store reviewer would read them as broken. When there is
+  // no ad to show, the honest and better-looking answer is no slot at all; the
+  // real unit below appears the moment AdSense is configured.
+  if (!CLIENT_ID || !resolvedSlot) return null;
 
   // ── Real AdSense unit ────────────────────────────────────────────────────
   return (

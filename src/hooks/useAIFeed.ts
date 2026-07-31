@@ -61,6 +61,12 @@ function fetchWithTimeout(url: string): Promise<Response> {
 
 interface CacheEntry { posts: Post[]; timestamp: number; page: number; radiusTier: number }
 
+/** True when the current city was hand-picked rather than resolved from GPS. */
+function isVisiting(): boolean {
+  if (typeof window === 'undefined') return false;
+  try { return window.localStorage.getItem('nova_location_manual') === '1'; } catch { return false; }
+}
+
 function cacheKey(city: string, category: string): string {
   return `${CACHE_PREFIX}${city.toLowerCase().replace(/\s+/g, '_')}_${category}`;
 }
@@ -239,10 +245,16 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       const fresh = filterExpired(data.posts ?? []);
       if (!fresh.length) return;
       setPosts(prev => {
-        // Background refresh PREPENDS genuinely new posts, so build the merge the
-        // other way round and keep the same content-level dedupe.
+        // The refresh is the SERVER's current, correctly-ranked first page, so it
+        // replaces the head of the list rather than being appended behind it.
+        //
+        // Appending was a real bug: a returning user opening a city they'd looked
+        // at before saw the stale cached order pinned at the top — in testing,
+        // Barcelona sightseeing led with two events dated 2027 while the fresh
+        // response (Virreina Palace, Via Sepulcral Romana) sat further down.
+        // Anything the user has already scrolled past keeps its place below.
         const combined = mergeUnique(fresh, prev);
-        if (combined.length === prev.length) return prev;
+        if (combined.length === prev.length && combined[0]?.id === prev[0]?.id) return prev;
         const merged = filterExpired(combined);
         writeCache(city, category, merged, pageRef.current, radiusTierRef.current);
         return merged;
@@ -317,6 +329,10 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       p.set('lat',     loc.lat.toFixed(3));
       p.set('lng',     loc.lng.toFixed(3));
     }
+    // A hand-picked city means the user is planning a visit, not standing in it.
+    // The server ranks notable-over-near for those, so "where to eat in
+    // Barcelona" stops answering with the nearest McDonald's.
+    if (isVisiting()) p.set('visiting', '1');
     return p.toString();
   }
 

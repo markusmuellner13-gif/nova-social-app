@@ -61,3 +61,55 @@ describe('isSettlementArticle', () => {
     expect(isSettlementArticle(undefined)).toBe(false);
   });
 });
+
+describe('isWorthSightseeing — administrative areas', () => {
+  it('drops the admin districts that were crowding out real Rome landmarks', () => {
+    // A trip briefing for Rome opened with these before any actual sight;
+    // Wikipedia geotags them at the city centre so they always rank first.
+    expect(isWorthSightseeing('Municipio I')).toBe(false);
+    expect(isWorthSightseeing('Municipio XII')).toBe(false);
+    expect(isWorthSightseeing('Metropolitan City of Rome Capital')).toBe(false);
+  });
+
+  it('drops admin areas in other languages too', () => {
+    expect(isWorthSightseeing('Comune di Fiesole')).toBe(false);
+    expect(isWorthSightseeing('9th arrondissement of Paris')).toBe(false);
+    expect(isWorthSightseeing('Distrito de Chamberí')).toBe(false);
+    expect(isWorthSightseeing('Stadtbezirk Mitte')).toBe(false);
+  });
+
+  it('still keeps the actual sights', () => {
+    expect(isWorthSightseeing('Capitoline Museums')).toBe(true);
+    expect(isWorthSightseeing('Medusa (Bernini)')).toBe(true);
+    expect(isWorthSightseeing('Pantheon, Rome')).toBe(true);
+    expect(isWorthSightseeing('Sagrada Família')).toBe(true);
+    expect(isWorthSightseeing('Els Quatre Gats')).toBe(true);
+  });
+});
+
+describe('isWorthSightseeing — historical events are not places', () => {
+  it('drops year-prefixed and year-suffixed articles', () => {
+    expect(isWorthSightseeing('1932 UCI Road World Championships')).toBe(false);
+    expect(isWorthSightseeing('Fall of Rome (1849)')).toBe(false);
+    expect(isWorthSightseeing('2006 Winter Olympics')).toBe(false);
+  });
+  it('does not drop a real place that merely contains a number', () => {
+    expect(isWorthSightseeing('Museum of the 20th Century')).toBe(true);
+    expect(isWorthSightseeing('Terminal 2')).toBe(true);
+    expect(isWorthSightseeing('Piazza del Campidoglio')).toBe(true);
+  });
+});
+
+describe('isWorthSightseeing — historical entities are not places either', () => {
+  it('drops polities and episodes Wikipedia geotags in a city', () => {
+    expect(isWorthSightseeing('Principality of Catalonia')).toBe(false);
+    expect(isWorthSightseeing('¡Cu-Cut! incident')).toBe(false);
+    expect(isWorthSightseeing('Kingdom of Bohemia')).toBe(false);
+  });
+  it('keeps real places whose names survive the filter', () => {
+    expect(isWorthSightseeing('Gothic Quarter, Barcelona')).toBe(true);
+    expect(isWorthSightseeing('Palace of the Generalitat of Catalonia')).toBe(true);
+    expect(isWorthSightseeing('Plaça Sant Jaume')).toBe(true);
+    expect(isWorthSightseeing('Arch of Nero')).toBe(true);
+  });
+});
