@@ -38,6 +38,22 @@ function daysUntil(eventDateRaw?: string | null): number | null {
   return diff >= 0 ? diff : null;
 }
 
+// "TONIGHT" / "TOMORROW" / "THIS SAT" for anything imminent, null further out.
+// Returned uppercase to sit in the event badge.
+function relativeWhen(eventDateRaw?: string | null): string | null {
+  if (!eventDateRaw) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const then = new Date(`${eventDateRaw}T00:00:00`);
+  if (Number.isNaN(then.getTime())) return null;
+  const days = Math.round((then.getTime() - today.getTime()) / 86_400_000);
+  if (days < 0) return null;
+  if (days === 0) return new Date().getHours() >= 16 ? 'TONIGHT' : 'TODAY';
+  if (days === 1) return 'TOMORROW';
+  if (days <= 6) return `THIS ${then.toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase()}`;
+  return null;
+}
+
 // ── Price parser ──────────────────────────────────────────────────────────────
 function parseMinPrice(priceStr: string): number {
   const lower = priceStr.toLowerCase();
@@ -274,7 +290,11 @@ export default function Post({ post, showHint = false }: Props) {
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold"
               style={{ background: 'linear-gradient(135deg, rgba(244,63,94,0.2), rgba(139,92,246,0.2))', color: '#f87171', border: '1px solid rgba(244,63,94,0.35)' }}>
               <Calendar size={11} />
-              {t.common.event} — {post.eventDate}
+              {/* Lead with how soon it is. "EVENT — Friday, 31 July 2026" makes
+                  you do date arithmetic to answer "is this tonight?"; "TONIGHT"
+                  answers it. The full date still follows for anything further
+                  out than a week. */}
+              {relativeWhen(post.eventDateRaw) ?? t.common.event} — {post.eventDate}
             </div>
             {post.eventVenue && (
               <span className="text-xs font-medium truncate" style={{ color: '#555566' }}>📍 {post.eventVenue}</span>

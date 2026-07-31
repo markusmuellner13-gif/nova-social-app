@@ -452,7 +452,11 @@ function toApiPost(
   const price = ev.price || 'See website';
   const url = ev.url || `https://allevents.in/${slugify(searchCity)}`;
   const host = (() => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'nova'; } })();
-  const desc = ev.description || `${ev.name} in ${evCity}.`;
+  // Crawled titles frequently already name the city ("Michael Patrick Kelly in
+  // Wien"), so the old unconditional suffix produced "…in Wien in Vienna."
+  const nameHasCity = sameLabel(ev.name.split(/\s+in\s+/i).pop() ?? '', evCity)
+    || new RegExp(`\\bin\\s+${evCity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(ev.name);
+  const desc = ev.description || (nameHasCity ? `${ev.name}.` : `${ev.name} in ${evCity}.`);
   // Some listings put a URL in the organizer field. A raw URL makes a terrible
   // display name and an unreadable @handle ("https.allevents.in.org.concert…"),
   // so fall back to the venue whenever the organiser doesn't look like a name.

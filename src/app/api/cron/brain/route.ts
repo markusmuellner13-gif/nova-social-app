@@ -6,6 +6,7 @@ import { dbReadEnabled, sampleEventsWorldwide } from '@/lib/eventsDb';
 import { assessQuality } from '@/lib/brain/quality';
 import { mergeDuplicates } from '@/lib/brain/curator';
 import { FEATURE_NAMES } from '@/lib/brain/features';
+import { topDestinations, gather } from '@/lib/brain/assistant';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -78,6 +79,27 @@ export async function GET(req: NextRequest) {
     } catch { /* DB unreachable — report what we have */ }
   }
 
+  // ── Build the places people are actually asking about ─────────────────────
+  // Every trip question records its destination. Here we go and fetch those
+  // cities — sights, events, food, outdoors — which write-throughs into the
+  // database. The effect is that coverage grows toward where this app's users
+  // are really going, instead of toward a hard-coded list of cities, and the
+  // second person to ask about a place gets an instant answer.
+  const origin = new URL(req.url).origin;
+  const destinations = await topDestinations(6).catch(() => []);
+  const warmed: { city: string; got: number }[] = [];
+  const deadline = Date.now() + 38_000; // stay inside the Hobby function cap
+
+  for (const d of destinations) {
+    if (Date.now() > deadline) break;
+    let got = 0;
+    for (const cat of ['sightseeing', 'events', 'restaurants']) {
+      if (Date.now() > deadline) break;
+      got += (await gather(origin, d, cat, 12, { visiting: true }).catch(() => [])).length;
+    }
+    warmed.push({ city: d.city, got });
+  }
+
   // Re-save so a healthy model refreshes its TTL and never quietly expires
   // during a quiet period.
   if (isUsable(model) && model.n > 0) await saveGlobalModel(model);
@@ -87,6 +109,7 @@ export async function GET(req: NextRequest) {
     model: { version: MODEL_VERSION, examplesSeen: model.n, trained: model.n >= 25, weights },
     sourceReliability: sources,
     corpus,
+    destinations: { tracked: destinations.length, warmed },
     generatedAt: new Date().toISOString(),
   });
 }

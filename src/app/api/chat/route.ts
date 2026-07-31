@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { answerLocally } from '@/lib/novaBrain';
+import { answerLocally, parseIntent } from '@/lib/novaBrain';
+import { answerTrip, answerFromLive } from '@/lib/brain/assistant';
+import type { ApiPost } from '@/lib/sources/shared';
 import { resolveRequestGeo } from '@/lib/sources/geocode';
 
 const SYSTEM_PROMPT = `You are Nova's AI assistant — a hyper-local event and activity discovery expert built into the Nova social discovery app.
@@ -70,6 +72,20 @@ export async function POST(request: NextRequest) {
     lat = geo.lat; lng = geo.lng; resolvedCity = geo.city || city;
   } catch { /* keep what we had */ }
 
+  const origin = new URL(request.url).origin;
+
+  // ── Trip planning ─────────────────────────────────────────────────────────
+  // "I'm going to Rome in three weeks — what's worth seeing?" is a different
+  // question from "what's on tonight", and it is half of what this app is for.
+  // Answered first, because a trip question mentioning a city would otherwise be
+  // handled as a query about the user's current one.
+  try {
+    const trip = await answerTrip(message, origin, { lat, lng, city: resolvedCity ?? '', country: country ?? '' });
+    if (trip) return NextResponse.json({ reply: trip.reply, source: 'nova_trip', city: trip.city });
+  } catch (err) {
+    console.error('[chat/trip]', err);
+  }
+
   try {
     const local = await answerLocally({ message, city: resolvedCity, country, lat, lng });
     if (local.used && local.reply) {
@@ -77,6 +93,31 @@ export async function POST(request: NextRequest) {
     }
   } catch (err) {
     console.error('[chat/brain]', err);
+  }
+
+  // ── Live fallback — the fix for "works in Vienna only" ────────────────────
+  // Our DB doesn't cover this city yet. Rather than giving up (and blaming the
+  // network for it), ask the app's own feed — the same pipeline the Discover tab
+  // uses — and answer from that. It also write-throughs to the DB, so the next
+  // person asking about this city gets an instant answer.
+  if (Number.isFinite(lat) && Number.isFinite(lng) && (lat || lng)) {
+    try {
+      const intent = parseIntent(message);
+      const posts = await answerFromLive(
+        origin,
+        { lat, lng, city: resolvedCity ?? '', country: country ?? '' },
+        intent.categories,
+        intent.window,
+      );
+      if (posts.length > 0) {
+        return NextResponse.json({
+          reply: composeLiveReply(posts, resolvedCity ?? 'your area'),
+          source: 'nova_live',
+        });
+      }
+    } catch (err) {
+      console.error('[chat/live]', err);
+    }
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -116,8 +157,29 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ reply });
   } catch (err) {
     console.error('[chat/route] Error:', err);
+    // Be honest about what happened. The old message blamed the network for
+    // what was usually "we have no data for this city", which is a different
+    // problem and sends the user off to check their wifi for nothing.
+    const where = resolvedCity ? ` for ${resolvedCity}` : '';
     return NextResponse.json({
-      reply: "I'm having trouble connecting right now. Try again in a moment! 🔄",
+      reply: `I couldn't pull live listings${where} just now. I've asked for them in the background — try me again in a moment, or open the **Discover** tab to see what's already loaded. 🔄`,
     });
   }
+}
+
+/** Turn live feed results into the same shape of answer the DB path gives. */
+function composeLiveReply(posts: ApiPost[], city: string): string {
+  const lines: string[] = [`Here's what I'm seeing in ${city}: ✨`, ''];
+  for (const p of posts.slice(0, 5)) {
+    const title = (p.caption?.split('\n')[0] ?? '').slice(0, 74);
+    const when = p.eventDateRaw
+      ? new Date(`${p.eventDateRaw}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+      : null;
+    lines.push(`• *${title}*`);
+    if (when) lines.push(`   📅 ${when}`);
+    if (p.eventVenue || p.location?.name) lines.push(`   📍 ${(p.eventVenue || p.location?.name || '').slice(0, 70)}`);
+    if (p.eventUrl) lines.push(`   🔗 ${p.eventUrl}`);
+  }
+  lines.push('', 'Open the Discover tab for the full list — and ask me about a city you\'re travelling to and I\'ll plan it out. 🧭');
+  return lines.join('\n');
 }

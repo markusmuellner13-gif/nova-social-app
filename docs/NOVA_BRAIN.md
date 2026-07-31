@@ -23,7 +23,7 @@ The app also ships `src/lib/novaBrain.ts`, a separate deterministic NLP layer
 that answers chat questions from the events DB. Different thing, same
 philosophy: real data, no paid model in the request path.
 
-## The four parts
+## The five jobs
 
 ### 1. The ranker — `brain/ranker.ts`, `brain/features.ts`
 
@@ -136,3 +136,49 @@ by more than 0.3 probability. If ranking ever stops working, that test is the
 first place to look.
 
 Run: `npx vitest run src/lib/brain`
+
+---
+
+### 5. The trip planner — `brain/trip.ts`, `brain/assistant.ts`
+
+The fifth job, added after user testing showed the assistant only worked in one
+city and couldn't answer the question the app exists to answer.
+
+**Understanding the ask.** `parseTripQuery` reads a destination and a future
+window out of plain language — "going to Rome in three weeks", "travelling to
+New York in 2 months", "I'll be in Barcelona in September", "what's really worth
+seeing in Amsterdam". It deliberately does *not* fire on "what's on tonight", so
+ordinary local questions still take the normal path.
+
+**Gathering.** Sights, events in the trip window, food and green space are
+fetched in parallel for that city — from our database when we have it, live when
+we don't. The live path write-throughs, so asking about a city makes the app
+permanently better at that city.
+
+**The briefing.** Worth seeing · what's on while you're there · where to eat ·
+green space · avoiding the crowds.
+
+**Crowd advice is derived, never invented.** We do not know live queue lengths
+and never pretend to. What we do know: which sights are most prominent (and
+therefore where everyone else is going), the quieter alternatives we actually
+found in the same city, and real published opening hours. That's what it says.
+
+**Honesty rules.** Sections with no data are omitted rather than padded. When
+there are no confirmed events in the window it says so and explains why (venues
+publish 3–6 weeks out) instead of inventing a listing. When we have nothing at
+all for a city it says that too.
+
+### The destination memory
+
+Every trip question records its destination with a hit count. `/api/cron/brain`
+then pre-builds the most-asked-about cities. Coverage grows toward where this
+app's users are actually going, rather than toward a city list somebody
+hard-coded — and the second person to ask about a place gets an instant answer.
+
+### These are additive
+
+Trip planning did not replace anything. The curator still manages the database,
+the quality gate still governs what becomes a post, the ranker still trains on
+every interaction and orders the feed, and the source learner still decides
+which upstreams to trust. `brain.test.ts` has a "still does every job" block that
+asserts all five, so a future change can't quietly drop one.
