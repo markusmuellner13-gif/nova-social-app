@@ -73,15 +73,33 @@ export function isLocalToCity(
   return Number.isFinite(d) && d <= withinKm;
 }
 
+/** Name to test for chain-ness: the venue, falling back to the headline. */
+function displayName(p: ApiPost): string {
+  return p.organizer || p.user?.name || (p.caption?.split('\n')[0] ?? '');
+}
+
 /**
- * Order places for a visitor: notable first, with distance as a gentle
- * tie-breaker so a famous place across town still beats an unremarkable one next
- * door, but two equally notable places surface the nearer one.
+ * Order places for a visitor.
+ *
+ * Chains are a HARD tier, not a scoring penalty. That distinction matters: in
+ * production every Barcelona restaurant scored within 0.05 of every other
+ * (they all had stock photos and only an OpenStreetMap link), so a penalty that
+ * merely lowered the score was swallowed by the tie-breaker and McDonald's and
+ * KFC came back to the top on distance alone. A traveller asking where to eat in
+ * Barcelona should never be handed a McDonald's above an independent, whatever
+ * the other signals say — so chains sort last, full stop.
+ *
+ * Within a tier: more notable first, distance breaking near-ties so a famous
+ * place across town still beats an unremarkable one next door.
  */
 export function rankForVisitor(posts: ApiPost[]): ApiPost[] {
   return [...posts].sort((a, b) => {
+    const ca = isChain(displayName(a)) ? 1 : 0;
+    const cb = isChain(displayName(b)) ? 1 : 0;
+    if (ca !== cb) return ca - cb;
+
     const pa = prominence(a), pb = prominence(b);
-    if (Math.abs(pa - pb) > 0.08) return pb - pa;
+    if (Math.abs(pa - pb) > 0.02) return pb - pa;
     return (a.distanceKm ?? 9999) - (b.distanceKm ?? 9999);
   });
 }
