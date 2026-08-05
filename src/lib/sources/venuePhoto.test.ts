@@ -124,6 +124,15 @@ describe('osmTagImage', () => {
     expect(osmTagImage({ wikimedia_commons: 'File:Stephansdom.jpg' }))
       .toBe('https://commons.wikimedia.org/wiki/Special:FilePath/Stephansdom.jpg?width=1600');
   });
+  it('converts a Commons description-page URL into the actual file', () => {
+    // Mappers paste these into `image`; the page serves HTML, so the browser
+    // blocks it (ERR_BLOCKED_BY_ORB) and the card loses its photo.
+    expect(osmTagImage({ image: 'https://commons.wikimedia.org/wiki/File:Mautwirtshaus.jpg' }))
+      .toBe('https://commons.wikimedia.org/wiki/Special:FilePath/Mautwirtshaus.jpg?width=1600');
+    expect(osmTagImage({ image: 'https://de.wikipedia.org/wiki/Datei:Alte%20M%C3%BChle.jpg' }))
+      .toBe('https://commons.wikimedia.org/wiki/Special:FilePath/Alte%20M%C3%BChle.jpg?width=1600');
+  });
+
   it('refuses a logo sitting in the image tag', () => {
     expect(osmTagImage({ image: 'https://x.io/logo.png' })).toBeNull();
   });

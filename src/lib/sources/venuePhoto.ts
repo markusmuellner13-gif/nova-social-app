@@ -360,6 +360,16 @@ export interface FoundPhoto {
 /** A photo straight from OSM's own tags — free, real, no extra request. */
 export function osmTagImage(tags: Record<string, string>): string | null {
   const direct = tags.image ?? tags['image:0'] ?? '';
+
+  // Mappers often paste the Commons *description page* into `image`
+  // (…/wiki/File:Foo.jpg). That URL serves HTML, so the browser blocks it as a
+  // cross-origin non-image (ERR_BLOCKED_BY_ORB) and the card loses its photo.
+  // The file behind it is real — Special:FilePath resolves to the image itself.
+  const wikiPage = direct.match(/^https?:\/\/(?:commons\.wikimedia\.org|[a-z-]+\.wikipedia\.org)\/wiki\/(?:File|Datei|Image):(.+)$/i);
+  if (wikiPage) {
+    return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(decodeURIComponent(wikiPage[1]))}?width=1600`;
+  }
+
   if (/^https?:\/\/\S+\.(jpe?g|png|webp|gif)/i.test(direct) && !looksLikeLogo(direct)) return direct;
   const commons = tags.wikimedia_commons ?? tags['image:wikimedia'] ?? '';
   if (commons.startsWith('File:')) {
