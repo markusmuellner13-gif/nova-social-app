@@ -173,6 +173,83 @@ export async function fetchSitePhoto(website: string, timeoutMs = 3500): Promise
 
 const placePhotoCache = new Map<string, string | null>();
 
+// Google disabled the LEGACY Places endpoints for projects created after
+// March 2025, so a recently-issued key gets REQUEST_DENIED from
+// `findplacefromtext` while looking perfectly valid. Production has a key and
+// was still serving zero Places photos, which is exactly that failure mode —
+// so the modern API is tried first and legacy is kept only as a fallback for
+// older keys.
+//
+// Failures are logged rather than swallowed: a silently dead Places is the
+// difference between "a picture on every post" and "a picture on 89% of posts",
+// and that must not be invisible.
+let placesWarned = false;
+function warnPlaces(where: string, detail: string) {
+  if (placesWarned) return;              // once per lambda — never a log flood
+  placesWarned = true;
+  console.error(`[places/${where}] ${detail} — venue photos are degraded`);
+}
+
+async function placesNewPhoto(name: string, lat: number, lng: number, key: string): Promise<string | null> {
+  const searchRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': key,
+      // The New API returns NOTHING without a field mask — it is not optional.
+      'X-Goog-FieldMask': 'places.id,places.photos',
+    },
+    body: JSON.stringify({
+      textQuery: name,
+      locationBias: { circle: { center: { latitude: lat, longitude: lng }, radius: 3000.0 } },
+      maxResultCount: 1,
+    }),
+    signal: AbortSignal.timeout(3500),
+  });
+  if (!searchRes.ok) {
+    warnPlaces('searchText', `HTTP ${searchRes.status} ${(await searchRes.text().catch(() => '')).slice(0, 200)}`);
+    return null;
+  }
+  const data = await searchRes.json() as { places?: { photos?: { name?: string }[] }[] };
+  const photoName = data.places?.[0]?.photos?.[0]?.name;
+  if (!photoName) return null;
+
+  // skipHttpRedirect returns the final googleusercontent URL as JSON, so we
+  // never have to follow a redirect by hand.
+  const mediaRes = await fetch(
+    `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=1600&skipHttpRedirect=true&key=${key}`,
+    { signal: AbortSignal.timeout(3500) }
+  );
+  if (!mediaRes.ok) {
+    warnPlaces('media', `HTTP ${mediaRes.status}`);
+    return null;
+  }
+  const media = await mediaRes.json() as { photoUri?: string };
+  return media.photoUri ?? null;
+}
+
+async function placesLegacyPhoto(name: string, lat: number, lng: number, key: string): Promise<string | null> {
+  const findUrl =
+    `https://maps.googleapis.com/maps/api/place/findplacefromtext/json` +
+    `?input=${encodeURIComponent(name)}&inputtype=textquery` +
+    `&locationbias=point:${lat},${lng}&fields=photos&key=${key}`;
+  const findRes = await fetch(findUrl, { signal: AbortSignal.timeout(3000) });
+  if (!findRes.ok) return null;
+  const d = await findRes.json() as {
+    candidates?: { photos?: { photo_reference?: string }[] }[];
+    status?: string; error_message?: string;
+  };
+  if (d.status && d.status !== 'OK' && d.status !== 'ZERO_RESULTS') {
+    warnPlaces('legacy', `${d.status} ${d.error_message ?? ''}`);
+    return null;
+  }
+  const ref = d.candidates?.[0]?.photos?.[0]?.photo_reference;
+  if (!ref) return null;
+  const photoUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1600&photo_reference=${ref}&key=${key}`;
+  const photoRes = await fetch(photoUrl, { redirect: 'manual', signal: AbortSignal.timeout(3000) });
+  return photoRes.headers.get('location');
+}
+
 export async function fetchGooglePlacePhoto(name: string, lat: number, lng: number): Promise<string | null> {
   const key = process.env.GOOGLE_PLACES_API_KEY;
   if (!key) return null;
@@ -183,25 +260,11 @@ export async function fetchGooglePlacePhoto(name: string, lat: number, lng: numb
   let result: string | null = null;
   try {
     await notePlacesCall();
-    const findUrl =
-      `https://maps.googleapis.com/maps/api/place/findplacefromtext/json` +
-      `?input=${encodeURIComponent(name)}&inputtype=textquery` +
-      `&locationbias=point:${lat},${lng}&fields=photos&key=${key}`;
-    const findRes = await fetch(findUrl, { signal: AbortSignal.timeout(3000) });
-    if (findRes.ok) {
-      const d = await findRes.json() as {
-        candidates?: { photos?: { photo_reference?: string }[] }[];
-        status?: string; error_message?: string;
-      };
-      const ref = d.candidates?.[0]?.photos?.[0]?.photo_reference;
-      if (ref) {
-        // maxwidth=1600 so the card has real pixels to work with on a 3× phone.
-        const photoUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1600&photo_reference=${ref}&key=${key}`;
-        const photoRes = await fetch(photoUrl, { redirect: 'manual', signal: AbortSignal.timeout(3000) });
-        result = photoRes.headers.get('location');
-      }
-    }
-  } catch { /* fall through to the website */ }
+    result = await placesNewPhoto(name, lat, lng, key);
+    if (!result) result = await placesLegacyPhoto(name, lat, lng, key).catch(() => null);
+  } catch (err) {
+    warnPlaces('fetch', String(err).slice(0, 200));
+  }
   placePhotoCache.set(cacheKey, result);
   return result;
 }
