@@ -19,9 +19,19 @@ function todayKey(): string {
   return `nova:aibudget:${new Date().toISOString().slice(0, 10)}`;
 }
 
+// Capped by DEFAULT, not only when someone remembers the env var — an unset
+// variable used to mean "unlimited Anthropic spend". The free sources
+// (Ticketmaster/SeatGeek/OSM/Wikipedia/DB) carry the feed once the cap is hit,
+// so the worst case is a slightly thinner feed, never a surprise invoice.
+// Set to 0 to disable the cap.
+const DEFAULT_DAILY_BUDGET = 200;
+
 function budget(): number {
-  const raw = parseInt(process.env.AI_DAILY_BUDGET || '0', 10);
-  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+  const raw = (process.env.AI_DAILY_BUDGET ?? '').trim();
+  if (raw === '') return DEFAULT_DAILY_BUDGET;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_DAILY_BUDGET;
+  return n; // 0 = explicitly unlimited
 }
 
 // Check (without incrementing) whether we're already at/over the daily cap.
