@@ -19,10 +19,15 @@ import { Redis } from '@upstash/redis';
 // hit from rotating provider IPs, so IP throttling would wrongly block them.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Tier = 'ai' | 'write' | 'read' | 'asset';
+type Tier = 'auth' | 'ai' | 'write' | 'read' | 'asset';
 
 // Requests allowed per minute, per IP, per tier.
 const TIER_LIMITS: Record<Tier, number> = {
+  // Endpoints guarded by a shared secret (/api/admin/*). The secret is the only
+  // thing between the internet and cache purges / diagnostics, so the sole
+  // defence against guessing it must not be the same 15/min a checkout gets.
+  // 5/min turns even an optimistic online search into millions of years.
+  auth:  5,
   ai:    20,   // /api/chat, /api/feed, /api/events — paid upstreams
   write: 15,   // /api/business/checkout, /api/account/*, /api/push/* — mutations
   read:  60,   // /api/geocode, /api/track, /api/sponsored — cheap
@@ -45,6 +50,7 @@ function isExcluded(pathname: string): boolean {
 }
 
 function tierFor(pathname: string): Tier {
+  if (pathname.startsWith('/api/admin')) return 'auth';
   if (pathname.startsWith('/api/image-proxy')) return 'asset';
   if (
     pathname.startsWith('/api/chat') ||
@@ -54,8 +60,7 @@ function tierFor(pathname: string): Tier {
   if (
     pathname.startsWith('/api/business') ||
     pathname.startsWith('/api/account') ||
-    pathname.startsWith('/api/push') ||
-    pathname.startsWith('/api/admin')
+    pathname.startsWith('/api/push')
   ) return 'write';
   return 'read';
 }
@@ -68,6 +73,7 @@ try {
   if (url?.startsWith('https://') && token) {
     const redis = new Redis({ url, token });
     limiters = {
+      auth:  new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.auth,  '1 m'), prefix: '@nova/rl/auth',  analytics: false }),
       ai:    new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.ai,    '1 m'), prefix: '@nova/rl/ai',    analytics: false }),
       write: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.write, '1 m'), prefix: '@nova/rl/write', analytics: false }),
       read:  new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.read,  '1 m'), prefix: '@nova/rl/read',  analytics: false }),
@@ -79,7 +85,23 @@ try {
 }
 
 // ── In-memory fallback (per instance) ────────────────────────────────────────
+// Entries were only ever overwritten when the SAME ip+tier came back, so a
+// spread of unique IPs grew this map forever — a slow leak that a spoofed
+// X-Forwarded-For flood could turn into memory exhaustion on the instance.
+// Expired entries are now swept, with a hard ceiling as a backstop.
 const requestLog = new Map<string, { count: number; reset: number }>();
+const MAX_TRACKED_IPS = 20_000;
+
+function sweepExpired(now: number): void {
+  for (const [k, v] of requestLog) if (now > v.reset) requestLog.delete(k);
+  // Still oversized after sweeping → an active flood. Drop the oldest entries;
+  // worst case a few clients get a fresh window, which beats falling over.
+  if (requestLog.size > MAX_TRACKED_IPS) {
+    const excess = requestLog.size - MAX_TRACKED_IPS;
+    let i = 0;
+    for (const k of requestLog.keys()) { if (i++ >= excess) break; requestLog.delete(k); }
+  }
+}
 
 function getIP(req: NextRequest): string {
   return (
@@ -127,9 +149,61 @@ function tooMany(limit: number, resetSec: number): NextResponse {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Content-Security-Policy (documents only)
+//
+// This used to live in next.config.ts with `script-src 'unsafe-inline'
+// 'unsafe-eval'`, which is close to having no script CSP at all: any injected
+// <script> or event-handler attribute executes. A static header cannot do
+// better, because a nonce has to be fresh per response — so the policy moved
+// here, where each document gets its own.
+//
+// `strict-dynamic` is what makes this workable. The AdSense and Turnstile
+// loaders are created with document.createElement('script') from our own
+// bundle, so they inherit trust from the nonce'd script that created them and
+// keep working, while an injected <script> tag does not. The trailing `https:`
+// is the CSP2 fallback that browsers understanding strict-dynamic ignore.
+//
+// style-src keeps 'unsafe-inline' deliberately: the UI is built on React inline
+// `style={{…}}` props and Framer Motion animates via the style attribute, so
+// removing it would break rendering wholesale for a far weaker threat than
+// script injection. That is a considered trade-off, not an oversight.
+function buildCsp(nonce: string): string {
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https:`,
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "frame-src 'self' https://challenges.cloudflare.com https://maps.google.com https://www.google.com https://googleads.g.doubleclick.net https://tpc.googlesyndication.com",
+    // Real venue photos come from unpredictable hosts (a venue's own og:image,
+    // Google Places on *.googleusercontent.com), so any https image is allowed.
+    "img-src 'self' data: blob: https:",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com https://*.sentry.io https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://challenges.cloudflare.com https://cdn.jsdelivr.net https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://router.project-osrm.org https://routing.openstreetmap.de https://tiles.openfreemap.org https://*.openfreemap.org https://nominatim.openstreetmap.org https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net",
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "upgrade-insecure-requests",
+  ].join('; ');
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  if (!pathname.startsWith('/api/')) return NextResponse.next();
+
+  // ── Documents: per-response nonce CSP ───────────────────────────────────────
+  if (!pathname.startsWith('/api/')) {
+    const nonce = crypto.randomUUID().replace(/-/g, '');
+    const csp = buildCsp(nonce);
+    // Next reads the nonce off the REQUEST header and stamps it onto the script
+    // tags it renders; without this the app's own bundle would be blocked.
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set('x-nonce', nonce);
+    requestHeaders.set('Content-Security-Policy', csp);
+    const res = NextResponse.next({ request: { headers: requestHeaders } });
+    res.headers.set('Content-Security-Policy', csp);
+    return res;
+  }
 
   // CORS for the bundled native app. Add the headers to every response (and
   // answer preflight) only when the request comes from an allowed native origin.
@@ -163,6 +237,7 @@ export async function middleware(request: NextRequest) {
   const now   = Date.now();
   const mapKey = `${ip}:${tier}`;
   const entry = requestLog.get(mapKey);
+  if (requestLog.size > 512) sweepExpired(now); // amortised — cheap while small
 
   if (!entry || now > entry.reset) {
     requestLog.set(mapKey, { count: 1, reset: now + WINDOW_MS });
@@ -184,5 +259,10 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: '/api/:path*',
+  // Documents need the nonce CSP and /api/* needs rate limiting, so middleware
+  // now runs on both — but never on static assets, which have no scripts to
+  // protect and would only pay the latency.
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|robots.txt|sitemap.xml|icons/|images/|.*\\.(?:png|jpg|jpeg|gif|webp|avif|svg|ico|woff2?|ttf|mp4)$).*)',
+  ],
 };

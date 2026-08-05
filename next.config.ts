@@ -12,35 +12,11 @@ const securityHeaders = [
   { key: 'Cross-Origin-Opener-Policy',  value: 'same-origin' },
   // Disallow Adobe cross-domain policy files.
   { key: 'X-Permitted-Cross-Domain-Policies', value: 'none' },
-  {
-    key: 'Content-Security-Policy',
-    value: [
-      "default-src 'self'",
-      // Next.js requires unsafe-inline for hydration; unsafe-eval for some runtime features
-      // va.vercel-scripts.com is Vercel Web Analytics' own loader — without it the
-      // consented analytics script is blocked by CSP and silently collects nothing.
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://va.vercel-scripts.com https://pagead2.googlesyndication.com https://partner.googleadservices.com https://tpc.googlesyndication.com https://challenges.cloudflare.com",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "font-src 'self' https://fonts.gstatic.com data:",
-      // Cloudflare Turnstile + Google Maps embed.
-      "frame-src 'self' https://challenges.cloudflare.com https://maps.google.com https://www.google.com",
-      // Images: real venue photos come from unpredictable hosts (a venue's own
-      // og:image, Google Places photos on *.googleusercontent.com, etc.), so we
-      // allow any https image source. Scripts/styles/connect stay locked down.
-      "img-src 'self' data: blob: https:",
-      // Connections: Supabase (REST + realtime), Vercel Analytics, Sentry,
-      // Turnstile, the world-map country data (jsdelivr), map tiles
-      // (OSM streets + Esri satellite) and the OSRM routing API for in-app
-      // navigation.
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com https://*.sentry.io https://*.ingest.sentry.io https://*.ingest.de.sentry.io https://challenges.cloudflare.com https://cdn.jsdelivr.net https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://router.project-osrm.org https://routing.openstreetmap.de https://tiles.openfreemap.org https://*.openfreemap.org https://nominatim.openstreetmap.org",
-      // MapLibre GL runs its tile workers from a blob: URL.
-      "worker-src 'self' blob:",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      "form-action 'self'",
-      "upgrade-insecure-requests",
-    ].join('; '),
-  },
+  // Content-Security-Policy is NOT here any more. A nonce has to be generated
+  // per response, which a static config cannot do, so the policy lives in
+  // middleware.ts — see `buildCsp`. Keeping a second copy here would silently
+  // override it (the last header set wins) and put back the `unsafe-inline`
+  // script policy this replaced.
 ];
 
 const nextConfig: NextConfig = {
@@ -59,19 +35,15 @@ const nextConfig: NextConfig = {
   },
   images: {
     remotePatterns: [
-      { protocol: 'https', hostname: 'picsum.photos' },
+      // The stock hosts (picsum/unsplash/pexels) and the retired logo.clearbit.com
+      // are gone — posts no longer carry stand-in photography, so allowing them
+      // here would only re-open a door nothing walks through.
       { protocol: 'https', hostname: 'i.pravatar.cc' },
       // Ticketmaster
       { protocol: 'https', hostname: 's1.ticketm.net' },
       { protocol: 'https', hostname: 's4.ticketm.net' },
       { protocol: 'https', hostname: '*.ticketmaster.com' },
       { protocol: 'https', hostname: '*.livenation.com' },
-      // Unsplash
-      { protocol: 'https', hostname: 'images.unsplash.com' },
-      // Pexels
-      { protocol: 'https', hostname: 'images.pexels.com' },
-      // Logo services
-      { protocol: 'https', hostname: 'logo.clearbit.com' },
       { protocol: 'https', hostname: 'ui-avatars.com' },
       // Wikipedia thumbnails (sightseeing)
       { protocol: 'https', hostname: 'upload.wikimedia.org' },

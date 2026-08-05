@@ -5,6 +5,18 @@ import CookieConsent from '@/components/CookieConsent';
 import ConsentedAnalytics from '@/components/ConsentedAnalytics';
 import ConsentedAdsScript from '@/components/ConsentedAdsScript';
 
+// A nonce has to be minted per response, and Next can only stamp one onto its
+// script tags while it is actually rendering the document — a statically
+// prerendered page is written once at build time and cannot carry one. With the
+// page static, the strict CSP in middleware blocked the app's own chunks
+// outright (verified in a browser: 23 violations, no hydration).
+//
+// So the document shell renders per request. It is a client-side app whose
+// content all arrives via /api/feed, so nothing cacheable is lost — the shell
+// is tiny and the expensive work is already cached at the API and CDN layers.
+// The native export has no server and no middleware, so it stays static.
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   metadataBase: new URL('https://nova-phi-liart.vercel.app'),
   title: 'Nova — Your World, Curated by AI',

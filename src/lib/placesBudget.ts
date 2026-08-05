@@ -22,9 +22,23 @@ function todayKey(): string {
   return `nova:placesbudget:${new Date().toISOString().slice(0, 10)}`;
 }
 
+// A cost guard that only works once you remember to set an env var is not a
+// guard. Places went from silently failing (and therefore free) to actually
+// working, so an unset variable now means "unlimited spend on a live paid API" —
+// the one default a production app must never have. The cap applies by DEFAULT
+// and the env var only moves it.
+//
+// 150/day ≈ 4,500 lookups/month, which sits just inside Google's free Text
+// Search allowance. Raising it is a deliberate decision to spend money; setting
+// it to 0 disables the cap entirely.
+const DEFAULT_DAILY_BUDGET = 150;
+
 function budget(): number {
-  const raw = parseInt(process.env.PLACES_DAILY_BUDGET || '0', 10);
-  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+  const raw = (process.env.PLACES_DAILY_BUDGET ?? '').trim();
+  if (raw === '') return DEFAULT_DAILY_BUDGET;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_DAILY_BUDGET; // typo → stay safe
+  return n; // 0 = explicitly unlimited
 }
 
 // Check (without incrementing) whether we're already at/over the daily cap.
