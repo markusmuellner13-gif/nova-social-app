@@ -36,12 +36,56 @@ export type SupabaseGroupEvent = {
   adder_name?: string;
 };
 
+// ── Username availability ────────────────────────────────────────────────────
+
+export type UsernameStatus =
+  | 'available' | 'taken' | 'reserved'
+  | 'too_short' | 'too_long' | 'invalid_format'
+  | 'unknown';
+
+const USERNAME_MESSAGES: Record<Exclude<UsernameStatus, 'available' | 'unknown'>, string> = {
+  taken:          'That username is already taken',
+  reserved:       'That username isn’t available',
+  too_short:      'Username must be at least 3 characters',
+  too_long:       'Username must be 30 characters or fewer',
+  invalid_format: 'Use lowercase letters, numbers, dots and underscores only',
+};
+
+export function usernameMessage(status: UsernameStatus): string {
+  if (status === 'available' || status === 'unknown') return '';
+  return USERNAME_MESSAGES[status];
+}
+
+// Asks the database (migration 007's SECURITY DEFINER RPC) whether a username
+// can be claimed. The RPC checks shape, the reserved list and case-insensitive
+// uniqueness without exposing any of the three to the client.
+//
+// This is a courtesy check, not the guarantee — uniqueness is enforced by the
+// unique index, and `handle_new_user` resolves a lost race by suffixing rather
+// than failing the signup. 'unknown' means the check itself failed; callers
+// should let the signup proceed and let the database decide.
+export async function checkUsernameAvailable(username: string): Promise<UsernameStatus> {
+  if (!supabase) return 'unknown';
+  const { data, error } = await supabase.rpc('username_available', { p_username: username });
+  if (error) {
+    console.error('[supabase/checkUsernameAvailable]', error);
+    return 'unknown';
+  }
+  return (data as UsernameStatus) ?? 'unknown';
+}
+
 // ── Auth helpers ─────────────────────────────────────────────────────────────
 
 // captchaToken is from the Cloudflare Turnstile widget. It's only enforced once
 // CAPTCHA is enabled in the Supabase dashboard (Auth → Settings → enable Turnstile)
 // AND the site key is set; otherwise it's an empty string Supabase ignores, so
 // signup keeps working before keys are configured.
+//
+// The profile row is NOT created here. Migration 007 creates it in the same
+// transaction as the auth.users insert, via the on_auth_user_created trigger, so
+// an account can no longer end up without one. `username` is passed as metadata
+// for that trigger to consume — it is sanitised and uniqueness-resolved server
+// side, so whatever arrives here is a request, not a guarantee.
 export async function signUpEmail(email: string, password: string, username: string, captchaToken?: string) {
   if (!supabase) throw new Error('Supabase not configured');
   const { data, error } = await supabase.auth.signUp({
@@ -50,6 +94,30 @@ export async function signUpEmail(email: string, password: string, username: str
   });
   if (error) throw error;
   return data;
+}
+
+// ── Password reset ───────────────────────────────────────────────────────────
+// Nova had no reset flow at all: a forgotten password meant a permanently
+// inaccessible account and no way back in, which pushes users toward weak,
+// memorable passwords — the opposite of what the policy is trying to buy.
+
+export async function requestPasswordReset(email: string, captchaToken?: string) {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/auth/reset`,
+    captchaToken: captchaToken || undefined,
+  });
+  // Deliberately NOT surfaced to the caller as a per-email result: telling the
+  // user "no account with that email" turns this form into an account-existence
+  // oracle. The UI shows the same confirmation either way.
+  if (error) console.error('[supabase/requestPasswordReset]', error);
+}
+
+// Sets a new password for the session established by the reset link.
+export async function updatePassword(newPassword: string) {
+  if (!supabase) throw new Error('Supabase not configured');
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
 }
 
 export async function signInEmail(email: string, password: string, captchaToken?: string) {
@@ -83,11 +151,18 @@ export async function getSession() {
 
 // ── Profile helpers ───────────────────────────────────────────────────────────
 
+// Updates the editable parts of a profile. `username` is deliberately stripped:
+// migration 007 makes it immutable at the database level (a handle that can be
+// abandoned and re-registered is how impersonation-by-reuse works), so sending
+// it would only ever produce a 42501. Profile CREATION is the trigger's job, not
+// this function's.
 export async function upsertProfile(profile: Partial<SupabaseProfile> & { id: string }) {
   if (!supabase) return null;
+  const { username: _ignored, ...editable } = profile;
+  void _ignored;
   const { data, error } = await supabase
     .from('profiles')
-    .upsert(profile, { onConflict: 'id' })
+    .upsert(editable, { onConflict: 'id' })
     .select()
     .single();
   if (error) console.error('[supabase/upsertProfile]', error);
