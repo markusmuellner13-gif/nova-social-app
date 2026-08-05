@@ -413,8 +413,19 @@ export async function GET(request: NextRequest) {
   const res = await computeFeed(request);
   try {
     const payload = await res.clone().json() as { posts?: unknown[] };
-    if (Array.isArray(payload.posts) && payload.posts.length > 0) {
-      await cacheSet(key, payload, cacheTtl('feed', rawCatKey));
+    const got = Array.isArray(payload.posts) ? payload.posts.length : 0;
+    if (got > 0) {
+      // A page computed while Overpass was cold or a source was rate-limited
+      // comes back thin — and caching it pins that thin page in front of every
+      // user for the full TTL. Vienna restaurants sat at 4 cards for hours from
+      // exactly this, while a fresh compute returned 16.
+      //
+      // A short-changed page is still worth serving (better than nothing) but
+      // not worth REMEMBERING, so it gets a few minutes instead of hours and
+      // the next request recomputes. Full pages cache normally.
+      const wanted = Math.max(1, Math.min(20, parseInt(searchParams.get('count') || '8', 10) || 8));
+      const thin = got < Math.min(wanted, 8);
+      await cacheSet(key, payload, thin ? 180 : cacheTtl('feed', rawCatKey));
     }
   } catch { /* skip caching non-JSON */ }
   return res;
