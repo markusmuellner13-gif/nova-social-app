@@ -137,6 +137,19 @@ describe('enforceRealImages', () => {
     expect(out[1].images).toBeUndefined(); // only one frame left — not a gallery
   });
 
+  it('drops the retired Clearbit avatar so the card stops requesting a dead host', () => {
+    const [out] = enforceRealImages([
+      post({ id: 'a', user: { avatar: 'https://logo.clearbit.com/eventbrite.com' } as ApiPost['user'] }),
+    ]);
+    expect(out.user.avatar).toBe('');
+  });
+
+  it('leaves a live avatar alone', () => {
+    const live = 'https://www.google.com/s2/favicons?domain=eventbrite.com&sz=128';
+    const [out] = enforceRealImages([post({ id: 'a', user: { avatar: live } as ApiPost['user'] })]);
+    expect(out.user.avatar).toBe(live);
+  });
+
   it('drops stand-ins out of a gallery too', () => {
     const out = enforceRealImages([
       post({ id: 'w1', image: 'https://picsum.photos/seed/z/1/1', images: ['https://picsum.photos/seed/z/1/1', 'https://upload.wikimedia.org/a/ab/Real.jpg'] }),
