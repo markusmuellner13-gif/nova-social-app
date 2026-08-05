@@ -190,6 +190,85 @@ function warnPlaces(where: string, detail: string) {
   console.error(`[places/${where}] ${detail} — venue photos are degraded`);
 }
 
+/** Resolve a Places (New) photo resource name to its final image URL. */
+async function placesNewPhotoUri(photoName: string, key: string): Promise<string | null> {
+  // skipHttpRedirect returns the final googleusercontent URL as JSON, so we
+  // never follow a redirect by hand — and the API key never ends up inside a
+  // URL we hand to the client.
+  const res = await fetch(
+    `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=1600&skipHttpRedirect=true&key=${key}`,
+    { signal: AbortSignal.timeout(3500) }
+  );
+  if (!res.ok) { warnPlaces('media', `HTTP ${res.status}`); return null; }
+  const media = await res.json() as { photoUri?: string };
+  return media.photoUri ?? null;
+}
+
+export interface PlaceLookup {
+  placeId: string;
+  name?: string;
+  address?: string;
+  lat: number;
+  lng: number;
+  photo: string;
+  businessStatus?: string;
+}
+
+/**
+ * Find one real place by free-text query — "does this business exist, and what
+ * does it actually look like". Powers the paid-post business verification gate
+ * as well as the photo cascade, so both speak the current API.
+ */
+export async function lookupPlace(query: string): Promise<PlaceLookup | null> {
+  const key = process.env.GOOGLE_PLACES_API_KEY;
+  if (!key || !query.trim()) return null;
+  try {
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask':
+          'places.id,places.displayName,places.formattedAddress,places.location,places.photos,places.businessStatus',
+      },
+      body: JSON.stringify({ textQuery: query, maxResultCount: 1 }),
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) {
+      warnPlaces('lookup', `HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 200)}`);
+      return null;
+    }
+    const d = await res.json() as {
+      places?: {
+        id?: string;
+        displayName?: { text?: string };
+        formattedAddress?: string;
+        location?: { latitude?: number; longitude?: number };
+        photos?: { name?: string }[];
+        businessStatus?: string;
+      }[];
+    };
+    const p = d.places?.[0];
+    if (!p?.id) return null;
+
+    const photoName = p.photos?.[0]?.name;
+    const photo = photoName ? (await placesNewPhotoUri(photoName, key).catch(() => null)) : null;
+
+    return {
+      placeId: p.id,
+      name: p.displayName?.text,
+      address: p.formattedAddress,
+      lat: p.location?.latitude ?? 0,
+      lng: p.location?.longitude ?? 0,
+      photo: photo ?? '',
+      businessStatus: p.businessStatus,
+    };
+  } catch (err) {
+    warnPlaces('lookup', String(err).slice(0, 200));
+    return null;
+  }
+}
+
 async function placesNewPhoto(name: string, lat: number, lng: number, key: string): Promise<string | null> {
   const searchRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
@@ -213,19 +292,7 @@ async function placesNewPhoto(name: string, lat: number, lng: number, key: strin
   const data = await searchRes.json() as { places?: { photos?: { name?: string }[] }[] };
   const photoName = data.places?.[0]?.photos?.[0]?.name;
   if (!photoName) return null;
-
-  // skipHttpRedirect returns the final googleusercontent URL as JSON, so we
-  // never have to follow a redirect by hand.
-  const mediaRes = await fetch(
-    `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=1600&skipHttpRedirect=true&key=${key}`,
-    { signal: AbortSignal.timeout(3500) }
-  );
-  if (!mediaRes.ok) {
-    warnPlaces('media', `HTTP ${mediaRes.status}`);
-    return null;
-  }
-  const media = await mediaRes.json() as { photoUri?: string };
-  return media.photoUri ?? null;
+  return placesNewPhotoUri(photoName, key);
 }
 
 async function placesLegacyPhoto(name: string, lat: number, lng: number, key: string): Promise<string | null> {

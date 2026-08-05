@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { lookupPlace } from '@/lib/sources/venuePhoto';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Real-business verification (#paid-posts gate).
@@ -29,46 +30,23 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const input = encodeURIComponent(`${business} ${city}`.trim());
-    const url =
-      `https://maps.googleapis.com/maps/api/place/findplacefromtext/json` +
-      `?input=${input}&inputtype=textquery` +
-      `&fields=place_id,name,formatted_address,geometry,photos,business_status&key=${key}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
-    if (!res.ok) return NextResponse.json({ verified: false, reason: 'lookup_failed' });
-
-    const d = await res.json() as {
-      candidates?: {
-        place_id?: string; name?: string; formatted_address?: string;
-        business_status?: string;
-        geometry?: { location?: { lat?: number; lng?: number } };
-        photos?: { photo_reference?: string }[];
-      }[];
-    };
-    const c = d.candidates?.[0];
-    if (!c?.place_id) {
+    // Was the LEGACY findplacefromtext endpoint, which Google made unavailable
+    // to Cloud projects created after March 2025 — so verification was failing
+    // for the same reason venue photos were. `lookupPlace` speaks the current
+    // API and resolves the photo server-side, so the key never reaches a client.
+    const place = await lookupPlace(`${business} ${city}`.trim());
+    if (!place) {
       return NextResponse.json({ verified: false, reason: 'not_found' });
-    }
-
-    // Resolve the venue's real photo to a final URL (key stays server-side).
-    let photo = '';
-    const ref = c.photos?.[0]?.photo_reference;
-    if (ref) {
-      const photoRes = await fetch(
-        `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1600&photo_reference=${ref}&key=${key}`,
-        { redirect: 'manual', signal: AbortSignal.timeout(3000) }
-      ).catch(() => null);
-      photo = photoRes?.headers.get('location') ?? '';
     }
 
     return NextResponse.json({
       verified: true,
-      placeId: c.place_id,
-      name: c.name ?? business,
-      address: c.formatted_address ?? city,
-      lat: c.geometry?.location?.lat ?? 0,
-      lng: c.geometry?.location?.lng ?? 0,
-      photo,
+      placeId: place.placeId,
+      name: place.name ?? business,
+      address: place.address ?? city,
+      lat: place.lat,
+      lng: place.lng,
+      photo: place.photo,
     });
   } catch {
     return NextResponse.json({ verified: false, reason: 'error' });
