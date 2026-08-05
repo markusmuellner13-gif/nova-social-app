@@ -3,7 +3,7 @@
 // feed. Stored in Redis as a per-city list; expires automatically.
 
 import { cacheGet, cacheSet } from '@/lib/serverCache';
-import { slugify } from '@/lib/sources/shared';
+import { slugify, logoUrl } from '@/lib/sources/shared';
 
 export interface SponsoredPost {
   id: string;
@@ -59,7 +59,11 @@ export function sponsoredToFeedPost(s: SponsoredPost) {
       id: `biz_${s.leadId}`,
       name: s.business,
       username: slugify(s.business).replace(/-/g, '') || 'partner',
-      avatar: domain ? `https://logo.clearbit.com/${domain}` : s.image,
+      // Clearbit's free logo API was retired and the host no longer resolves —
+      // `logoUrl` is the surviving keyless equivalent. This was missed when the
+      // rest of the app moved off Clearbit, so every partner card was firing a
+      // request that could only ever fail.
+      avatar: domain ? logoUrl(domain) : s.image,
       bio: `Official Nova partner — ${s.business}`,
       followers: 0, following: 0, posts: 0, verified: true,
     },

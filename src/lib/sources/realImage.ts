@@ -141,6 +141,18 @@ export function postsAreRelated(a: Parameters<typeof relationKeys>[0], b: Parame
  * already stored in the events DB with a stock URL are cleaned on the way out
  * too, so the fix applies without re-ingesting anything.
  */
+// Rows ingested before the app moved off Clearbit still carry a
+// `logo.clearbit.com` avatar. The host was retired and no longer resolves, so
+// every one of those cards fires a request that can only fail — two dead image
+// requests per feed screen, and a console error each. The Avatar component does
+// fall back to a monogram, so this is cosmetic, but it is free to stop asking.
+const DEAD_AVATAR_HOSTS = /(^|\.)(logo\.clearbit\.com|clearbit\.com)$/i;
+
+function liveAvatar(url: string | undefined): string {
+  if (!url || !/^https?:\/\//i.test(url)) return url ?? '';
+  try { return DEAD_AVATAR_HOSTS.test(new URL(url).hostname) ? '' : url; } catch { return url; }
+}
+
 export function enforceRealImages<T extends ApiPost>(posts: T[]): T[] {
   // identity → the post that claimed this photograph first
   const claimed = new Map<string, T>();
@@ -170,7 +182,14 @@ export function enforceRealImages<T extends ApiPost>(posts: T[]): T[] {
     }
 
     const images = keptGallery.length > 1 ? keptGallery : undefined;
-    if (image === post.image && images === post.images) return post;
-    return { ...post, image, images };
+    const avatar = liveAvatar(post.user?.avatar);
+    const avatarChanged = post.user && avatar !== post.user.avatar;
+    if (image === post.image && images === post.images && !avatarChanged) return post;
+    return {
+      ...post,
+      image,
+      images,
+      ...(avatarChanged ? { user: { ...post.user, avatar } } : {}),
+    };
   });
 }
