@@ -9,7 +9,7 @@
 // own website advertises an og:image. Descriptions are written locally from the
 // tags — no LLM in the loop.
 
-import { ApiPost, makeUser, getImage, picsumUrl, proxyImage } from './shared';
+import { ApiPost, makeUser, proxyImage } from './shared';
 import { placesBudgetExceeded, notePlacesCall } from '@/lib/placesBudget';
 import { fetchCommonsImagesByWikidata } from './wikipedia';
 
@@ -516,7 +516,7 @@ function outdoorExtras(tags: Record<string, string>): string[] {
 
 export async function overpassToPost(
   el: OverpassElement, city: string, category: string, description: string,
-  unsplashKey?: string, pexelsKey?: string, tryOgImage = false
+  tryRealPhoto = false
 ): Promise<ApiPost> {
   const elLat = el.lat ?? el.center?.lat ?? 0;
   const elLng = el.lon ?? el.center?.lon ?? 0;
@@ -535,39 +535,23 @@ export async function overpassToPost(
   // Caption: a free, tag-written description (no LLM) unless the caller supplied one.
   const desc = description && description.trim() ? description : describePlace(tags, city, el.id);
 
-  const IMG_QUERIES: Record<string, string> = {
-    shops:       'vintage thrift store interior clothing racks',
-    fashion:     'boutique clothing store interior fashion',
-    venues:      'concert hall theatre interior stage lights',
-    music:       'live music club stage concert crowd',
-    art:         'art museum gallery interior exhibition',
-    sightseeing: 'historic landmark architecture travel',
-    community:   'town square market community people',
-    restaurants: cuisine ? `${cuisine} restaurant food dish` : 'cozy restaurant interior dinner table',
-    food:        cuisine ? `${cuisine} restaurant food dish` : 'delicious food dish restaurant table',
-    hotels:      'elegant hotel room interior design',
-    fitness:     'modern gym fitness studio equipment',
-    sports:      'sports stadium field game',
-    lifestyle:   'green park garden nature path',
-    pets:        'happy dog pet park',
-    rentals:     'bicycle car rental shop city',
-    outdoors:    'mountain lake hiking trail forest nature landscape',
-    travel:      'travel landmark scenic viewpoint',
-  };
-  const imgQ = IMG_QUERIES[category] ?? `${kind.label} ${category}`;
-
-  // Real photo of the actual place, best source first:
+  // A photo OF THIS PLACE, best source first:
   //   0. Wikimedia gallery for landmarks linked to Wikidata (swipeable) →
   //   1. OSM's own image/wikimedia tag → 2. Google Places (gated) →
-  //   3. the venue's own og:image → 4. category stock (Unsplash/Pexels) → picsum
+  //   3. the venue's own og:image → 4. no photo.
+  //
+  // There is no step 5. The old one asked Unsplash/Pexels for the CATEGORY
+  // ("cozy restaurant interior") and fell through to picsum, so a place with no
+  // photo of its own was handed someone else's — the same twenty photos shared
+  // out across every restaurant in every city. An honest empty state (a designed
+  // cover from `PostImage`) beats a photo of a room this place has never seen.
   let image: string | null = osmTagImage(tags);
   let images: string[] | undefined;
 
   // Landmarks/parks/peaks linked to a Wikidata entity get a real, multi-photo
-  // Wikimedia gallery — the same treatment sightseeing POIs get. Bounded to the
-  // page's first elements (tryOgImage) and time-boxed inside the fetch so it
-  // never stalls a page.
-  if (tryOgImage && tags.wikidata) {
+  // Wikimedia gallery — the same treatment sightseeing POIs get. Time-boxed
+  // inside the fetch so it never stalls a page.
+  if (tryRealPhoto && tags.wikidata) {
     const gallery = await fetchCommonsImagesByWikidata(tags.wikidata).catch(() => []);
     if (gallery.length >= 2) {
       images = gallery;
@@ -578,18 +562,12 @@ export async function overpassToPost(
   }
 
   if (image && image.includes('upload.wikimedia.org')) image = proxyImage(image);
-  if (!image && tryOgImage) {
+  if (!image && tryRealPhoto) {
     image = await fetchGooglePlacePhoto(name, elLat, elLng);
   }
-  if (!image && tryOgImage && website) {
+  if (!image && tryRealPhoto && website) {
     image = await fetchOgImage(website);
     if (image) image = proxyImage(image);
-  }
-  if (!image) {
-    image = await Promise.race([
-      getImage(imgQ, unsplashKey, pexelsKey, `osm_${el.id}`),
-      new Promise<string>(resolve => setTimeout(() => resolve(picsumUrl(`osm_${el.id}`)), 3000)),
-    ]);
   }
 
   const osmUrl = `https://www.openstreetmap.org/${el.type}/${el.id}`;
@@ -607,7 +585,7 @@ export async function overpassToPost(
   return {
     id: `osm_${el.id}`,
     user: makeUser(name, domain || undefined),
-    image: image!,
+    image: image ?? '',
     images,
     caption: `${desc}\n\n${kind.emoji} ${name}${addr ? `\n📍 ${addr}, ${city}` : `\n📍 ${city}`}${extras}${website ? `\n🔗 ${website}` : `\n🗺️ ${osmUrl}`}`,
     likes: 0,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { todayStr } from '@/lib/sources/shared';
+import { enforceRealImages } from '@/lib/sources/realImage';
 import { resolveRequestGeo } from '@/lib/sources/geocode';
 import { fetchTicketmaster, tmEventToPost, TM_CATEGORY_MAP } from '@/lib/sources/ticketmaster';
 import { fetchEventbriteEvents } from '@/lib/sources/eventbrite';
@@ -49,8 +50,6 @@ export async function GET(request: NextRequest) {
 
   const tmKey       = process.env.TICKETMASTER_API_KEY;
   const claudeKey   = process.env.ANTHROPIC_API_KEY;
-  const unsplashKey = process.env.UNSPLASH_ACCESS_KEY;
-  const pexelsKey   = process.env.PEXELS_API_KEY;
   const today       = todayStr();
 
   // ── TOURISM: events promoted on the city's official tourism websites ──────
@@ -60,10 +59,10 @@ export async function GET(request: NextRequest) {
       try {
         const posts = await searchRealEventsWithClaude(
           city, country, today, count, page, 'events', claudeKey,
-          unsplashKey, pexelsKey, lat, lng, /* tourismFocus */ true
+          lat, lng, /* tourismFocus */ true
         );
         if (posts.length > 0) {
-          return NextResponse.json({ posts, city, country, source: 'tourism', hasMore: page < 4 }, { headers: NO_CACHE });
+          return NextResponse.json({ posts: enforceRealImages(posts), city, country, source: 'tourism', hasMore: page < 4 }, { headers: NO_CACHE });
         }
       } catch (err) {
         console.error('[events/tourism]', err);
@@ -73,7 +72,7 @@ export async function GET(request: NextRequest) {
     try {
       const posts = await fetchEventbriteEvents(city, country, lat, lng, count, 'events', page);
       if (posts.length > 0) {
-        return NextResponse.json({ posts, city, country, source: 'eventbrite', hasMore: false }, { headers: PLACE_CACHE });
+        return NextResponse.json({ posts: enforceRealImages(posts), city, country, source: 'eventbrite', hasMore: false }, { headers: PLACE_CACHE });
       }
     } catch (err) {
       console.error('[events/tourism/eventbrite]', err);
@@ -106,11 +105,11 @@ export async function GET(request: NextRequest) {
         : placeData.map(p => `${p.name} is a popular ${p.type} in ${city}.`);
 
       const posts = await Promise.all(
-        pageEls.map((el, i) => overpassToPost(el, city, category, descriptions[i] ?? '', unsplashKey, pexelsKey, i < 4))
+        pageEls.map((el, i) => overpassToPost(el, city, category, descriptions[i] ?? '', /* tryRealPhoto */ true))
       );
 
       const hasMore = (page + 1) * count < elements.length;
-      return NextResponse.json({ posts, city, country, source: 'osm', hasMore }, { headers: PLACE_CACHE });
+      return NextResponse.json({ posts: enforceRealImages(posts), city, country, source: 'osm', hasMore }, { headers: PLACE_CACHE });
     } catch (err) {
       console.error('[events/overpass]', err);
       // Fall through to Claude web search as fallback
@@ -121,9 +120,9 @@ export async function GET(request: NextRequest) {
   if (category === 'community') {
     if (claudeKey) {
       try {
-        const posts = await searchRealEventsWithClaude(city, country, today, count, page, 'community', claudeKey, unsplashKey, pexelsKey, lat, lng);
+        const posts = await searchRealEventsWithClaude(city, country, today, count, page, 'community', claudeKey, lat, lng);
         if (posts.length > 0) {
-          return NextResponse.json({ posts, city, country, source: 'web_search', hasMore: page < 8 }, { headers: NO_CACHE });
+          return NextResponse.json({ posts: enforceRealImages(posts), city, country, source: 'web_search', hasMore: page < 8 }, { headers: NO_CACHE });
         }
       } catch (err) {
         console.error('[events/community]', err);
@@ -132,7 +131,7 @@ export async function GET(request: NextRequest) {
     try {
       const ebPosts = await fetchEventbriteEvents(city, country, lat, lng, count, 'community', page);
       if (ebPosts.length > 0) {
-        return NextResponse.json({ posts: ebPosts, city, country, source: 'eventbrite', hasMore: ebPosts.length >= count }, { headers: PLACE_CACHE });
+        return NextResponse.json({ posts: enforceRealImages(ebPosts), city, country, source: 'eventbrite', hasMore: ebPosts.length >= count }, { headers: PLACE_CACHE });
       }
     } catch (err) {
       console.error('[events/community/eventbrite]', err);
@@ -166,11 +165,11 @@ export async function GET(request: NextRequest) {
         : poiData.map(p => p.extract.slice(0, 300));
 
       const posts = await Promise.all(pagePOIs.map((poi, i) =>
-        wikiToPost(poi, summaries[i], descriptions[i] ?? poiData[i].extract.slice(0, 300), city, unsplashKey, pexelsKey)
+        wikiToPost(poi, summaries[i], descriptions[i] ?? poiData[i].extract.slice(0, 300), city)
       ));
 
       const hasMore = (page + 1) * count < nearby.length;
-      return NextResponse.json({ posts, city, country, source: 'wikipedia', hasMore }, { headers: WIKI_CACHE });
+      return NextResponse.json({ posts: enforceRealImages(posts), city, country, source: 'wikipedia', hasMore }, { headers: WIKI_CACHE });
     } catch (err) {
       console.error('[events/sightseeing/wikipedia]', err);
       // Fall through to Claude for sightseeing
@@ -181,7 +180,7 @@ export async function GET(request: NextRequest) {
   if (category !== 'sightseeing') {
     // Fire Claude immediately (don't wait for TM to finish first)
     const claudePromise = claudeKey
-      ? searchRealEventsWithClaude(city, country, today, count, page, category, claudeKey, unsplashKey, pexelsKey, lat, lng).catch(() => null)
+      ? searchRealEventsWithClaude(city, country, today, count, page, category, claudeKey, lat, lng).catch(() => null)
       : Promise.resolve(null);
 
     if (tmKey && TM_CATEGORY_MAP[category]) {
@@ -215,7 +214,7 @@ export async function GET(request: NextRequest) {
             : tmEvents.map(ev => `${ev.name} at ${ev._embedded?.venues?.[0]?.name ?? city}.`);
 
           const posts = tmEvents.map((ev, i) => tmEventToPost(ev, descriptions[i] ?? '', city));
-          return NextResponse.json({ posts, city, country, source: 'ticketmaster', hasMore: page < totalPages - 1, totalPages }, { headers: EVENT_CACHE });
+          return NextResponse.json({ posts: enforceRealImages(posts), city, country, source: 'ticketmaster', hasMore: page < totalPages - 1, totalPages }, { headers: EVENT_CACHE });
         }
       } catch (err) {
         console.error('[events/ticketmaster]', err);
@@ -225,7 +224,7 @@ export async function GET(request: NextRequest) {
     // No TM results — use the Claude generation that was already running
     const claudePosts = await claudePromise;
     if (claudePosts && claudePosts.length > 0) {
-      return NextResponse.json({ posts: claudePosts, city, country, source: 'claude', hasMore: page < 10 }, { headers: NO_CACHE });
+      return NextResponse.json({ posts: enforceRealImages(claudePosts), city, country, source: 'claude', hasMore: page < 10 }, { headers: NO_CACHE });
     }
 
     // FOOD free fallback — real local restaurants/cafés/bars from OpenStreetMap
@@ -247,11 +246,11 @@ export async function GET(request: NextRequest) {
             : placeData.map(p => `${p.name} is a popular ${p.type} in ${city}.`);
 
           const posts = await Promise.all(
-            pageEls.map((el, i) => overpassToPost(el, city, 'food', descriptions[i] ?? '', unsplashKey, pexelsKey, i < 4))
+            pageEls.map((el, i) => overpassToPost(el, city, 'food', descriptions[i] ?? '', /* tryRealPhoto */ true))
           );
 
           const hasMore = (page + 1) * count < elements.length;
-          return NextResponse.json({ posts, city, country, source: 'osm', hasMore }, { headers: PLACE_CACHE });
+          return NextResponse.json({ posts: enforceRealImages(posts), city, country, source: 'osm', hasMore }, { headers: PLACE_CACHE });
         }
       } catch (err) {
         console.error('[events/food/osm]', err);
@@ -262,9 +261,9 @@ export async function GET(request: NextRequest) {
   // ── SIGHTSEEING Claude fallback (if Wikipedia failed above) ───────────────
   if (category === 'sightseeing' && claudeKey) {
     try {
-      const posts = await searchRealEventsWithClaude(city, country, today, count, page, category, claudeKey, unsplashKey, pexelsKey, lat, lng);
+      const posts = await searchRealEventsWithClaude(city, country, today, count, page, category, claudeKey, lat, lng);
       if (posts.length > 0) {
-        return NextResponse.json({ posts, city, country, source: 'claude', hasMore: page < 10 }, { headers: NO_CACHE });
+        return NextResponse.json({ posts: enforceRealImages(posts), city, country, source: 'claude', hasMore: page < 10 }, { headers: NO_CACHE });
       }
     } catch (err) {
       console.error('[events/sightseeing/claude]', err);
@@ -275,7 +274,7 @@ export async function GET(request: NextRequest) {
   try {
     const ebPosts = await fetchEventbriteEvents(city, country, lat, lng, count, category, page);
     if (ebPosts.length > 0) {
-      return NextResponse.json({ posts: ebPosts, city, country, source: 'eventbrite', hasMore: ebPosts.length >= count }, { headers: PLACE_CACHE });
+      return NextResponse.json({ posts: enforceRealImages(ebPosts), city, country, source: 'eventbrite', hasMore: ebPosts.length >= count }, { headers: PLACE_CACHE });
     }
   } catch (err) {
     console.error('[events/eventbrite]', err);

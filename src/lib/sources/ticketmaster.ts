@@ -1,6 +1,6 @@
 // Ticketmaster Discovery API — real ticketed events with real images.
 
-import { ApiPost, makeUser, picsumUrl } from './shared';
+import { ApiPost, makeUser } from './shared';
 
 export interface TmImage { url: string; width: number; height: number; ratio?: string; fallback?: boolean }
 export interface TmEvent {
@@ -60,7 +60,10 @@ export async function fetchTicketmaster(
 }
 
 export function bestTmImage(images: TmImage[]): string {
-  if (!images?.length) return picsumUrl('event_placeholder');
+  // No artwork on the listing → no photo. A filler image here read as "this is
+  // what the event looks like", and the same filler landed on every artwork-less
+  // event in the response.
+  if (!images?.length) return '';
   const real = images.filter(i => !i.fallback && i.url);
   const pool = real.length ? real : images;
   // Prefer true portrait ratios for 4:5 post frames; fallback to any image

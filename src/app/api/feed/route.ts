@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ApiPost, dedupePosts, dropExpired, withDistance, todayStr, haversineKm, ensureUniqueImages } from '@/lib/sources/shared';
+import { ApiPost, dedupePosts, dropExpired, withDistance, todayStr, haversineKm } from '@/lib/sources/shared';
+import { enforceRealImages } from '@/lib/sources/realImage';
 import { resolveRequestGeo } from '@/lib/sources/geocode';
 import { fetchTicketmaster, tmEventToPost, TM_CATEGORY_MAP } from '@/lib/sources/ticketmaster';
 import { fetchEventbriteEvents } from '@/lib/sources/eventbrite';
@@ -94,7 +95,7 @@ async function ticketmasterPosts(
 
 async function osmPosts(
   lat: number, lng: number, city: string, requestedCat: string, page: number,
-  radius: number, count: number, unsplashKey?: string, pexelsKey?: string
+  radius: number, count: number
 ): Promise<{ posts: ApiPost[]; hasMore: boolean }> {
   // 'food' rides on the restaurants query but keeps its own category label
   const osmCat = requestedCat === 'food' ? 'restaurants' : requestedCat;
@@ -104,21 +105,24 @@ async function osmPosts(
   if (pageEls.length === 0) return { posts: [], hasMore: false };
 
   // Descriptions are written for free from each place's own OSM tags inside
-  // overpassToPost (no LLM, no credits) — we pass '' so it self-describes. We try
-  // the venue's REAL photo (og:image, free; Google Places, budget-capped) for
-  // most of the page now — OSM's own image/wikimedia tag is used for all,
-  // instantly and free. More real venue photos, cost still bounded.
+  // overpassToPost (no LLM, no credits) — we pass '' so it self-describes.
+  //
+  // The real-photo lookup (OSM tag → Commons → Google Places → the venue's own
+  // og:image) now runs for the WHOLE page, not just the first ten. It used to be
+  // capped because the rest could fall back to a stock photo; they can't any
+  // more, and a place with no photo is a worse card than one extra request. The
+  // lookups run in parallel and every step is individually time-boxed, so wall
+  // time is unchanged — only the outbound request count grows, and Places stays
+  // behind its daily budget cap.
   const posts = await Promise.all(
-    pageEls.map((el, i) => overpassToPost(
-      el, city, requestedCat, '', unsplashKey, pexelsKey, /* tryRealPhoto */ i < 10
-    ))
+    pageEls.map(el => overpassToPost(el, city, requestedCat, '', /* tryRealPhoto */ true))
   );
   return { posts, hasMore: (page + 1) * count < elements.length };
 }
 
 async function wikipediaPosts(
   lat: number, lng: number, city: string, page: number, radius: number, count: number,
-  claudeKey?: string, unsplashKey?: string, pexelsKey?: string
+  claudeKey?: string
 ): Promise<{ posts: ApiPost[]; hasMore: boolean }> {
   // Each ~50-result search serves 3 pages; deeper pages shift the search
   // centre outward in a ring so sightseeing never runs dry
@@ -152,7 +156,7 @@ async function wikipediaPosts(
     : fallbackDescs;
 
   const posts = await Promise.all(keptPOIs.map((poi, i) =>
-    wikiToPost(poi, summaries[i], descriptions[i] ?? fallbackDescs[i], city, unsplashKey, pexelsKey)
+    wikiToPost(poi, summaries[i], descriptions[i] ?? fallbackDescs[i], city)
   ));
   return { posts, hasMore: offset + count < nearby.length || ring < 8 };
 }
@@ -197,7 +201,7 @@ async function placesFromDb(
     let placed = withDistance(places, lat, lng);
     if (visiting) placed = rankForVisitor(placed);
     return {
-      posts: ensureUniqueImages(placed.slice(0, count)),
+      posts: enforceRealImages(placed.slice(0, count)),
       hasMore: places.length > count,
     };
   } catch {
@@ -383,8 +387,9 @@ export async function GET(request: NextRequest) {
             // KFC ended up leading the list again.
             if (isVisiting) dbFinal = rankForVisitor(dbFinal);
             const payload = {
-              // ensureUniqueImages guarantees no two cards share a photo.
-              posts: ensureUniqueImages(dbFinal),
+              // enforceRealImages guarantees every photo is of its own post's
+              // subject, and that no two UNRELATED cards share one.
+              posts: enforceRealImages(dbFinal),
               city: searchParams.get('city') || '',
               country: searchParams.get('country') || '',
               sources: ['db'], hasMore: dbPosts.length >= count,
@@ -432,8 +437,6 @@ async function computeFeed(request: NextRequest) {
   const tmKey       = process.env.TICKETMASTER_API_KEY;
   const sgKey       = process.env.SEATGEEK_CLIENT_ID;
   const claudeKey   = process.env.ANTHROPIC_API_KEY;
-  const unsplashKey = process.env.UNSPLASH_ACCESS_KEY;
-  const pexelsKey   = process.env.PEXELS_API_KEY;
 
   // ── Pure place categories: OSM is the single source ───────────────────────
   // "Hotels" must mean hotels. These categories describe PLACES, and the only
@@ -454,13 +457,13 @@ async function computeFeed(request: NextRequest) {
       );
     }
     try {
-      const { posts, hasMore } = await osmPosts(lat, lng, city, category, page, radius, count, unsplashKey, pexelsKey);
+      const { posts, hasMore } = await osmPosts(lat, lng, city, category, page, radius, count);
       if (posts.length > 0) {
         let placed = withDistance(posts, lat, lng);
         // A visitor wants what's WORTH going to; a local wants what's CLOSE.
         // Nearest-first is why "where to eat in Barcelona" answered McDonald's.
         if (visiting) placed = rankForVisitor(placed);
-        const final = ensureUniqueImages(placed);
+        const final = enforceRealImages(placed);
         // Write-through: the first visitor to a city pays Overpass's 20 seconds
         // once; everyone after is served from Postgres in about a second, and
         // the tab keeps working even when Overpass is down.
@@ -517,7 +520,7 @@ async function computeFeed(request: NextRequest) {
 
   if (category === 'sightseeing') {
     tasks.push(
-      wikipediaPosts(lat, lng, city, page, radius, count, claudeKey, unsplashKey, pexelsKey)
+      wikipediaPosts(lat, lng, city, page, radius, count, claudeKey)
         .then(r => ({ source: 'wikipedia', ...r }))
         .catch(err => { console.error('[feed/wiki]', err); return { source: 'wikipedia', posts: [], hasMore: false }; })
     );
@@ -525,7 +528,7 @@ async function computeFeed(request: NextRequest) {
 
   if (category === 'food') {
     tasks.push(
-      osmPosts(lat, lng, city, 'food', page, radius, count, unsplashKey, pexelsKey)
+      osmPosts(lat, lng, city, 'food', page, radius, count)
         .then(r => ({ source: 'osm', ...r }))
         .catch(err => { console.error('[feed/food-osm]', err); return { source: 'osm', posts: [], hasMore: false }; })
     );
@@ -540,7 +543,7 @@ async function computeFeed(request: NextRequest) {
       ? (['events', 'restaurants', 'art', 'fitness', 'music', 'community'] as const)[page % 6]
       : category as string;
     tasks.push(
-      osmPosts(lat, lng, city, osmCatForDiscover, page, radius, count, unsplashKey, pexelsKey)
+      osmPosts(lat, lng, city, osmCatForDiscover, page, radius, count)
         .then(r => ({ source: 'osm', ...r }))
         .catch(err => { console.error('[feed/osm-blend]', err); return { source: 'osm', posts: [], hasMore: false }; })
     );
@@ -587,7 +590,7 @@ async function computeFeed(request: NextRequest) {
     try {
       await noteAiCall();
       const aiPosts = await searchRealEventsWithClaude(
-        city, country, todayStr(), count, page, category, claudeKey, unsplashKey, pexelsKey, lat, lng
+        city, country, todayStr(), count, page, category, claudeKey, lat, lng
       );
       if (aiPosts.length > 0) {
         pool = dropExpired(dedupePosts([...pool, ...aiPosts]));
@@ -646,7 +649,7 @@ async function computeFeed(request: NextRequest) {
     } catch { /* fall back to empty */ }
   }
 
-  const finalPosts = ensureUniqueImages(final);
+  const finalPosts = enforceRealImages(final);
 
   // Everything we just computed live goes into our own database, so the next
   // person asking about this city — through the feed, the chatbot or the trip

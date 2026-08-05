@@ -11,6 +11,7 @@ import { getPostComments, addPostComment, deletePostComment, PostComment } from 
 import AuthModal from './AuthModal';
 import Avatar from './Avatar';
 import { postImageUrl } from '@/lib/imageUrl';
+import { coverBackground } from '@/components/PostImage';
 
 interface Props {
   post: Post;
@@ -91,7 +92,9 @@ export default function CommentsSheet({ post, onClose }: Props) {
 
       {/* Post mini-header */}
       <div className="flex items-center gap-3 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid #1a1a24' }}>
-        <img src={postImageUrl(post.image, 480)} alt="" className="w-12 h-12 rounded-xl object-cover flex-shrink-0" loading="lazy" />
+        <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0" style={{ background: coverBackground(post.id) }}>
+          {post.image && <img src={postImageUrl(post.image, 480)} alt="" className="w-full h-full object-cover" loading="lazy" />}
+        </div>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold text-white truncate">@{post.user.username}</p>
           <p className="text-xs mt-0.5 line-clamp-2 leading-snug" style={{ color: '#888899' }}>{post.caption}</p>

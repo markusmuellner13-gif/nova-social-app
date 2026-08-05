@@ -58,8 +58,6 @@ export async function GET(request: NextRequest) {
   const sp = new URL(request.url).searchParams;
   const offset = Math.max(0, parseInt(sp.get('offset') || '0', 10));
   const count = Math.max(4, Math.min(12, parseInt(sp.get('count') || '10', 10)));
-  const unsplashKey = process.env.UNSPLASH_ACCESS_KEY;
-  const pexelsKey   = process.env.PEXELS_API_KEY;
   const today = todayStr();
   const deadline = Date.now() + 45_000; // each town's AI search is ~15-25s
 
@@ -72,7 +70,7 @@ export async function GET(request: NextRequest) {
     try {
       const posts = await searchRealEventsWithClaude(
         city, country, today, count, 0, 'events', apiKey,
-        unsplashKey, pexelsKey, lat, lng, /* tourismFocus */ true,
+        lat, lng, /* tourismFocus */ true,
       );
       const clean = dropExpired(dedupePosts(posts)).filter(p => p && p.id && p.eventDateRaw);
       if (clean.length) {

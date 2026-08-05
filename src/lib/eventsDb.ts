@@ -7,6 +7,7 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { ApiPost } from '@/lib/sources/shared';
+import { enforceRealImages } from '@/lib/sources/realImage';
 
 const url        = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 const anonKey    = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -19,6 +20,16 @@ const writeClient: SupabaseClient | null = url && serviceKey ? createClient(url,
 
 export const dbReadEnabled  = readClient !== null;
 export const dbWriteEnabled = writeClient !== null;
+
+// Rows ingested before the stand-in photo sources were removed still carry a
+// stock/filler URL in `raw.image`. Cleaning on the way OUT (rather than
+// migrating the table) means the fix applies to every stored row immediately,
+// including ones a cron re-writes later, and there is no window where the old
+// images come back.
+function readPosts(data: unknown): ApiPost[] {
+  const posts = ((data ?? []) as { raw: ApiPost }[]).map(r => r.raw).filter(Boolean);
+  return enforceRealImages(posts);
+}
 
 // A row ready to upsert. `raw` is the full feed-ready post object the client renders.
 export interface EventRow {
@@ -105,7 +116,7 @@ export async function queryEventsNear(opts: {
     in_offset: opts.offset,
   });
   if (error) { console.error('[eventsDb/query]', error.message); return []; }
-  return ((data ?? []) as { raw: ApiPost }[]).map(r => r.raw).filter(Boolean);
+  return readPosts(data);
 }
 
 // Read feed-ready posts near a location across SEVERAL categories at once
@@ -126,7 +137,7 @@ export async function queryEventsNearAny(opts: {
     in_offset: opts.offset,
   });
   if (error) { console.error('[eventsDb/queryAny]', error.message); return []; }
-  return ((data ?? []) as { raw: ApiPost }[]).map(r => r.raw).filter(Boolean);
+  return readPosts(data);
 }
 
 // Top upcoming events near a point across the "going out" categories — powers
@@ -148,7 +159,7 @@ export async function queryTopEventsNear(opts: {
     in_offset: 0,
   });
   if (error) { console.error('[eventsDb/topNear]', error.message); return []; }
-  return ((data ?? []) as { raw: ApiPost }[]).map(r => r.raw).filter(Boolean);
+  return readPosts(data);
 }
 
 // Cold-start fallback: when nothing is happening within the user's radius (a tiny
@@ -167,7 +178,7 @@ export async function queryEventsByCountry(opts: {
     .order('start_at', { ascending: true, nullsFirst: false })
     .range(opts.offset, opts.offset + opts.limit - 1);
   if (error) { console.error('[eventsDb/byCountry]', error.message); return []; }
-  return ((data ?? []) as { raw: ApiPost }[]).map(r => r.raw).filter(Boolean);
+  return readPosts(data);
 }
 
 // A worldwide spread of live events for the globe view. Pulls the most popular
@@ -183,8 +194,7 @@ export async function sampleEventsWorldwide(limit = 1500): Promise<ApiPost[]> {
     .order('popularity', { ascending: false })
     .limit(limit);
   if (error) { console.error('[eventsDb/sample]', error.message); return []; }
-  return ((data ?? []) as { raw: ApiPost }[])
-    .map(r => r.raw)
+  return readPosts(data)
     .filter(p => p && p.location && Number.isFinite(p.location.lat) && Number.isFinite(p.location.lng));
 }
 

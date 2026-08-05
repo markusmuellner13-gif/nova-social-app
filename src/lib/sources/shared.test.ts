@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   slugify, haversineKm, withDistance, dedupePosts, dropExpired,
-  proxyImage, picsumUrl, todayStr, ensureUniqueImages, makeUser, type ApiPost,
+  proxyImage, todayStr, makeUser, type ApiPost,
 } from './shared';
 
 // Minimal ApiPost factory so tests stay readable.
@@ -95,12 +95,6 @@ describe('proxyImage', () => {
   });
 });
 
-describe('picsumUrl', () => {
-  it('produces a deterministic, sanitised seed url at card resolution', () => {
-    expect(picsumUrl('Rome Events!')).toBe('https://picsum.photos/seed/rome_events_/1440/1800');
-  });
-});
-
 describe('makeUser', () => {
   it('keeps accented names readable in the handle', () => {
     // Previously "Grünbergstraße" became "gr.nbergstra.e" — every non-ASCII
@@ -113,26 +107,3 @@ describe('makeUser', () => {
   });
 });
 
-describe('ensureUniqueImages', () => {
-  it('leaves already-unique images untouched', () => {
-    const posts = [
-      post({ id: 'a', image: 'https://x/1.jpg' }),
-      post({ id: 'b', image: 'https://x/2.jpg' }),
-    ];
-    const out = ensureUniqueImages(posts);
-    expect(out[0].image).toBe('https://x/1.jpg');
-    expect(out[1].image).toBe('https://x/2.jpg');
-  });
-
-  it('re-seeds duplicate images so no two posts share one', () => {
-    const posts = [
-      post({ id: 'a', image: 'https://x/same.jpg' }),
-      post({ id: 'b', image: 'https://x/same.jpg' }),
-      post({ id: 'c', image: 'https://x/same.jpg' }),
-    ];
-    const out = ensureUniqueImages(posts);
-    const imgs = out.map(p => p.image);
-    expect(new Set(imgs).size).toBe(3);
-    expect(imgs[0]).toBe('https://x/same.jpg'); // first keeps it
-  });
-});

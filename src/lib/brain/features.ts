@@ -5,6 +5,7 @@
 // linear model can be trained with a single shared learning rate.
 
 import type { ApiPost } from '@/lib/sources/shared';
+import { isStandInImage } from '@/lib/sources/realImage';
 
 /** Ordered feature names — the index of each name IS its weight index. */
 export const FEATURE_NAMES = [
@@ -32,10 +33,13 @@ export const FEATURE_COUNT = FEATURE_NAMES.length;
 
 const clamp01 = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0);
 
-/** Stock/filler photos are the ones we'd rather not lead with. */
+/**
+ * A photo of the post's own subject. Sources no longer produce stand-ins at all,
+ * but the check stays: it is what tells the ranker that a card with an honest
+ * empty cover should not lead the feed over one with the venue's real photo.
+ */
 export function hasRealPhoto(image: string | undefined): boolean {
-  if (!image) return false;
-  return !/picsum\.photos|ui-avatars\.com|unsplash\.com|pexels\.com/i.test(image);
+  return !isStandInImage(image);
 }
 
 /** Rough "is this a title a human wrote about a real thing" score. */
