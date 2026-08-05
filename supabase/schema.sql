@@ -65,7 +65,72 @@ alter table group_members     enable row level security;
 alter table post_interactions enable row level security;
 alter table group_events  enable row level security;
 
--- ── Step 3: Add all policies (all tables now exist) ──────────────────────────
+-- ── Step 3: Membership predicate (must exist before the policies use it) ─────
+
+-- Every group policy needs to ask "is the caller a member of this group?", which
+-- means reading group_members. Asking that INSIDE a policy on group_members is
+-- infinite recursion (Postgres 42P17), and because the other group tables asked
+-- it too, the recursion took all of them down. SECURITY DEFINER runs the lookup
+-- as the function owner, which is exempt from RLS — so the question can be asked
+-- without re-entering the policy. See migrations/006_fix_group_rls_recursion.sql.
+--
+-- `search_path = ''` is mandatory here: without it a caller could shadow
+-- `group_members` with their own table. Hence the schema qualification below.
+create or replace function public.is_group_member(p_group_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.group_members
+    where group_id = p_group_id
+      and user_id  = auth.uid()
+  );
+$$;
+
+grant execute on function public.is_group_member(uuid) to anon, authenticated, service_role;
+
+-- Joining by invite code needs to read a group you are NOT yet a member of. Doing
+-- that from the client required a policy exposing every group (and every invite
+-- code) to every signed-in user. This resolves only the group whose code the
+-- caller already has, and joins them in the same statement.
+create or replace function public.join_group_by_code(p_code text)
+returns public.groups
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid   uuid := auth.uid();
+  v_group public.groups;
+begin
+  if v_uid is null then
+    return null;
+  end if;
+
+  select * into v_group
+  from public.groups
+  where code = upper(btrim(p_code));
+
+  if not found then
+    return null;
+  end if;
+
+  insert into public.group_members (group_id, user_id)
+  values (v_group.id, v_uid)
+  on conflict (group_id, user_id) do nothing;
+
+  return v_group;
+end;
+$$;
+
+revoke execute on function public.join_group_by_code(text) from public;
+grant execute on function public.join_group_by_code(text) to authenticated, service_role;
+
+-- ── Step 4: Add all policies (all tables now exist) ──────────────────────────
 
 -- profiles
 create policy "Profiles are public"          on profiles for select using (true);
@@ -78,27 +143,30 @@ create policy "Users can follow"             on follows for insert with check (a
 create policy "Users can unfollow"           on follows for delete using (auth.uid() = follower_id);
 
 -- groups
+-- `created_by` is checked first because createGroup() does INSERT ... RETURNING:
+-- at that instant the creator is not a member yet (the auto-join is the next
+-- statement), so a membership-only rule would filter out the row it just wrote.
 create policy "Group members can view group" on groups for select using (
-  exists (select 1 from group_members where group_id = groups.id and user_id = auth.uid())
+  created_by = (select auth.uid()) or public.is_group_member(id)
 );
--- Allow any signed-in user to look up a group by invite code (needed for joinGroup before membership exists)
-create policy "Authenticated users can discover groups" on groups for select using (auth.uid() is not null);
 create policy "Auth users can create groups" on groups for insert with check (auth.uid() is not null);
 
 -- group_members
 create policy "Members can view other members" on group_members for select using (
-  exists (select 1 from group_members gm where gm.group_id = group_members.group_id and gm.user_id = auth.uid())
+  user_id = (select auth.uid()) or public.is_group_member(group_id)
 );
 create policy "Users can join groups"          on group_members for insert with check (auth.uid() = user_id);
 create policy "Users can leave groups"         on group_members for delete using (auth.uid() = user_id);
+-- joinGroup() upserts, and the ON CONFLICT DO UPDATE arm needs an UPDATE policy.
+create policy "Users can update own membership" on group_members for update
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 
 -- group_events
 create policy "Members can view group events" on group_events for select using (
-  exists (select 1 from group_members where group_id = group_events.group_id and user_id = auth.uid())
+  public.is_group_member(group_id)
 );
 create policy "Members can add events"        on group_events for insert with check (
-  auth.uid() = added_by and
-  exists (select 1 from group_members where group_id = group_events.group_id and user_id = auth.uid())
+  (select auth.uid()) = added_by and public.is_group_member(group_id)
 );
 create policy "Adder can remove events"       on group_events for delete using (auth.uid() = added_by);
 

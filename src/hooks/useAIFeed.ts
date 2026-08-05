@@ -59,6 +59,12 @@ function fetchWithTimeout(url: string): Promise<Response> {
   return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
 }
 
+// The streaming read is bounded by SILENCE, not by total duration. A cold city
+// legitimately takes ~20s (Overpass), which the flat 22s cap above was cutting
+// off just as the answer arrived; but a socket that has said nothing for this
+// long is genuinely hung. Each chunk resets the clock.
+const STREAM_IDLE_MS = 20_000;
+
 interface CacheEntry { posts: Post[]; timestamp: number; page: number; radiusTier: number }
 
 /** True when the current city was hand-picked rather than resolved from GPS. */
@@ -132,6 +138,34 @@ export function mergeUnique(existing: Post[], incoming: Post[]): Post[] {
   return fresh.length ? [...existing, ...fresh] : existing;
 }
 
+/**
+ * Merge a later, richer version of posts we are already showing.
+ *
+ * The cold-start stream delivers each card twice: once as soon as it is real and
+ * ranked, and again once its photo has been chased down. The second delivery is
+ * the SAME post with a picture — which `mergeUnique` would discard as a
+ * duplicate, leaving the feed on the photoless copies for good. This replaces
+ * them in place (same slot, same order, so React swaps the image rather than
+ * reflowing the list) and appends anything genuinely new.
+ */
+export function mergeUpgrade(existing: Post[], incoming: Post[]): Post[] {
+  if (incoming.length === 0) return existing;
+  if (existing.length === 0) return incoming;
+
+  const byId  = new Map(incoming.map(p => [p.id, p]));
+  const byKey = new Map(incoming.map(p => [contentKey(p), p]));
+
+  const replaced = new Set<string>();
+  const upgraded = existing.map(p => {
+    const next = byId.get(p.id) ?? byKey.get(contentKey(p));
+    if (!next) return p;
+    replaced.add(next.id);
+    return next;
+  });
+
+  return mergeUnique(upgraded, incoming.filter(p => !replaced.has(p.id)));
+}
+
 // Remove events whose date has already passed
 function filterExpired(posts: Post[]): Post[] {
   const today = new Date().toISOString().split('T')[0];
@@ -144,6 +178,82 @@ function filterExpired(posts: Post[]): Post[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface FeedResponse { posts?: Post[]; hasMore?: boolean; city?: string; reason?: string }
+
+/** One NDJSON line from `/api/feed?stream=1`. */
+type FeedChunk =
+  | ({ type: 'meta' } & FeedResponse)
+  | ({ type: 'posts'; posts: Post[] })
+  | ({ type: 'done' } & FeedResponse);
+
+/**
+ * Read the feed as a stream, handing each early batch to `onPartial` and
+ * resolving with the final body — the same shape the plain JSON route returns,
+ * so every caller downstream is unchanged.
+ *
+ * Falls back to reading the whole body at once wherever streaming isn't
+ * available (some Capacitor WebViews hand back a response with no `body`), which
+ * degrades to exactly today's behaviour rather than failing.
+ */
+async function streamFeed(url: string, onPartial: (posts: Post[]) => void): Promise<FeedResponse | null> {
+  const ctrl = new AbortController();
+  let timer = setTimeout(() => ctrl.abort(), STREAM_IDLE_MS);
+  const resetIdle = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => ctrl.abort(), STREAM_IDLE_MS);
+  };
+
+  // Last batch we actually showed the user. If the connection dies after we've
+  // painted real cards, that's a completed page as far as the feed is concerned
+  // — reporting null would make it widen the radius and stack on more content
+  // underneath what's already on screen.
+  let latest: Post[] | null = null;
+  let done: FeedResponse | null = null;
+
+  const handle = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    let msg: FeedChunk;
+    try { msg = JSON.parse(trimmed) as FeedChunk; } catch { return; }
+    if (msg.type === 'posts' && Array.isArray(msg.posts)) {
+      latest = msg.posts;
+      onPartial(msg.posts);
+    } else if (msg.type === 'done') {
+      done = msg;
+    }
+  };
+
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/x-ndjson' } });
+    if (!res.ok) return null;
+
+    if (!res.body?.getReader) {
+      for (const line of (await res.text()).split('\n')) handle(line);
+      return done ?? (latest ? { posts: latest, hasMore: true } : null);
+    }
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done: finished } = await reader.read();
+      if (finished) break;
+      resetIdle();
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        handle(buf.slice(0, nl));
+        buf = buf.slice(nl + 1);
+      }
+    }
+    handle(buf); // trailing line, if the stream ended without a newline
+    return done ?? (latest ? { posts: latest, hasMore: true } : null);
+  } catch {
+    // Aborted or network error — keep whatever we already painted.
+    return done ?? (latest ? { posts: latest, hasMore: true } : null);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 interface UseAIFeedReturn {
   posts: Post[];
@@ -336,14 +446,23 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     return p.toString();
   }
 
-  // Fetch a feed page, preferring the prefetch buffer; always warms the next page
-  function fetchFeedPage(loc: LocationState | null, category: string, page: number, radius: number, days: number): Promise<FeedResponse | null> {
+  // Fetch a feed page, preferring the prefetch buffer; always warms the next page.
+  //
+  // `onPartial` opts into the streaming response, which only pays off on a cold
+  // compute — so callers pass it for the FIRST page a user is waiting on, and
+  // leave it off for prefetch and pagination, where the result is buffered
+  // out of sight anyway and a plain JSON body is cheaper.
+  function fetchFeedPage(
+    loc: LocationState | null, category: string, page: number, radius: number, days: number,
+    onPartial?: (posts: Post[]) => void,
+  ): Promise<FeedResponse | null> {
     const params = buildParams(loc, category, page, radius, days);
     const buffered = prefetchRef.current.get(params);
     if (buffered) {
       prefetchRef.current.delete(params);
       return buffered;
     }
+    if (onPartial) return streamFeed(apiUrl(`/api/feed?${params}&stream=1`), onPartial);
     return fetchWithTimeout(apiUrl(`/api/feed?${params}`))
       .then(res => (res.ok ? (res.json() as Promise<FeedResponse>) : null))
       .catch(() => null);
@@ -420,7 +539,10 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
 
     const merge = (newPosts: Post[], nextPage: number) => {
       setPosts(prev => {
-        const merged = mergeUnique(prev, newPosts);
+        // mergeUpgrade, not mergeUnique: on a streamed first page these same
+        // posts are already on screen without their photos, and a plain unique
+        // merge would treat the finished versions as duplicates and drop them.
+        const merged = mergeUpgrade(prev, newPosts);
         // First time we append results from an EXPANDED radius (beyond the
         // city), remember where the "nearby towns" section begins.
         if (radiusTierRef.current > 0 && nearbyStartRef.current === null && prev.length > 0 && merged.length > prev.length) {
@@ -433,7 +555,23 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     };
 
     try {
-      const data = await fetchFeedPage(location, cat, pageRef.current, radius, days);
+      // Stream the first page only. That is the one a user actually waits on,
+      // and the one that can be a cold ~20s compute; later pages are prefetched
+      // long before they're needed, so streaming them would buy nothing.
+      const streamFirstPage = pageRef.current === 0
+        ? (partial: Post[]) => {
+            const fresh = filterExpired(partial);
+            if (fresh.length === 0) return;
+            // Paint immediately. Deliberately no writeCache here: these cards
+            // have no photos yet, and persisting them would make the NEXT cold
+            // open restore a photoless feed from localStorage. The final merge
+            // below caches the finished version.
+            setPosts(prev => mergeUpgrade(prev, fresh));
+            setEmptyReason(null);
+          }
+        : undefined;
+
+      const data = await fetchFeedPage(location, cat, pageRef.current, radius, days, streamFirstPage);
       const newPosts = filterExpired(data?.posts ?? []);
       const apiHasMore = data?.hasMore !== false;
       // Remember WHY a page was empty (e.g. the places service was unreachable)
