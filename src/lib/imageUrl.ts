@@ -79,31 +79,9 @@ function upgradeGooglePlaces(u: URL): string | null {
   return u.toString();
 }
 
-/** Unsplash / Pexels expose the render size directly in the query string. */
-function upgradeStock(u: URL): string | null {
-  if (u.hostname === 'images.unsplash.com') {
-    if (parseInt(u.searchParams.get('w') ?? '0', 10) >= 1440) return null;
-    u.searchParams.set('w', '1440');
-    u.searchParams.set('h', '1800');
-    u.searchParams.set('q', '85');
-    return u.toString();
-  }
-  if (u.hostname === 'images.pexels.com') {
-    if (parseInt(u.searchParams.get('w') ?? '0', 10) >= 1440) return null;
-    u.searchParams.set('w', '1440');
-    u.searchParams.set('h', '1800');
-    return u.toString();
-  }
-  return null;
-}
-
-/** picsum's size lives in the path: `/seed/<s>/1080/1350`. */
-function upgradePicsum(u: URL): string | null {
-  if (u.hostname !== 'picsum.photos') return null;
-  const m = u.pathname.match(/^(.*?)\/(\d+)\/(\d+)$/);
-  if (!m || parseInt(m[2], 10) >= 1440) return null;
-  return `${u.origin}${m[1]}/1440/1800`;
-}
+// There are deliberately no Unsplash/Pexels/picsum rules here any more. Those
+// hosts only ever served stand-in photography, and posts no longer carry it —
+// `realImage.ts` strips it, including from rows ingested before the change.
 
 /**
  * Rewrite an image URL to the highest-resolution variant the source will serve.
@@ -116,7 +94,7 @@ export function upgradeImageUrl(raw: string): string {
 
   for (const fn of [
     upgradeEventbrite, upgradeAllEvents, upgradeWikimedia,
-    upgradeCommonsFilePath, upgradeGooglePlaces, upgradeStock, upgradePicsum,
+    upgradeCommonsFilePath, upgradeGooglePlaces,
   ]) {
     try {
       const next = fn(new URL(u.toString()));

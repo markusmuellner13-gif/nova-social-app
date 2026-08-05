@@ -3,7 +3,7 @@
 // Supports per-category pages and deep pagination (?page=N) so every category
 // has a real, endless stream.
 
-import { ApiPost, makeUser, picsumUrl, slugify, todayStr } from './shared';
+import { ApiPost, makeUser, slugify, todayStr } from './shared';
 
 // Eventbrite's JSON-LD has no geo coordinates, so every event would otherwise be
 // stamped with the SEARCH-CITY centroid. On a small town's page Eventbrite spills
@@ -146,7 +146,8 @@ export async function fetchEventbriteEvents(
     ], venue);
     const rawDate = (ev.startDate ?? '').slice(0, 10);
     const time    = (ev.startDate ?? '').length > 10 ? (ev.startDate ?? '').slice(11, 16) : '';
-    const image   = (Array.isArray(ev.image) ? ev.image[0] : ev.image) || picsumUrl(`eb_${city}_${page}_${i}`);
+    // The listing's own artwork, or none — never a stand-in.
+    const image   = (Array.isArray(ev.image) ? ev.image[0] : ev.image) || '';
     const evUrl   = ev.url ?? url;
     const idMatch = evUrl.match(/(\d+)\/?$/);
 

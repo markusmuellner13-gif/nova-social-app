@@ -30,8 +30,9 @@ const DEFAULT_WIDTH = 1080;
 // Hosts we always allow. Everything else is permitted only after passing the
 // SSRF guard below — real venue photos legitimately come from a venue's own
 // domain, so a fixed allowlist would throw most of them away.
+// (The stock hosts that used to sit at the top of this list are gone — posts no
+// longer carry stand-in photography, so nothing should be asking to proxy it.)
 const TRUSTED_HOSTS = new Set([
-  'images.unsplash.com', 'images.pexels.com', 'picsum.photos',
   'upload.wikimedia.org', 'commons.wikimedia.org',
   's1.ticketm.net', 's4.ticketm.net', 'img.ticketmaster.com',
   'img.evbuc.com', 'cdn.evbuc.com',

@@ -72,12 +72,6 @@ export function makeUser(name: string, domain?: string) {
   };
 }
 
-// High-res 4:5 portrait. Bumped from 600×750 → 1080×1350 so event cards look
-// crisp on modern high-DPI phones.
-export function picsumUrl(seed: string) {
-  return `https://picsum.photos/seed/${seed.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 32)}/1440/1800`;
-}
-
 // Pull the real, high-quality hero image a page advertises to social crawlers
 // (og:image / twitter:image / link rel=image_src). This is how we get the
 // ACTUAL event photo rather than a stock stand-in. Fail-soft → null.
@@ -178,75 +172,15 @@ export function dropExpired(posts: ApiPost[]): ApiPost[] {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Image helpers — Unsplash → Pexels → picsum
+// Images
 // ─────────────────────────────────────────────────────────────────────────────
-
-async function fetchUnsplashImage(query: string, key: string): Promise<string | null> {
-  try {
-    const res = await fetch(
-      `https://api.unsplash.com/photos/random?query=${encodeURIComponent(query)}&orientation=portrait&content_filter=high`,
-      { headers: { Authorization: `Client-ID ${key}` }, signal: AbortSignal.timeout(3500) }
-    );
-    if (!res.ok) return null;
-    const d = await res.json() as { urls?: { raw?: string; regular?: string } };
-    // Use raw URL with explicit crop dimensions for perfect 4:5 portrait framing
-    const base = d.urls?.raw ?? d.urls?.regular;
-    if (!base) return null;
-    const sep = base.includes('?') ? '&' : '?';
-    return `${base}${sep}auto=format&fit=crop&w=1440&h=1800&q=85&crop=faces,entropy`;
-  } catch { return null; }
-}
-
-// Small deterministic hash so a given post always maps to the SAME photo in a
-// result set (stable across reloads) while DIFFERENT posts pick different ones —
-// this is what stops twenty restaurants all sharing the one top stock photo.
-function hashSeed(seed: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return h >>> 0;
-}
-
-async function fetchPexelsImage(query: string, key: string, seed?: string): Promise<string | null> {
-  try {
-    // Pull a page of candidates (not just the first) so different posts on the
-    // same query can each take a different, relevant photo.
-    const res = await fetch(
-      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=20&orientation=portrait`,
-      { headers: { Authorization: key }, signal: AbortSignal.timeout(3500) }
-    );
-    if (!res.ok) return null;
-    const d = await res.json() as { photos?: { src?: { large2x?: string; large?: string } }[] };
-    const photos = d.photos ?? [];
-    if (photos.length === 0) return null;
-    const idx = seed ? hashSeed(seed) % photos.length : 0;
-    const src = photos[idx]?.src ?? photos[0]?.src;
-    const base = src?.large2x ?? src?.large;
-    if (!base) return null;
-    // Pexels supports ?w=&h=&fit=crop via their CDN
-    const sep = base.includes('?') ? '&' : '?';
-    return `${base}${sep}w=1440&h=1800&fit=crop`;
-  } catch { return null; }
-}
-
-export async function getImage(query: string, unsplashKey?: string, pexelsKey?: string, seed?: string): Promise<string> {
-  if (unsplashKey) { const u = await fetchUnsplashImage(query, unsplashKey); if (u) return proxyImage(u); }
-  if (pexelsKey)   { const u = await fetchPexelsImage(query, pexelsKey, seed); if (u) return proxyImage(u); }
-  return picsumUrl(seed ?? query);
-}
-
-// Final safety net so NO two posts in a single feed response share an image. Real
-// venue photos (OSM/Places/og:image) are kept as-is; only a genuine collision
-// (usually a repeated stock fallback) is broken by re-seeding that post to a
-// unique deterministic image. Keeps the feed feeling curated, never copy-pasted.
-export function ensureUniqueImages<T extends { id: string; image: string }>(posts: T[]): T[] {
-  const seen = new Set<string>();
-  return posts.map(p => {
-    const img = p.image ?? '';
-    if (img && !seen.has(img)) { seen.add(img); return p; }
-    let next = picsumUrl(p.id);
-    let n = 0;
-    while (seen.has(next) && n < 5) { next = picsumUrl(`${p.id}_${n++}`); }
-    seen.add(next);
-    return { ...p, image: next };
-  });
-}
+//
+// There is deliberately no keyword photo lookup here any more. Unsplash and
+// Pexels were queried with the post's CATEGORY ("cozy restaurant interior
+// dinner table"), so every restaurant on earth without its own photo drew from
+// the same twenty results — which is how unrelated posts ended up sharing a
+// picture that belonged to neither of them. picsum went further and served an
+// unrelated photograph on purpose.
+//
+// A post now shows a photo of its own subject or no photo at all. See
+// `realImage.ts` for the gate, and `PostImage` for the designed empty state.

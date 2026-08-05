@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { X, Link2, Share2, Users } from 'lucide-react';
 import { Post } from '@/types';
 import { buildShareUrl } from '@/lib/shareLink';
+import { coverBackground } from '@/components/PostImage';
 import { useApp } from '@/context/AppContext';
 
 interface Props {
@@ -131,7 +132,9 @@ export default function InviteSheet({ post, onClose }: Props) {
 
         {/* Event preview chip */}
         <div className="flex items-center gap-3 my-4 p-3 rounded-2xl" style={{ background: '#0d0d16', border: '1px solid #2a2a38' }}>
-          <img src={post.image} alt="" className="w-12 h-12 rounded-xl object-cover flex-shrink-0" style={{ background: '#1a1a24' }} />
+          <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0" style={{ background: coverBackground(post.id) }}>
+            {post.image && <img src={post.image} alt="" className="w-full h-full object-cover" />}
+          </div>
           <div className="min-w-0">
             <p className="text-sm font-semibold text-white truncate">{title}</p>
             {(post.eventDate || post.location?.name) && (

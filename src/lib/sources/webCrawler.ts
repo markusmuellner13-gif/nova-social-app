@@ -17,7 +17,7 @@
 // the events DB without spending credits.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { ApiPost, makeUser, picsumUrl, slugify, todayStr, haversineKm, fetchOgImage, proxyImage } from './shared';
+import { ApiPost, makeUser, slugify, todayStr, haversineKm, fetchOgImage, proxyImage } from './shared';
 import { validateBatch } from '@/lib/eventValidation';
 import { sameLabel, dedupeAddressParts } from './eventbrite';
 
@@ -58,14 +58,44 @@ function typeMatches(t: unknown): boolean {
   return false;
 }
 
+// Publishers routinely HTML-escape the text inside their JSON-LD, so titles
+// arrive as "Hans Zimmer, John Williams &amp; mehr" and get shown to the user
+// with the entity intact. There is no DOM on the server to decode with, and the
+// set of entities that actually appears in event titles is small.
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  ndash: '–', mdash: '—', hellip: '…', rsquo: '’', lsquo: '‘',
+  rdquo: '”', ldquo: '“', eacute: 'é', egrave: 'è', auml: 'ä', ouml: 'ö',
+  uuml: 'ü', Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü', szlig: 'ß', deg: '°', euro: '€',
+};
+
+export function decodeEntities(s: string): string {
+  if (!s.includes('&')) return s;
+  // Two passes: some feeds double-escape ("&amp;#39;"), and one pass would leave
+  // a bare "&#39;" behind.
+  let out = s;
+  for (let pass = 0; pass < 2 && out.includes('&'); pass++) {
+    out = out.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, body: string) => {
+      if (body[0] === '#') {
+        const code = body[1] === 'x' || body[1] === 'X'
+          ? parseInt(body.slice(2), 16)
+          : parseInt(body.slice(1), 10);
+        return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+      }
+      return NAMED_ENTITIES[body] ?? NAMED_ENTITIES[body.toLowerCase()] ?? m;
+    });
+  }
+  return out;
+}
+
 function firstString(v: unknown): string | undefined {
-  if (typeof v === 'string') return v;
+  if (typeof v === 'string') return decodeEntities(v);
   if (Array.isArray(v)) { for (const x of v) { const s = firstString(x); if (s) return s; } }
   if (v && typeof v === 'object') {
     const o = v as Json;
     if (typeof o.url === 'string') return o.url;
-    if (typeof o.name === 'string') return o.name;
-    if (typeof o['@value'] === 'string') return o['@value'] as string;
+    if (typeof o.name === 'string') return decodeEntities(o.name);
+    if (typeof o['@value'] === 'string') return decodeEntities(o['@value'] as string);
   }
   return undefined;
 }
@@ -468,7 +498,9 @@ function toApiPost(
   return {
     id: `nova_${slugify(ev.name).slice(0, 28)}_${rawDate}_${idx}`,
     user: makeUser(organizer, host),
-    image: ev.image || picsumUrl(`nova_${searchCity}_${category}_${idx}`),
+    // The listing's own image, or none — `crawlCityEvents` then tries the event
+    // page's og:image. A filler photo is never substituted.
+    image: ev.image || '',
     caption: `${desc.slice(0, 320)}\n\n📅 ${dateStr}${time ? ` · ${time}` : ''}\n📍 ${venue}${addr ? `, ${addr}` : ''}\n🎟️ ${price}\n🔗 Tickets & info: ${url}`,
     likes: 0,
     comments: 0,
@@ -521,15 +553,19 @@ export async function crawlCityEvents(opts: {
   // region's listings stamped at this city's centroid.
   posts = validateBatch(posts, { cityLat: lat, cityLng: lng, maxKm: 150 }).valid;
 
-  // Real photos: for the first few posts that don't already carry a real image,
-  // fetch the event page's og:image (the actual event poster/photo). Capped and
-  // run in parallel so it never slows the feed much.
-  await Promise.all(posts.slice(0, 6).map(async p => {
-    const hasReal = p.image && !p.image.includes('picsum.photos');
-    if (hasReal || !p.eventUrl || p.eventUrl === '#') return;
-    const og = await fetchOgImage(p.eventUrl, 3500);
-    if (og) p.image = proxyImage(og);
-  }));
+  // Real photos: for every post that doesn't already carry one, fetch the event
+  // page's own og:image (the actual poster). This used to stop after six because
+  // the rest could fall back to a stock photo — they can't any more, so the net
+  // is cast over the whole page. Run in bounded batches with a short timeout so
+  // a slow listing site can't hold up the feed.
+  const needsPhoto = posts.filter(p => !p.image && p.eventUrl && p.eventUrl !== '#');
+  const OG_BATCH = 8;
+  for (let i = 0; i < needsPhoto.length; i += OG_BATCH) {
+    await Promise.all(needsPhoto.slice(i, i + OG_BATCH).map(async p => {
+      const og = await fetchOgImage(p.eventUrl!, 3500);
+      if (og) p.image = proxyImage(og);
+    }));
+  }
 
   // Sort soonest-first; prefer events with real geo near the search point.
   return posts.sort((a, b) => {

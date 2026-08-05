@@ -10,6 +10,7 @@ import { parseMinPrice } from './Post';
 import { useApp } from '@/context/AppContext';
 import { useAIFeed } from '@/hooks/useAIFeed';
 import { initBrain, rankPosts, setBrainContext, flushBrain } from '@/lib/brain/client';
+import { hasRealPhoto } from '@/lib/brain/features';
 import { apiUrl } from '@/lib/apiBase';
 import PostComponent from './Post';
 import { useLanguage } from '@/context/LanguageContext';
@@ -437,7 +438,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
       if (typeof p.distanceKm === 'number') s += Math.max(0, 25 - p.distanceKm);
       return s;
     };
-    const realPhoto = aiPosts.filter(p => p.image && !p.image.includes('picsum'));
+    const realPhoto = aiPosts.filter(p => hasRealPhoto(p.image));
     const pool = realPhoto.length >= 3 ? realPhoto : aiPosts;
     return [...pool].sort((a, b) => score(b) - score(a)).slice(0, 8);
   }, [activeMainTab, hasCity, aiPosts]);

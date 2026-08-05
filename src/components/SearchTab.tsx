@@ -10,6 +10,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import { useApp } from '@/context/AppContext';
 import { apiUrl } from '@/lib/apiBase';
 import { postImageUrl } from '@/lib/imageUrl';
+import { coverBackground } from '@/components/PostImage';
 
 type MapProvider = 'nova' | 'google';
 
@@ -474,10 +475,14 @@ function PostGrid({ posts, onPostOpen, query, onSuggestion }: { posts: Post[]; o
           whileTap={{ scale: 0.97 }}
           onClick={() => onPostOpen(post)}
           className="relative overflow-hidden"
-          style={{ aspectRatio: '1', background: '#13131a' }}
+          style={{ aspectRatio: '1', background: coverBackground(post.id) }}
         >
-          <img src={postImageUrl(post.image, 480)} alt="" className="w-full h-full object-cover" loading="lazy"
-            onError={(e) => { const el = e.currentTarget; const fb = `https://picsum.photos/seed/${post.id.replace(/[^a-zA-Z0-9]/g, '_').slice(0,32)}/400/400`; if (el.src !== fb) el.src = fb; }} />
+          {/* No photo (or a dead one) shows the tile's own gradient rather than
+              a filler photograph of somewhere else. */}
+          {post.image && (
+            <img src={postImageUrl(post.image, 480)} alt="" className="w-full h-full object-cover" loading="lazy"
+              onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+          )}
           {post.isEvent && (
             <div className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-xs font-bold" style={{ background: 'rgba(244,63,94,0.85)', color: 'white', fontSize: 9 }}>
               EVENT

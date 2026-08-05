@@ -1,5 +1,24 @@
 import { describe, it, expect } from 'vitest';
-import { extractEventsFromHtml, extractEmbeddedEvents } from './webCrawler';
+import { extractEventsFromHtml, extractEmbeddedEvents, decodeEntities } from './webCrawler';
+
+describe('decodeEntities', () => {
+  it('decodes the entities publishers escape into their JSON-LD', () => {
+    expect(decodeEntities('Hans Zimmer, John Williams &amp; mehr'))
+      .toBe('Hans Zimmer, John Williams & mehr');
+    expect(decodeEntities('Rock &#39;n&#39; Roll')).toBe("Rock 'n' Roll");
+    expect(decodeEntities('Caf&eacute; Gr&ouml;&szlig;enwahn')).toBe('Café Größenwahn');
+    expect(decodeEntities('19&#x2013;21 Uhr')).toBe('19–21 Uhr');
+  });
+
+  it('handles double-escaped text', () => {
+    expect(decodeEntities('Fish &amp;amp; Chips')).toBe('Fish & Chips');
+  });
+
+  it('leaves ordinary text and unknown entities alone', () => {
+    expect(decodeEntities('Jazz Night')).toBe('Jazz Night');
+    expect(decodeEntities('A &notarealentity; B')).toBe('A &notarealentity; B');
+  });
+});
 
 describe('extractEventsFromHtml', () => {
   it('extracts a single schema.org Event', () => {

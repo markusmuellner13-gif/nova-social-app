@@ -2,7 +2,7 @@
 // Deep pages shift the search centre outward in a ring so the stream keeps
 // going after the first 50 nearby articles are exhausted.
 
-import { ApiPost, makeUser, getImage, proxyImage } from './shared';
+import { ApiPost, makeUser, proxyImage } from './shared';
 
 export interface WikiGeoResult {
   pageid: number;
@@ -270,8 +270,7 @@ export async function fetchCommonsImagesByWikidata(qid: string, max = 6): Promis
 }
 
 export async function wikiToPost(
-  poi: WikiGeoResult, summary: WikiSummary | null, desc: string, city: string,
-  unsplashKey?: string, pexelsKey?: string
+  poi: WikiGeoResult, summary: WikiSummary | null, desc: string, city: string
 ): Promise<ApiPost> {
   // Prefer the article's ORIGINAL photo over the 330px REST thumbnail.
   const wikiImg = summary?.originalimage?.source ?? summary?.thumbnail?.source;
@@ -279,8 +278,10 @@ export async function wikiToPost(
     ?? `https://en.wikipedia.org/wiki/${encodeURIComponent(poi.title.replace(/ /g, '_'))}`;
 
   // Pull several real photos of the landmark for a swipeable gallery. When the
-  // article has 2+ usable photos we lead with them; otherwise fall back to the
-  // single summary thumbnail (then Unsplash/Pexels/picsum) — unchanged behaviour.
+  // article has 2+ usable photos we lead with them; otherwise the single summary
+  // image. An article with no photo at all now yields no photo — asking a stock
+  // library for "<title> <city> landmark" returned a picture of some other
+  // building, which is worse than an honest empty cover.
   const gallery = await fetchWikipediaImages(poi.title).catch(() => []);
   let image: string;
   let images: string[] | undefined;
@@ -288,9 +289,7 @@ export async function wikiToPost(
     images = gallery;
     image = gallery[0];
   } else {
-    image = wikiImg
-      ? proxyImage(wikiImg)
-      : (gallery[0] ?? await getImage(`${poi.title} ${city} landmark`, unsplashKey, pexelsKey, `wiki_${poi.pageid}`));
+    image = wikiImg ? proxyImage(wikiImg) : (gallery[0] ?? '');
   }
 
   return {

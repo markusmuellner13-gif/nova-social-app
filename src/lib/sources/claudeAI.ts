@@ -2,7 +2,7 @@
 // ANTHROPIC_API_KEY with credits is configured. Everything else in the feed
 // works without it.
 
-import { ApiPost, makeUser, getImage, picsumUrl } from './shared';
+import { ApiPost, makeUser, fetchOgImage, proxyImage } from './shared';
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -118,8 +118,7 @@ const CATEGORY_GUIDANCE: Record<string, string> = {
 
 export async function searchRealEventsWithClaude(
   city: string, country: string, today: string, count: number, page: number, category: string, apiKey: string,
-  unsplashKey?: string, pexelsKey?: string, userLat?: number, userLng?: number,
-  tourismFocus = false
+  userLat?: number, userLng?: number, tourismFocus = false
 ): Promise<ApiPost[]> {
   const guidance = CATEGORY_GUIDANCE[category] ?? CATEGORY_GUIDANCE.events;
 
@@ -152,8 +151,7 @@ For each real event you find, extract the exact details from the real event page
   "description": "2-3 sentences about this specific real event",
   "url": "exact URL to buy tickets or find info",
   "category": "${category}",
-  "hashtags": ["#tag1","#tag2","#tag3","#tag4"],
-  "imageQuery": "3-word atmospheric photo search query matching this event type"
+  "hashtags": ["#tag1","#tag2","#tag3","#tag4"]
 }]
 
 IMPORTANT: Only include events you confirmed exist via web search. Do not invent events.
@@ -180,15 +178,19 @@ Return only the raw JSON array, no markdown, no extra text.`;
     const url      = String(ev.url ?? '#');
     const cat      = String(ev.category ?? category);
     const tags     = Array.isArray(ev.hashtags) ? ev.hashtags as string[] : [`#${city}`, '#events'];
-    const imgQ     = String(ev.imageQuery ?? `${cat} ${city} event`);
 
     let eventDateStr = 'Date TBC';
     if (date) { try { eventDateStr = new Date(`${date}T${time || '00:00'}:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); } catch { /* ignore */ } }
 
-    const image = await Promise.race([
-      getImage(imgQ, unsplashKey, pexelsKey, `${city}_${cat}_${page}_${i}`),
-      new Promise<string>(resolve => setTimeout(() => resolve(picsumUrl(`${city}_${cat}_${page}_${i}`)), 4000)),
-    ]);
+    // The event's OWN poster, taken from the page Claude cited (og:image is what
+    // that page hands social crawlers, so it is the real artwork for this
+    // event). Previously this asked a stock library for the model's suggested
+    // `imageQuery` — a category-shaped phrase like "jazz concert night", which
+    // is precisely how two unrelated gigs ended up on the same photograph.
+    // No poster found → no photo.
+    const pageUrl = /^https?:\/\//.test(url) ? url : (/^https?:\/\//.test(website) ? website : '');
+    const og = pageUrl ? await fetchOgImage(pageUrl, 4000) : null;
+    const image = og ? proxyImage(og) : '';
 
     return {
       id: `${tourismFocus ? 'tour' : 'ws'}_${city}_p${page}_${i}_${Date.now()}`,

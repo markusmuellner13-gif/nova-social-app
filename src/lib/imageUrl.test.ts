@@ -67,14 +67,8 @@ describe('upgradeImageUrl — other hosts', () => {
     expect(upgradeImageUrl('https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photo_reference=r&key=k'))
       .toContain('maxwidth=1600');
   });
-  it('raises Unsplash and Pexels render sizes', () => {
-    expect(upgradeImageUrl('https://images.unsplash.com/photo-1?w=1080&h=1350')).toContain('w=1440');
-    expect(upgradeImageUrl('https://images.pexels.com/photos/1/x.jpg?w=1080&h=1350')).toContain('w=1440');
-  });
-  it('raises picsum path dimensions', () => {
-    expect(upgradeImageUrl('https://picsum.photos/seed/abc/1080/1350'))
-      .toBe('https://picsum.photos/seed/abc/1440/1800');
-  });
+  // The stock hosts are no longer upgraded because posts no longer carry them —
+  // `realImage.ts` strips stand-in photography before it reaches a card.
   it('passes unknown hosts, http and junk through unchanged', () => {
     expect(upgradeImageUrl('https://example.com/a.jpg')).toBe('https://example.com/a.jpg');
     expect(upgradeImageUrl('http://example.com/a.jpg')).toBe('http://example.com/a.jpg');
