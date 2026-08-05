@@ -2,11 +2,19 @@
   "crons": [
     {
       "path": "/api/cron/ingest",
-      "schedule": "0 5 * * *"
+      "schedule": "0 */6 * * *"
     },
     {
       "path": "/api/cron/warm",
-      "schedule": "0 6 * * *"
+      "schedule": "30 */6 * * *"
+    },
+    {
+      "path": "/api/cron/ingest-towns",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/push",
+      "schedule": "0 16 * * *"
     }
   ]
 }
