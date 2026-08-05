@@ -172,8 +172,22 @@ export async function createGroup(name: string, description: string, userId: str
   return data as SupabaseGroup;
 }
 
+// Joining is a single server-side call (migration 006). It has to be: looking a
+// group up by code means reading a row you are not yet a member of, and the only
+// way to allow that from the client was a policy that let every signed-in user
+// select EVERY group — names, descriptions and invite codes included. The RPC
+// resolves exactly the one group whose code you already hold, and joins you to
+// it, so nothing leaks about the groups you weren't invited to.
 export async function joinGroup(code: string, userId: string): Promise<SupabaseGroup | null> {
   if (!supabase) return null;
+  const { data, error } = await supabase.rpc('join_group_by_code', { p_code: code.toUpperCase() });
+
+  if (!error) return (data as SupabaseGroup | null) ?? null;
+
+  // PGRST202 = the function isn't in the schema cache, i.e. this project hasn't
+  // run migration 006 yet. Fall back to the old client-side lookup, which still
+  // works there because the permissive policy 006 removes is still in place.
+  if (error.code !== 'PGRST202') { console.error('[supabase/joinGroup]', error); return null; }
   const { data: group } = await supabase.from('groups').select('*').eq('code', code.toUpperCase()).single();
   if (!group) return null;
   await supabase.from('group_members').upsert({ group_id: group.id, user_id: userId });

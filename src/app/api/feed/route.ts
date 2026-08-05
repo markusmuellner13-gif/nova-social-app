@@ -185,7 +185,7 @@ const PLACES_FIRST = new Set(['sightseeing', 'travel']);
 async function placesFromDb(
   category: string, lat: number, lng: number, radius: number,
   count: number, page: number, visiting: boolean, photoBudgetMs: number
-): Promise<{ posts: ApiPost[]; hasMore: boolean } | null> {
+): Promise<{ posts: ApiPost[]; hasMore: boolean; sufficient: boolean } | null> {
   if (!dbReadEnabled || (!lat && !lng)) return null;
   try {
     const rows = await queryEventsNear({
@@ -193,16 +193,29 @@ async function placesFromDb(
       afterIso: new Date().toISOString(), limit: count * 2, offset: page * count,
     });
     const places = mergeDuplicates(rows.filter(p => !p.isEvent)).merged;
-    if (places.length < 4) return null;
+    if (places.length === 0) return null;
+
     const nearest = Math.min(...places.map(p =>
       haversineKm(lat, lng, p.location?.lat ?? 0, p.location?.lng ?? 0)));
-    if (!(nearest <= 12)) return null;
 
     let placed = withDistance(places, lat, lng);
     if (visiting) placed = rankForVisitor(placed);
+
+    // "Sufficient" means this is a page in its own right and we can skip the
+    // live sources entirely. Below the bar we still hand the rows back: they are
+    // real local places, and the streaming path shows them in about a second
+    // instead of leaving the screen empty for the twenty that Overpass takes.
+    // They are NOT good enough to serve as the whole answer, hence the flag.
+    if (places.length < 4 || nearest > 12) {
+      // No photo backfill on the seed — it is about to be replaced, and the
+      // eventsDb read path has already stripped any stand-in image.
+      return { posts: placed.slice(0, count), hasMore: false, sufficient: false };
+    }
+
     return {
       posts: await finalizePhotos(placed.slice(0, count), photoBudgetMs),
       hasMore: places.length > count,
+      sufficient: true,
     };
   } catch {
     return null;
@@ -299,6 +312,20 @@ function rankAndMix(posts: ApiPost[], count: number, category = ''): ApiPost[] {
 // expensive Ticketmaster/Claude/Overpass work runs once per area+category, not
 // once per user. No-ops transparently when Upstash isn't configured.
 export async function GET(request: NextRequest) {
+  // `stream=1` asks for the same feed as NDJSON, delivered in pieces as it is
+  // computed rather than in one block at the end. Everything else — the ingest
+  // cron, next-page prefetch, /api/events, any external caller — keeps getting
+  // the plain JSON body, unchanged.
+  if (new URL(request.url).searchParams.get('stream') === '1') return streamFeed(request);
+  return resolveFeed(request);
+}
+
+// A sink the compute path can push early results into. Called at most once per
+// stage, with whatever posts exist at that moment; `null` when nobody is
+// streaming, in which case the compute path behaves exactly as it always has.
+type PartialSink = (partial: { posts: ApiPost[]; sources: string[] }) => void;
+
+async function resolveFeed(request: NextRequest, onPartial?: PartialSink) {
   const { searchParams } = new URL(request.url);
   const noStore = searchParams.get('fresh') === '1';
 
@@ -410,7 +437,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const res = await computeFeed(request);
+  const res = await computeFeed(request, onPartial);
   try {
     const payload = await res.clone().json() as { posts?: unknown[] };
     const got = Array.isArray(payload.posts) ? payload.posts.length : 0;
@@ -431,7 +458,76 @@ export async function GET(request: NextRequest) {
   return res;
 }
 
-async function computeFeed(request: NextRequest) {
+// ── Cold-start streaming ─────────────────────────────────────────────────────
+// A warm feed is served from Redis or Postgres in about a second. A COLD one --
+// a city nobody has opened yet -- has to wait on Overpass, which measures at
+// 19-22s, and then on the photo backfill. All of that used to arrive as a single
+// response at the end, so the user watched a spinner for twenty seconds and the
+// client's own 22s abort was landing right on top of the answer.
+//
+// The work is not made faster here; it is made VISIBLE. The response is NDJSON,
+// one JSON object per line:
+//
+//   {"type":"meta",  ...}            immediately, before any upstream call
+//   {"type":"posts", "posts":[...]}  0+ times, each time a stage has real posts
+//   {"type":"done",  ...}            always last, and always the complete body
+//
+// The `done` line is byte-for-byte the body the non-streaming route returns, so
+// a client may ignore every line before it and behave exactly as it does today.
+function streamFeed(request: NextRequest): Response {
+  const encoder = new TextEncoder();
+  const { searchParams } = new URL(request.url);
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let closed = false;
+      const write = (obj: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'));
+        } catch {
+          closed = true; // client hung up; let the compute finish and cache
+        }
+      };
+
+      // Sent before any network call, so the client can drop its skeleton and
+      // name the city it is loading straight away.
+      write({
+        type: 'meta',
+        city:     searchParams.get('city') || '',
+        country:  searchParams.get('country') || '',
+        category: searchParams.get('category') || 'events',
+      });
+
+      try {
+        const res  = await resolveFeed(request, partial => write({ type: 'posts', ...partial }));
+        const body = await res.json();
+        write({ type: 'done', ...body });
+      } catch (err) {
+        console.error('[feed/stream]', err);
+        // The client keys its empty state off `reason`, so failing here must
+        // still produce a well-formed terminal line rather than a truncated
+        // stream it would have to guess about.
+        write({ type: 'done', posts: [], hasMore: false, reason: 'stream_failed' });
+      } finally {
+        closed = true;
+        try { controller.close(); } catch { /* already closed */ }
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type':  'application/x-ndjson; charset=utf-8',
+      'Cache-Control': 'no-store',
+      // Without this a proxy may buffer the whole body and hand it over in one
+      // piece at the end -- which is precisely the behaviour being fixed.
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
+
+async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
   const { searchParams } = new URL(request.url);
 
   const cityParam    = (searchParams.get('city')    ?? '').slice(0, 100).replace(/[<>'"\\]/g, '');
@@ -474,12 +570,17 @@ async function computeFeed(request: NextRequest) {
     // where its places come from — about a second instead of twenty, and it
     // keeps working when Overpass doesn't (which, measured, is often).
     const dbFirst = await placesFromDb(category, lat, lng, radius, count, page, visiting, photoBudgetMs);
-    if (dbFirst) {
+    if (dbFirst?.sufficient) {
       return NextResponse.json(
         { posts: dbFirst.posts, city, country, sources: ['db'], hasMore: dbFirst.hasMore },
         { headers: { 'Cache-Control': 'no-store', 'x-nova-cache': 'DB' } }
       );
     }
+    // The DB knows a few places here but not a full page of them. Put those on
+    // screen now rather than making the user watch a spinner for the whole
+    // Overpass round-trip; the complete list replaces them when it lands.
+    if (dbFirst && dbFirst.posts.length > 0) onPartial?.({ posts: dbFirst.posts, sources: ['db'] });
+
     try {
       const { posts, hasMore } = await osmPosts(lat, lng, city, category, page, radius, count);
       if (posts.length > 0) {
@@ -487,6 +588,12 @@ async function computeFeed(request: NextRequest) {
         // A visitor wants what's WORTH going to; a local wants what's CLOSE.
         // Nearest-first is why "where to eat in Barcelona" answered McDonald's.
         if (visiting) placed = rankForVisitor(placed);
+        // The places are real and correctly ordered at this point; only their
+        // photos are still being chased. On a cold city that ordering cost
+        // Overpass ~20 seconds, and holding it back for another few seconds of
+        // photo lookup meant the user saw nothing at all for the whole time.
+        // Send the cards now — the photo pass below re-sends them filled in.
+        onPartial?.({ posts: placed, sources: ['osm'] });
         const final = await finalizePhotos(placed, photoBudgetMs);
         // Write-through: the first visitor to a city pays Overpass's 20 seconds
         // once; everyone after is served from Postgres in about a second, and
@@ -672,6 +779,10 @@ async function computeFeed(request: NextRequest) {
       }
     } catch { /* fall back to empty */ }
   }
+
+  // Same idea as the place path: the feed is ranked and final in everything but
+  // its pictures, so it goes out before the photo backfill rather than after.
+  if (final.length > 0) onPartial?.({ posts: final, sources });
 
   const finalPosts = await finalizePhotos(final, photoBudgetMs);
 
