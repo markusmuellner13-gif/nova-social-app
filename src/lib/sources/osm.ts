@@ -10,8 +10,7 @@
 // tags — no LLM in the loop.
 
 import { ApiPost, makeUser, proxyImage } from './shared';
-import { placesBudgetExceeded, notePlacesCall } from '@/lib/placesBudget';
-import { fetchCommonsImagesByWikidata } from './wikipedia';
+import { findVenuePhoto, osmTagImage } from './venuePhoto';
 
 export interface OverpassElement {
   type: 'node' | 'way' | 'relation';
@@ -186,83 +185,6 @@ export async function fetchOverpassPlaces(lat: number, lng: number, category: st
   throw lastErr;
 }
 
-// ── og:image lookup — the venue's real photo from its own website ──────────
-// Best-effort with a short timeout; cached for the warm lambda's lifetime.
-const ogImageCache = new Map<string, string | null>();
-
-export async function fetchOgImage(website: string): Promise<string | null> {
-  if (ogImageCache.has(website)) return ogImageCache.get(website) ?? null;
-  let result: string | null = null;
-  try {
-    const res = await fetch(website, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Nova-App/2.0)' },
-      signal: AbortSignal.timeout(2500),
-      redirect: 'follow',
-    });
-    if (res.ok && (res.headers.get('content-type') ?? '').includes('html')) {
-      // Read only the head-ish part — og tags live early in the document
-      const html = (await res.text()).slice(0, 60_000);
-      const m = html.match(/<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i)
-             ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i);
-      const url = m?.[1];
-      if (url && /^https?:\/\//.test(url)) result = url;
-    }
-  } catch { /* no og image */ }
-  ogImageCache.set(website, result);
-  return result;
-}
-
-// ── Google Places photo (gated on GOOGLE_PLACES_API_KEY) ──────────────────────
-// The highest-quality "real photo of the actual venue" source. The key is read
-// from env and never reaches the client: we resolve the Places photo redirect
-// server-side and return the final googleusercontent URL. No key → returns null.
-const placePhotoCache = new Map<string, string | null>();
-
-export async function fetchGooglePlacePhoto(name: string, lat: number, lng: number): Promise<string | null> {
-  const key = process.env.GOOGLE_PLACES_API_KEY;
-  if (!key) return null;
-  const cacheKey = `${name}|${lat.toFixed(3)}|${lng.toFixed(3)}`;
-  if (placePhotoCache.has(cacheKey)) return placePhotoCache.get(cacheKey) ?? null;
-
-  // Respect the soft daily spend cap (PLACES_DAILY_BUDGET). Once hit, we stop
-  // calling Places and fall back to the free photo sources — cost stays bounded.
-  if (await placesBudgetExceeded()) return null;
-
-  let result: string | null = null;
-  try {
-    await notePlacesCall();
-    const findUrl =
-      `https://maps.googleapis.com/maps/api/place/findplacefromtext/json` +
-      `?input=${encodeURIComponent(name)}&inputtype=textquery` +
-      `&locationbias=point:${lat},${lng}&fields=photos&key=${key}`;
-    const findRes = await fetch(findUrl, { signal: AbortSignal.timeout(3000) });
-    if (findRes.ok) {
-      const d = await findRes.json() as { candidates?: { photos?: { photo_reference?: string }[] }[] };
-      const ref = d.candidates?.[0]?.photos?.[0]?.photo_reference;
-      if (ref) {
-        const photoUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=1600&photo_reference=${ref}&key=${key}`;
-        const photoRes = await fetch(photoUrl, { redirect: 'manual', signal: AbortSignal.timeout(3000) });
-        result = photoRes.headers.get('location');
-      }
-    }
-  } catch { /* fall through to og:image / stock */ }
-  placePhotoCache.set(cacheKey, result);
-  return result;
-}
-
-// ── A photo straight from OSM's own tags (free, real, no extra request) ───────
-// Many landmarks, churches, museums and parks carry an `image` URL or a
-// `wikimedia_commons` file reference right in OpenStreetMap.
-function osmTagImage(tags: Record<string, string>): string | null {
-  const direct = tags.image ?? tags['image:0'] ?? '';
-  if (/^https?:\/\/\S+\.(jpe?g|png|webp|gif)/i.test(direct)) return direct;
-  const commons = tags.wikimedia_commons ?? tags['image:wikimedia'] ?? '';
-  if (commons.startsWith('File:')) {
-    const file = commons.slice('File:'.length);
-    return `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(file)}?width=1600`;
-  }
-  return null;
-}
 
 // ── Human-readable type + a free, varied description from the OSM tags ─────────
 // No LLM: we read the place's real tags and write a natural caption ourselves.
@@ -535,40 +457,25 @@ export async function overpassToPost(
   // Caption: a free, tag-written description (no LLM) unless the caller supplied one.
   const desc = description && description.trim() ? description : describePlace(tags, city, el.id);
 
-  // A photo OF THIS PLACE, best source first:
-  //   0. Wikimedia gallery for landmarks linked to Wikidata (swipeable) →
-  //   1. OSM's own image/wikimedia tag → 2. Google Places (gated) →
-  //   3. the venue's own og:image → 4. no photo.
+  // A photo OF THIS PLACE. The full cascade lives in `venuePhoto.ts`: its own
+  // OSM image tag → its own Wikidata entity → Google Places → its own website →
+  // its brand's entity. Nothing keyword-matched, so whatever comes back is
+  // attributable to this venue.
   //
-  // There is no step 5. The old one asked Unsplash/Pexels for the CATEGORY
-  // ("cozy restaurant interior") and fell through to picsum, so a place with no
-  // photo of its own was handed someone else's — the same twenty photos shared
-  // out across every restaurant in every city. An honest empty state (a designed
-  // cover from `PostImage`) beats a photo of a room this place has never seen.
+  // Only 46% of real OSM venues carry any photo lead in their tags (30% outside
+  // Vienna), which is why Places sits in the middle of the cascade rather than
+  // last — it is the one source that knows a photo of nearly any named business.
   let image: string | null = osmTagImage(tags);
   let images: string[] | undefined;
 
-  // Landmarks/parks/peaks linked to a Wikidata entity get a real, multi-photo
-  // Wikimedia gallery — the same treatment sightseeing POIs get. Time-boxed
-  // inside the fetch so it never stalls a page.
-  if (tryRealPhoto && tags.wikidata) {
-    const gallery = await fetchCommonsImagesByWikidata(tags.wikidata).catch(() => []);
-    if (gallery.length >= 2) {
-      images = gallery;
-      image = gallery[0];
-    } else if (gallery.length === 1 && !image) {
-      image = gallery[0];
+  if (!image && tryRealPhoto) {
+    const found = await findVenuePhoto({ name, lat: elLat, lng: elLng, tags }).catch(() => null);
+    if (found) {
+      image = found.image;
+      images = found.gallery;
     }
   }
-
   if (image && image.includes('upload.wikimedia.org')) image = proxyImage(image);
-  if (!image && tryRealPhoto) {
-    image = await fetchGooglePlacePhoto(name, elLat, elLng);
-  }
-  if (!image && tryRealPhoto && website) {
-    image = await fetchOgImage(website);
-    if (image) image = proxyImage(image);
-  }
 
   const osmUrl = `https://www.openstreetmap.org/${el.type}/${el.id}`;
   const isFoodCat = category === 'restaurants' || category === 'food';

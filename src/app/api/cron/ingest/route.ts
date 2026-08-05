@@ -203,6 +203,11 @@ export async function GET(request: NextRequest) {
       const params = new URLSearchParams({
         city, country, lat: String(lat), lng: String(lng),
         page: '0', radius: '25', count: '12', category, fresh: '1',
+        // Ingest has a 24s window per city and its result is STORED, so it can
+        // afford to chase down a real photo for every post. A visitor's request
+        // gets the short budget; this pass is what makes the stored row arrive
+        // with a picture already on it.
+        photoBudgetMs: '12000',
       });
       const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(24000) });
       if (!res.ok) { errors.push(`${city}/${category}:${res.status}`); processed++; continue; }

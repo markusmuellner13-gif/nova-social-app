@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ApiPost, dedupePosts, dropExpired, withDistance, todayStr, haversineKm } from '@/lib/sources/shared';
-import { enforceRealImages } from '@/lib/sources/realImage';
+import { finalizePhotos } from '@/lib/sources/venuePhoto';
 import { resolveRequestGeo } from '@/lib/sources/geocode';
 import { fetchTicketmaster, tmEventToPost, TM_CATEGORY_MAP } from '@/lib/sources/ticketmaster';
 import { fetchEventbriteEvents } from '@/lib/sources/eventbrite';
@@ -184,7 +184,7 @@ const PLACES_FIRST = new Set(['sightseeing', 'travel']);
  */
 async function placesFromDb(
   category: string, lat: number, lng: number, radius: number,
-  count: number, page: number, visiting: boolean
+  count: number, page: number, visiting: boolean, photoBudgetMs: number
 ): Promise<{ posts: ApiPost[]; hasMore: boolean } | null> {
   if (!dbReadEnabled || (!lat && !lng)) return null;
   try {
@@ -201,7 +201,7 @@ async function placesFromDb(
     let placed = withDistance(places, lat, lng);
     if (visiting) placed = rankForVisitor(placed);
     return {
-      posts: enforceRealImages(placed.slice(0, count)),
+      posts: await finalizePhotos(placed.slice(0, count), photoBudgetMs),
       hasMore: places.length > count,
     };
   } catch {
@@ -302,6 +302,14 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const noStore = searchParams.get('fresh') === '1';
 
+  // How long the photo backfill may spend chasing a real picture for posts that
+  // arrive without one. A visitor gets a short budget so the feed stays fast;
+  // the ingest cron asks for much more, because its result is stored and every
+  // later reader gets the photo for free. Clamped so a caller can't stall us.
+  const photoBudgetMs = Math.max(0, Math.min(
+    20_000, parseInt(searchParams.get('photoBudgetMs') || '3500', 10) || 3500
+  ));
+
   const rawCatKey = searchParams.get('category') ?? 'events';
   // A visitor and a local get different ORDERINGS of the same city, so they must
   // not share a cache entry — otherwise whoever asks first decides what everyone
@@ -389,7 +397,7 @@ export async function GET(request: NextRequest) {
             const payload = {
               // enforceRealImages guarantees every photo is of its own post's
               // subject, and that no two UNRELATED cards share one.
-              posts: enforceRealImages(dbFinal),
+              posts: await finalizePhotos(dbFinal, photoBudgetMs),
               city: searchParams.get('city') || '',
               country: searchParams.get('country') || '',
               sources: ['db'], hasMore: dbPosts.length >= count,
@@ -427,6 +435,11 @@ async function computeFeed(request: NextRequest) {
   // than resolved from GPS — i.e. the user is planning a visit, not standing
   // there. It changes what "best" means: notable over near.
   const visiting = searchParams.get('visiting') === '1';
+  // See the note on the same parse in GET — a visitor gets a short photo-backfill
+  // budget, the ingest cron asks for a long one because its result is stored.
+  const photoBudgetMs = Math.max(0, Math.min(
+    20_000, parseInt(searchParams.get('photoBudgetMs') || '3500', 10) || 3500
+  ));
 
   // Explicit coords → IP geolocation (free Vercel headers) → Vienna default;
   // plus the city guard so posts are never labelled "Unknown City"
@@ -449,7 +462,7 @@ async function computeFeed(request: NextRequest) {
     // Our own database first. Once a city has been fetched even once, this is
     // where its places come from — about a second instead of twenty, and it
     // keeps working when Overpass doesn't (which, measured, is often).
-    const dbFirst = await placesFromDb(category, lat, lng, radius, count, page, visiting);
+    const dbFirst = await placesFromDb(category, lat, lng, radius, count, page, visiting, photoBudgetMs);
     if (dbFirst) {
       return NextResponse.json(
         { posts: dbFirst.posts, city, country, sources: ['db'], hasMore: dbFirst.hasMore },
@@ -463,7 +476,7 @@ async function computeFeed(request: NextRequest) {
         // A visitor wants what's WORTH going to; a local wants what's CLOSE.
         // Nearest-first is why "where to eat in Barcelona" answered McDonald's.
         if (visiting) placed = rankForVisitor(placed);
-        const final = enforceRealImages(placed);
+        const final = await finalizePhotos(placed, photoBudgetMs);
         // Write-through: the first visitor to a city pays Overpass's 20 seconds
         // once; everyone after is served from Postgres in about a second, and
         // the tab keeps working even when Overpass is down.
@@ -649,7 +662,7 @@ async function computeFeed(request: NextRequest) {
     } catch { /* fall back to empty */ }
   }
 
-  const finalPosts = enforceRealImages(final);
+  const finalPosts = await finalizePhotos(final, photoBudgetMs);
 
   // Everything we just computed live goes into our own database, so the next
   // person asking about this city — through the feed, the chatbot or the trip
