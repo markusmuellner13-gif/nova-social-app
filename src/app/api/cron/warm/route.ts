@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isCronRequest, cronSecret } from '@/lib/cronAuth';
 import { cacheEnabled } from '@/lib/serverCache';
 
 export const maxDuration = 300; // warming many cities can take a while
@@ -31,12 +32,11 @@ const CATEGORIES = ['events', 'music', 'restaurants', 'sightseeing', 'community'
 
 export async function GET(request: NextRequest) {
   // Protect the endpoint: Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`.
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = request.headers.get('authorization');
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-    }
+  // Fails CLOSED when no secret is configured — see src/lib/cronAuth.ts. This
+  // used to skip auth entirely if CRON_SECRET was unset, which would have made
+  // the endpoint public the moment that variable went missing.
+  if (!isCronRequest(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
 
   if (!cacheEnabled) {
@@ -65,6 +65,11 @@ export async function GET(request: NextRequest) {
 
   // Fire the daily "events near you" push digest as a sub-step (keeps us to two
   // Vercel cron entries). Best-effort + gated — no-ops without VAPID keys.
+  // This job chains into /api/cron/push and /api/cron/brain, both of which now
+  // fail CLOSED — so the secret must actually be forwarded. Reading it back from
+  // cronAuth (rather than the local variable this used to close over) keeps the
+  // two in lockstep: whatever key authenticated us is the key we pass on.
+  const secret = cronSecret();
   const cronHeaders = secret ? { Authorization: `Bearer ${secret}` } : undefined;
   let pushResult: unknown = null;
   try {

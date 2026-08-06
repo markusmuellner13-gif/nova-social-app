@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isCronRequest } from '@/lib/cronAuth';
 import { dbWriteEnabled, upsertEvents, postToRow } from '@/lib/eventsDb';
 import { searchRealEventsWithClaude } from '@/lib/sources/claudeAI';
 import { dropExpired, dedupePosts, todayStr } from '@/lib/sources/shared';
@@ -44,12 +45,9 @@ const TOWNS: [string, string, number, number][] = [
 ];
 
 export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = request.headers.get('authorization');
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-    }
+  // Fails CLOSED when no secret is configured — see src/lib/cronAuth.ts.
+  if (!isCronRequest(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return NextResponse.json({ ok: false, note: 'no ANTHROPIC_API_KEY' });

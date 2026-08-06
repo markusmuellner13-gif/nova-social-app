@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isCronRequest } from '@/lib/cronAuth';
 import { loadGlobalModel, saveGlobalModel } from '@/lib/brain/store';
 import { isUsable, MODEL_VERSION } from '@/lib/brain/ranker';
 import { getAllSourceStats } from '@/lib/sourceStats';
@@ -33,17 +34,10 @@ const KNOWN_SOURCES = [
   'tm', 'eb', 'sg', 'osm', 'wiki', 'nova', 'ai', 'db', 'crawler',
 ];
 
-function authorised(req: NextRequest): boolean {
-  const expected = process.env.CRON_SECRET ?? process.env.ADMIN_SECRET;
-  if (!expected) return false;
-  const header = req.headers.get('authorization') ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-  if (token.length !== expected.length) return false;
-  // Constant-time-ish compare so the secret can't be probed byte by byte.
-  let diff = 0;
-  for (let i = 0; i < token.length; i++) diff |= token.charCodeAt(i) ^ expected.charCodeAt(i);
-  return diff === 0;
-}
+// This route's own fail-closed check is now the shared one in src/lib/cronAuth.ts
+// — it was the only cron route that got this right, so the helper is modelled on
+// it and the other four were brought up to match.
+const authorised = isCronRequest;
 
 export async function GET(req: NextRequest) {
   // Vercel's own cron invocations carry the secret too; anything else is denied.

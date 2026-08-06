@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isCronRequest } from '@/lib/cronAuth';
 import { cacheEnabled, cacheScanKeys, cacheGet, cacheSet, cacheDelete } from '@/lib/serverCache';
 import { webPushEnabled, sendPush, PushSub } from '@/lib/webpush';
 import { dbReadEnabled, queryTopEventsNear } from '@/lib/eventsDb';
@@ -58,12 +59,11 @@ function inWindow(hour: number, [start, end]: number[]): boolean {
 }
 
 export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = request.headers.get('authorization');
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-    }
+  // Fails CLOSED when no secret is configured — see src/lib/cronAuth.ts. This
+  // route SENDS PUSH NOTIFICATIONS to real users, so an unauthenticated caller
+  // reaching it is the worst case of the whole fail-open family.
+  if (!isCronRequest(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
   if (!webPushEnabled) {
     return NextResponse.json({ ok: false, sent: 0, note: 'web push disabled (set NEXT_PUBLIC_VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY)' });
