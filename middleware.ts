@@ -19,7 +19,7 @@ import { Redis } from '@upstash/redis';
 // hit from rotating provider IPs, so IP throttling would wrongly block them.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Tier = 'auth' | 'ai' | 'write' | 'read' | 'asset';
+type Tier = 'auth' | 'login' | 'ai' | 'write' | 'read' | 'asset';
 
 // Requests allowed per minute, per IP, per tier.
 const TIER_LIMITS: Record<Tier, number> = {
@@ -28,6 +28,16 @@ const TIER_LIMITS: Record<Tier, number> = {
   // defence against guessing it must not be the same 15/min a checkout gets.
   // 5/min turns even an optimistic online search into millions of years.
   auth:  5,
+  // /api/auth/* — the Supabase credential endpoints, proxied through this origin
+  // precisely so they land here (see src/lib/authProxy.ts). Before that they went
+  // browser → supabase.co and middleware never saw a single login attempt.
+  //
+  // 20/min is deliberately not tighter: carrier-grade NAT puts thousands of real
+  // users behind one address, and a per-IP limit strict enough to stop a botnet
+  // would lock out an entire mobile network. The per-IP limit here is the blunt
+  // instrument; the sharp one is the per-ACCOUNT exponential backoff inside the
+  // route, which tracks the account being attacked rather than the IP doing it.
+  login: 20,
   ai:    20,   // /api/chat, /api/feed, /api/events — paid upstreams
   write: 15,   // /api/business/checkout, /api/account/*, /api/push/* — mutations
   read:  60,   // /api/geocode, /api/track, /api/sponsored — cheap
@@ -51,6 +61,10 @@ function isExcluded(pathname: string): boolean {
 
 function tierFor(pathname: string): Tier {
   if (pathname.startsWith('/api/admin')) return 'auth';
+  // Must be checked before the /api/account rule below — different prefix, but
+  // keeping them adjacent makes the distinction obvious: /api/auth is credential
+  // traffic, /api/account is an authenticated user acting on their own data.
+  if (pathname.startsWith('/api/auth')) return 'login';
   if (pathname.startsWith('/api/image-proxy')) return 'asset';
   if (
     pathname.startsWith('/api/chat') ||
@@ -74,6 +88,7 @@ try {
     const redis = new Redis({ url, token });
     limiters = {
       auth:  new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.auth,  '1 m'), prefix: '@nova/rl/auth',  analytics: false }),
+      login: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.login, '1 m'), prefix: '@nova/rl/login', analytics: false }),
       ai:    new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.ai,    '1 m'), prefix: '@nova/rl/ai',    analytics: false }),
       write: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.write, '1 m'), prefix: '@nova/rl/write', analytics: false }),
       read:  new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.read,  '1 m'), prefix: '@nova/rl/read',  analytics: false }),
@@ -128,7 +143,11 @@ function corsHeaders(origin: string): Record<string, string> {
   return {
     'Access-Control-Allow-Origin':  origin,
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-admin-secret',
+    // `apikey` and `x-client-info` are sent by supabase-js on every auth call.
+    // Since the credential endpoints are now proxied through this origin
+    // (src/lib/authProxy.ts), omitting them would fail the native app's CORS
+    // preflight and break sign-in on device while working fine on the web.
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey, x-client-info, x-admin-secret',
     'Access-Control-Max-Age':       '86400',
     'Vary':                         'Origin',
   };

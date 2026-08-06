@@ -38,7 +38,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const updateProfile = useCallback(async (updates: Partial<SupabaseProfile>) => {
     if (!supabase || !user) return;
-    const merged = { id: user.id, ...(profile ?? {}), ...updates };
+    // `username` is immutable server-side (migration 007) and upsertProfile
+    // strips it anyway; spreading the existing profile in is what used to send
+    // it back on every edit.
+    const merged = { ...(profile ?? {}), ...updates, id: user.id };
     const result = await upsertProfile(merged as SupabaseProfile);
     if (result) setProfile(result as SupabaseProfile);
   }, [user, profile]);
@@ -59,20 +62,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(s?.user ?? null);
 
       if (s?.user) {
-        // Ensure profile exists
-        const existing = await getProfile(s.user.id);
-        if (!existing) {
-          const username = s.user.user_metadata?.username
-            ?? s.user.email?.split('@')[0]
-            ?? `user_${s.user.id.slice(0, 6)}`;
-          await upsertProfile({
-            id: s.user.id,
-            username,
-            display_name: s.user.user_metadata?.full_name ?? username,
-            avatar_url: s.user.user_metadata?.avatar_url,
-          });
-        }
-        setProfile(existing ?? await getProfile(s.user.id));
+        // The profile is created by the on_auth_user_created trigger, inside the
+        // same transaction as the auth.users row (migration 007), so by the time
+        // a session exists the profile does too.
+        //
+        // This used to create it from the client instead, and that was the bug:
+        // a username collision made the insert fail with 23505, the failure was
+        // console.error'd and dropped, and the account stayed permanently
+        // profile-less while still being able to sign in. Client-side creation
+        // is gone — a single retry covers a cold read, and nothing here invents
+        // a username any more.
+        let p = await getProfile(s.user.id);
+        if (!p) p = await getProfile(s.user.id);
+        setProfile(p);
       } else {
         setProfile(null);
       }
