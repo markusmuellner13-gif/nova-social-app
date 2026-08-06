@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isCronRequest } from '@/lib/cronAuth';
 import { dbWriteEnabled, upsertEvents, purgeExpiredEvents, postToRow } from '@/lib/eventsDb';
 import { validateBatch } from '@/lib/eventValidation';
 import { recordSourceYield } from '@/lib/sourceStats';
@@ -143,12 +144,9 @@ function sourceOf(id: string): string {
 }
 
 export async function GET(request: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = request.headers.get('authorization');
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-    }
+  // Fails CLOSED when no secret is configured — see src/lib/cronAuth.ts.
+  if (!isCronRequest(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
   if (!dbWriteEnabled) {
     return NextResponse.json({ ok: false, ingested: 0, note: 'DB writes disabled (set SUPABASE_SERVICE_ROLE_KEY)' });
