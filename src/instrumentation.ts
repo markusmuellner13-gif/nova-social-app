@@ -12,6 +12,29 @@ export async function register() {
       dsn,
       tracesSampleRate: 0.1,
       environment: process.env.VERCEL_ENV || 'development',
+      // Never attach request bodies, headers, cookies or IPs to an event.
+      // This is the SDK default, but it is set explicitly because it is now
+      // load-bearing: /api/auth/[...path] proxies Supabase's credential
+      // endpoints, so a plaintext password is briefly present in a request body
+      // on this server. If an unhandled error there ever attached request data,
+      // that password would be shipped to Sentry. A silent default is too thin a
+      // thread to hang that on.
+      sendDefaultPii: false,
+      beforeSend(event) {
+        // Belt and braces: strip any request payload that reached the event by
+        // another route (integration change, manual captureException with
+        // context, a future SDK default flip).
+        if (event.request) {
+          delete event.request.data;
+          delete event.request.cookies;
+          if (event.request.headers) {
+            delete event.request.headers.authorization;
+            delete event.request.headers.apikey;
+            delete event.request.headers.cookie;
+          }
+        }
+        return event;
+      },
     });
   }
 }

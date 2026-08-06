@@ -215,6 +215,59 @@ endpoints rather than the user's, so its own per-IP limits are less useful on
 them. The real client IP is forwarded in `X-Forwarded-For`, but Supabase may not
 honour it. Nova's own two layers are the compensating control.
 
+## 3c. Where personal data actually lives — audited 2026-08-06
+
+**Passwords.** Nova never stores one, anywhere. There is no password column in
+any table we own; Supabase holds bcrypt hashes in `auth.users`. Verified: the
+`auth` schema is **not exposed by PostgREST** — an anon request for it returns
+`PGRST106 "Only the following schemas are exposed: public, graphql_public"`. So
+emails and password hashes cannot be read through the API with the public key,
+which is the thing that key would otherwise be dangerous for.
+
+**One honest change:** since login is now proxied for rate limiting, a plaintext
+password is briefly present in a request body **on our own server** on its way to
+Supabase. It is never logged, never stored, and only held for the duration of the
+forward. This is not a meaningful shift in trust — the Vercel deployment already
+serves the JavaScript that collects the password, so a compromise there could
+capture it regardless — but it is a real change and worth knowing. Sentry is now
+explicitly configured with `sendDefaultPii: false` plus a `beforeSend` that strips
+request bodies, cookies and auth headers, so an unhandled error in that route
+cannot ship a password to an error tracker.
+
+**Emails.** Held only in `auth.users` (not API-readable, see above). The `profiles`
+table has no email column — confirmed against the live schema. One partial
+exposure to be aware of: for a Google sign-up with no chosen username, the
+username is derived from the email's local part, and usernames are public. So
+`markus@gmail.com` may become the public handle `markus`. The domain is never
+exposed, but the local part is. That is normal for social apps; noted because it
+is the one place any part of an email becomes public.
+
+**Secrets in the codebase.** Verified clean:
+
+- No `.env` file has ever been committed — checked the **entire** git history
+  (`git log --all --diff-filter=A`), not just the current tree.
+- No hardcoded keys in `src/`, `scripts/`, `middleware.ts` or `next.config.ts`.
+- Every `NEXT_PUBLIC_*` variable is one that is *designed* to be public: the
+  Supabase anon key, the Turnstile **site** key, the VAPID **public** key, the
+  Sentry DSN, AdSense IDs. No secret is exposed to the browser.
+- No client component references `SERVICE_ROLE`, `CRON_SECRET`, `ADMIN_SECRET`,
+  `STRIPE_SECRET` or `ANTHROPIC_API_KEY`.
+
+Note that the Supabase anon key being public is **by design and unavoidable** —
+the browser must authenticate to Supabase somehow. It is safe precisely because
+RLS decides what it can reach. The anon key is a door handle, not a lock.
+
+**localStorage encryption is not what it looks like.** `AppContext` AES-GCM
+encrypts persisted app state — but stores the key in localStorage directly
+beside the ciphertext (`nova_key` next to `nova_enc`). Anything that can read one
+can read the other, so this stops nobody: not XSS, not a malicious extension, not
+someone with the unlocked device. It is not a *vulnerability* (the data is the
+user's own preferences and saved posts, on their own device, and it is no worse
+than plaintext) but it should not be counted as protection. **The real defence
+against script-based theft is the CSP**, which is genuinely hardened — nonce +
+`strict-dynamic`, so an injected `<script>` does not execute. No credentials are
+kept in this store; Supabase session tokens are managed by supabase-js.
+
 ## 4. Residual risks, stated honestly
 
 - **Every profile is publicly dumpable.** `profiles` has `SELECT using (true)`,
