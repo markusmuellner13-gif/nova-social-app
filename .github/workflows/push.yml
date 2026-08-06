@@ -54,6 +54,20 @@ jobs:
             else slot="auto"; fi
           fi
           echo "Sending push slot=$slot"
-          curl -s -m 60 -H "Authorization: Bearer $CRON_SECRET" \
-            "$BASE_URL/api/cron/push?slot=$slot" | head -c 500 || true
+          # Check the status, don't just print the body. `curl -s` exits 0 on a
+          # 401, so before this the job went green while sending zero digests —
+          # see the 2026-08-06 note in ingest.yml. A dead notification pipeline is
+          # invisible from the outside: nobody reports the push they never got.
+          code=$(curl -s -m 60 -H "Authorization: Bearer $CRON_SECRET" \
+            -o body.json -w '%{http_code}' "$BASE_URL/api/cron/push?slot=$slot" || echo 000)
+          echo "HTTP $code"
+          head -c 500 body.json || true
           echo ""
+          if [ "$code" = "401" ] || [ "$code" = "403" ]; then
+            echo "::error::HTTP $code from /api/cron/push — the CRON_SECRET repo secret no longer matches the CRON_SECRET env var in Vercel. Reset both to the same value."
+            exit 1
+          fi
+          if [ "$code" != "200" ]; then
+            echo "::error::/api/cron/push returned HTTP $code — no digest was sent for slot=$slot."
+            exit 1
+          fi
