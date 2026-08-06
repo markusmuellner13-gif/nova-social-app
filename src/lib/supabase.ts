@@ -1,12 +1,20 @@
 'use client';
 
 import { createClient } from '@supabase/supabase-js';
+import { makeAuthProxyFetch } from './authProxy';
 
 const url  = process.env.NEXT_PUBLIC_SUPABASE_URL  ?? '';
 const key  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 // Returns null if Supabase is not configured — app gracefully falls back to local state
-export const supabase = url && key ? createClient(url, key) : null;
+//
+// The custom fetch routes ONLY the credential endpoints (sign-in, sign-up, and
+// the two email-sending ones) through /api/auth/*, so Nova's middleware and the
+// per-account backoff can see them. Everything else — PostgREST, realtime, token
+// refresh — goes straight to Supabase exactly as before. See src/lib/authProxy.ts.
+export const supabase = url && key
+  ? createClient(url, key, { global: { fetch: makeAuthProxyFetch(url) } })
+  : null;
 
 export type SupabaseProfile = {
   id: string;

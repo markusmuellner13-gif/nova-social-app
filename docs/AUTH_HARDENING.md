@@ -144,23 +144,76 @@ API keys available here.
    This is Supabase's own server-side HIBP check. Our client-side one is a good
    experience; this one is the enforcement.
 
-4. **Authentication → Attack Protection → CAPTCHA → Enable, provider Turnstile**
-   Secret key `TURNSTILE_SECRET_KEY` is already in Vercel and the widget is
-   already live on the form. **Signup is only actually protected once this toggle
-   is on** — `/auth/v1/settings` does not expose captcha state, so this cannot be
-   verified from outside. It remains the one unverified item.
+4. ~~**Attack Protection → CAPTCHA**~~ — **already on, confirmed 2026-08-06.**
+   This was previously listed as the one item that couldn't be verified, because
+   `/auth/v1/settings` doesn't expose captcha state. It got answered by accident
+   while testing the auth proxy: a sign-in POST with no captcha token comes back
+
+   ```
+   400 {"error_code":"captcha_failed",
+        "msg":"captcha protection: request disallowed (no captcha_token found)"}
+   ```
+
+   Supabase checks CAPTCHA *before* it checks the password, so every credential
+   endpoint is gated. Nothing to do here.
 
 ### Recommended
 
-5. **Authentication → Rate Limits** — lower "sign in / sign up" from the default.
-   Note Nova's own middleware rate limiting **does not cover login at all**: the
-   browser talks to `supabase.co` directly, so `middleware.ts` never sees those
-   requests. Supabase's own limits are the only brake on credential stuffing.
-
-6. **Authentication → Multi-Factor Authentication** — enable TOTP if you want
+5. **Authentication → Multi-Factor Authentication** — enable TOTP if you want
    real account security for the accounts that matter.
 
+6. **Authentication → Rate Limits** — still worth lowering as defence in depth,
+   though Nova now applies its own (see below).
+
 ---
+
+## 3b. Login rate limiting
+
+Nova's middleware used to cover `/api/feed` and `/api/admin` while the password
+endpoint — the one thing actually worth brute-forcing — had no limit from us at
+all, because supabase-js posts straight to `<project>.supabase.co` and
+middleware never saw those requests.
+
+`src/lib/authProxy.ts` installs a custom `fetch` on the Supabase client that
+rewrites **only the credential-taking endpoints** (`token` with
+`grant_type=password`, `signup`, `recover`, `otp`) onto `/api/auth/*`, which
+middleware does see. `/api/auth/[...path]` forwards them to Supabase unchanged.
+
+**Token refresh is deliberately NOT proxied.** It runs constantly for every
+signed-in user, isn't a guessing surface, and rate limiting it would log people
+out for using the app normally. Same for PostgREST, realtime, and the OAuth
+redirect. A test asserts this specifically, because getting it wrong would be
+subtle and horrible.
+
+Two layers, doing different jobs:
+
+| Layer | Limit | What it's for |
+|---|---|---|
+| middleware `login` tier | 20/min per IP | blunt volume control |
+| per-account backoff in the route | 5 fails → 30s, 8 → 2m, 12 → 15m, 20 → 1h | the actual anti-stuffing control |
+
+Per-IP alone is the wrong tool: too loose to stop a botnet spreading 5 guesses
+across 10,000 addresses, too tight for carrier-grade NAT where thousands of real
+users share one address. Per-account backoff tracks the thing being attacked
+instead of the thing that's cheap to rotate.
+
+**The lockout only counts genuine wrong-password answers.** This matters more
+than it looks. Supabase checks CAPTCHA *before* credentials, so if CAPTCHA
+failures counted, anyone could lock any user out of their own account by posting
+that user's email with no captcha token — a free denial of service. Only
+`invalid_credentials` counts; captcha/validation/throttling/upstream errors do
+not, and a successful login clears the counter, so a typo earlier in the day
+never accumulates. Signup/recover/otp get no per-account counter at all, for the
+same reason — there is nothing to "get right" there, so a failure count keyed on
+someone else's email would be a lockout weapon.
+
+Identifiers are HMAC-hashed before they reach Redis: a rate-limit store
+shouldn't double as a list of everyone who has tried to log in.
+
+Trade-off worth knowing: Supabase now sees Vercel's egress IP for these four
+endpoints rather than the user's, so its own per-IP limits are less useful on
+them. The real client IP is forwarded in `X-Forwarded-For`, but Supabase may not
+honour it. Nova's own two layers are the compensating control.
 
 ## 4. Residual risks, stated honestly
 
