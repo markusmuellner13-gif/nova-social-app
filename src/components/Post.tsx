@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Post as PostType } from '@/types';
 import { ensureNotificationPermission } from '@/lib/notifications';
+import { postTitle } from '@/lib/postTitle';
 import { trackEvent } from '@/lib/track';
 import { fetchGoingCount, invalidateGoingCount } from '@/lib/goingCounts';
 import { fetchFriendsGoing } from '@/lib/friendsGoing';
@@ -224,7 +225,7 @@ export default function Post({ post, showHint = false }: Props) {
     void ensureNotificationPermission();
     addReminder({
       postId: post.id,
-      title: post.caption.split('\n')[0].slice(0, 60),
+      title: postTitle(post, 'Event', 60),
       venue: post.eventVenue ?? post.location?.name ?? '',
       eventDateRaw: post.eventDateRaw,
       minutesBefore,
@@ -628,7 +629,7 @@ export default function Post({ post, showHint = false }: Props) {
                 <div>
                   <p className="text-base font-bold text-white">{t.common.setReminder}</p>
                   <p className="text-xs mt-0.5" style={{ color: '#666677' }}>
-                    {post.caption.split('\n')[0].slice(0, 50)}
+                    {postTitle(post, 'Event', 50)}
                   </p>
                 </div>
                 <button onClick={() => setShowReminderSheet(false)}>

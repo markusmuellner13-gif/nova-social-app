@@ -9,6 +9,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { canonicalCity } from './cityName';
 import type { ApiPost } from '@/lib/sources/shared';
 import { enforceRealImages } from '@/lib/sources/realImage';
+import { cleanTitle, titleFromCaption } from './postTitle';
 
 const url        = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 const anonKey    = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -73,7 +74,12 @@ export function postToRow(post: ApiPost & { eventDateRaw?: string | null }, sour
     id: post.id,
     source,
     category: post.category,
-    title: post.caption?.split('\n')[0]?.slice(0, 300) ?? null,
+    // The source's REAL event name. This used to be `caption.split('\n')[0]`,
+    // which is why production stored titles like "https://allevents.in/org/…"
+    // and "Registration opens 3 weeks before the…" — see src/lib/postTitle.ts.
+    // The caption line stays as a fallback for sources that carry no name, but
+    // it now goes through cleanTitle so a URL can never be stored as a title.
+    title: cleanTitle(post.title, 300) || titleFromCaption(post.caption, 300) || null,
     description: post.caption ?? null,
     // Canonicalised so German/Italian/etc. sources don't create a second row for
     // a city we already have — "Wien" and "Vienna" were two buckets, splitting

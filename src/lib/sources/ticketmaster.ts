@@ -107,6 +107,8 @@ export function tmEventToPost(ev: TmEvent, description: string, city: string): A
   return {
     id: `tm_${ev.id}`,
     user: makeUser(venueName),
+    // The promoter's own event name — the headline, not the blurb.
+    title: ev.name,
     image: bestTmImage(ev.images),
     caption: `${description}\n\n📅 ${eventDateStr}${localTime ? ` · ${localTime}` : ''}\n📍 ${venueName}${venueAddr ? `, ${venueAddr}` : ''}\n🎟️ ${priceStr}\n🔗 Tickets & info: ${ev.url}`,
     likes: 0,

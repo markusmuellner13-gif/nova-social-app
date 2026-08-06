@@ -12,6 +12,7 @@
 
 import type { ApiPost } from '@/lib/sources/shared';
 import { prominence, isChain } from './prominence';
+import { postTitle } from '@/lib/postTitle';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Understanding the question
@@ -136,7 +137,10 @@ export interface TripInput {
   outdoors: ApiPost[];
 }
 
-const title = (p: ApiPost) => (p.caption?.split('\n')[0] ?? p.organizer ?? '').trim();
+// The event's real name. Previously the caption's first line, which is why
+// briefings read "• *Endlich ist es so weit: Alegría öffnet seine Türen. Ein
+// Ort voller Far* — Sat 8 Aug": a description sliced mid-word, not a title.
+const title = (p: ApiPost) => postTitle(p, p.organizer ?? '', 70);
 
 /** Short name for a place — the organiser/venue rather than the sentence. */
 function name(p: ApiPost): string {
@@ -218,7 +222,7 @@ export function buildTripBriefing(input: TripInput): string {
   if (events.length) {
     lines.push('', `**On while you're there** (${prettyDate(from)} – ${prettyDate(to)})`);
     for (const e of events) {
-      lines.push(`• *${title(e).slice(0, 70)}* — ${prettyDate(e.eventDateRaw)}${e.eventVenue ? ` · ${e.eventVenue.split(',')[0]}` : ''}`);
+      lines.push(`• *${title(e)}* — ${prettyDate(e.eventDateRaw)}${e.eventVenue ? ` · ${e.eventVenue.split(',')[0]}` : ''}`);
     }
   } else {
     lines.push('', `**On while you're there**`, `I don't have confirmed listings for ${prettyDate(from)} – ${prettyDate(to)} yet — most venues publish 3–6 weeks ahead, so check back closer to the date and I'll have more.`);

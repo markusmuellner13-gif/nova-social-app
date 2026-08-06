@@ -18,6 +18,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { ApiPost, makeUser, slugify, todayStr, haversineKm, fetchOgImage, proxyImage } from './shared';
+import { cleanTitle } from '../postTitle';
 import { validateBatch } from '@/lib/eventValidation';
 import { sameLabel, dedupeAddressParts } from './eventbrite';
 
@@ -498,6 +499,9 @@ function toApiPost(
   return {
     id: `nova_${slugify(ev.name).slice(0, 28)}_${rawDate}_${idx}`,
     user: makeUser(organizer, host),
+    // The listing's own name (JSON-LD `name`/`title`/`headline`). Crawled feeds
+    // sometimes carry a URL here, so it still goes through `cleanTitle`.
+    title: cleanTitle(ev.name, 120) || undefined,
     // The listing's own image, or none — `crawlCityEvents` then tries the event
     // page's og:image. A filler photo is never substituted.
     image: ev.image || '',
