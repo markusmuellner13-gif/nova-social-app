@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import crypto from 'node:crypto';
+import crypto from 'node:crypto'; // still needed below for the key fingerprint
+import { isAdminRequest } from '@/lib/adminAuth';
 
 // Admin: is the venue-photo pipeline actually working in THIS environment?
 //
@@ -11,24 +12,9 @@ import crypto from 'node:crypto';
 // Production had exactly that: a key set, and zero Google photos in the feed.
 //
 // This endpoint asks Google directly and reports what it says, WITHOUT ever
-// returning the key. Header-only Bearer auth (ADMIN_SECRET or CRON_SECRET).
+// returning the key. Header-only Bearer auth — see src/lib/adminAuth.ts.
 //
-//   curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/admin/photos
-
-function safeEqual(a: string, b: string): boolean {
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
-}
-
-function authed(request: NextRequest): boolean {
-  const provided = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
-  if (!provided) return false;
-  for (const secret of [process.env.ADMIN_SECRET, process.env.CRON_SECRET]) {
-    if (secret && safeEqual(provided, secret)) return true;
-  }
-  return false;
-}
+//   curl -H "Authorization: Bearer $ADMIN_SECRET" https://<host>/api/admin/photos
 
 interface Check { api: string; ok: boolean; status: number; detail?: string; photo?: string }
 
@@ -89,7 +75,7 @@ async function checkLegacy(key: string): Promise<Check> {
 }
 
 export async function GET(request: NextRequest) {
-  if (!authed(request)) {
+  if (!isAdminRequest(request)) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
 

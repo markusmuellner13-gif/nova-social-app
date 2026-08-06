@@ -268,6 +268,77 @@ against script-based theft is the CSP**, which is genuinely hardened — nonce +
 `strict-dynamic`, so an injected `<script>` does not execute. No credentials are
 kept in this store; Supabase session tokens are managed by supabase-js.
 
+## 3d. There is no admin ACCOUNT — and the admin SECRET needed splitting
+
+Worth stating plainly because it changes what "someone logging in as the admin"
+even means: **Nova has no admin user.** No `is_admin` column, no role claim, no
+`app_metadata` check anywhere in the codebase. Every account is an ordinary
+account. Stealing any user's session — including the owner's — yields that
+user's feed and saved posts, nothing more.
+
+The real privileged surface is `/api/admin/*`, guarded by a **shared bearer
+secret**, entirely separate from user login. And that had a genuine flaw:
+
+`/api/admin/cache` and `/api/admin/photos` looped over `[ADMIN_SECRET,
+CRON_SECRET]` and accepted **either**, so setting a dedicated `ADMIN_SECRET`
+did not stop the cron secret from opening admin endpoints. Confirmed against
+production — a request bearing `CRON_SECRET` got `200` from `/api/admin/photos`.
+
+That matters because `CRON_SECRET` is the widely-copied one: it lives in cron
+config, gets pasted into curl commands for cache purges, and ends up in terminal
+scrollback and notes. A secret with that blast radius must not also be the key to
+the admin surface.
+
+`src/lib/adminAuth.ts` is now the single implementation for all three routes:
+
+| `ADMIN_SECRET` | `CRON_SECRET` | Result |
+|---|---|---|
+| set | set | **only `ADMIN_SECRET` works** — cron secret is dead here |
+| unset | set | falls back to `CRON_SECRET` (back-compat, nothing breaks) |
+| unset | unset | everything refused |
+
+So setting `ADMIN_SECRET` revokes the cron secret's admin power immediately — no
+code change, no redeploy.
+
+### Action required: rotate
+
+The previous `CRON_SECRET` value was stored in plaintext in an assistant memory
+file and appeared in terminal commands, so it should be treated as disclosed:
+
+1. Generate two **different** random values (e.g. `openssl rand -hex 32`).
+2. In Vercel → Settings → Environment Variables, set **`ADMIN_SECRET`** to the
+   first and **replace `CRON_SECRET`** with the second.
+3. Redeploy so the new values are picked up.
+4. Verify the old secret is dead:
+   `curl -o /dev/null -w "%{http_code}" -H "Authorization: Bearer <OLD>" https://nova-phi-liart.vercel.app/api/admin/photos` → expect **401**.
+
+## 3e. Session tokens in localStorage — what is and isn't fixable
+
+supabase-js stores the session (a bearer token) in `localStorage` under
+`sb-<ref>-auth-token`, unencrypted. Whoever holds it is signed in as that user
+until it expires. This is standard for Supabase's browser client.
+
+**It cannot be fixed by encrypting it**, for the same reason the `AppContext`
+store can't: any key the app can use, injected script can use. The genuine fixes,
+in descending order of value:
+
+1. **CSP** — already hardened (nonce + `strict-dynamic`), so an injected
+   `<script>` never runs and never reaches the token. This is the actual defence
+   and it is in place.
+2. **Short access-token lifetime** — Supabase dashboard → Authentication →
+   Sessions → *JWT expiry*. Default 3600s; lowering it shrinks how long a stolen
+   token is worth anything. Refresh-token rotation is on by default.
+3. **MFA (TOTP)** — stops someone signing in with a stolen *password*. Note it
+   does **not** stop a stolen *session token*, which is already past the login
+   step. Worth enabling, but not a fix for this specific thing.
+4. **httpOnly cookies** (via `@supabase/ssr`) — the only approach that truly puts
+   the token out of JavaScript's reach. **Deliberately not done here**: it is an
+   architectural change to a client-rendered SPA that also ships as a Capacitor
+   native app calling a cross-origin API, where cookie handling is fragile. The
+   risk of breaking sign-in on device outweighs the marginal gain over a CSP that
+   already blocks the injection path. Revisit if the app ever moves to
+   server-rendered auth.
+
 ## 4. Residual risks, stated honestly
 
 - **Every profile is publicly dumpable.** `profiles` has `SELECT using (true)`,
