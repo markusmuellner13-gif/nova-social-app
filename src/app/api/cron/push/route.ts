@@ -3,7 +3,8 @@ import { isCronRequest } from '@/lib/cronAuth';
 import { cacheEnabled, cacheScanKeys, cacheGet, cacheSet, cacheDelete } from '@/lib/serverCache';
 import { webPushEnabled, sendPush, PushSub } from '@/lib/webpush';
 import { dbReadEnabled, queryTopEventsNear } from '@/lib/eventsDb';
-import { buildSmartPush, buildFriendGoingPush } from '@/lib/pushContent';
+import { chooseSmartPush } from '@/lib/pushContent';
+import { buildLocalisedPush, resolveLocale } from '@/lib/pushCopy';
 import { friendsGoingNear, socialServerEnabled } from '@/lib/socialServer';
 import type { ApiPost } from '@/lib/sources/shared';
 
@@ -30,6 +31,7 @@ interface Envelope {
   lng?: number | null;
   categories?: string[] | null; // the user's learned top interests
   userId?: string | null;       // signed-in user id (for "friends going" nudges)
+  locale?: string | null;       // the language picked in Profile → Settings
   ts?: number;
   lastPush?: number;            // when we last pushed to this user (cooldown)
 }
@@ -93,6 +95,9 @@ export async function GET(request: NextRequest) {
 
     // Only push during a sensible LOCAL window (their morning or evening).
     const local = localNowFromLng(env.lng);
+    // Whatever the user picked in Profile → Settings, stored with their
+    // subscription. Anything unknown or missing resolves to English.
+    const locale = resolveLocale(env.locale);
     const hour = local.getHours();
     const isMorning = inWindow(hour, MORNING);
     const isEvening = inWindow(hour, EVENING);
@@ -112,7 +117,7 @@ export async function GET(request: NextRequest) {
     if (socialServerEnabled && env.userId && Number.isFinite(env.lat) && Number.isFinite(env.lng)) {
       const fg = await friendsGoingNear(env.userId, env.lat as number, env.lng as number).catch(() => null);
       if (fg) {
-        friendPush = buildFriendGoingPush(fg.friendName, fg.title);
+        friendPush = buildLocalisedPush('friend', { city: env.city || '', locale, name: fg.friendName });
         url = `/e/${fg.postId}`;
         tag = 'nova-friend-going';
       }
@@ -129,13 +134,17 @@ export async function GET(request: NextRequest) {
           lat: env.lat as number, lng: env.lng as number, radiusKm: 50, limit: 12,
         }).catch(() => [] as ApiPost[]);
       }
-      msg = buildSmartPush({
-        city: env.city || 'your area',
+      // Decide WHICH nudge (language-independent), then write it entirely in
+      // the user's own language. The previous path built an English sentence
+      // around the event's own title, so a German user in Vienna received
+      // "Tonight in Vienna 🌃 / Endlich ist es so weit: Alegría öffnet seine…"
+      // — two languages, ~15 words, and the interesting half truncated.
+      const { kind, count } = chooseSmartPush({
         events: nearby,
         categories: Array.isArray(env.categories) ? env.categories : [],
         now: local,
-        seed: seedFromKey(key),
       });
+      msg = buildLocalisedPush(kind, { city: env.city || '', count, locale });
     }
     const payload = { ...msg, url, tag };
 

@@ -99,6 +99,10 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
 
 interface PushLocation {
   city?: string; lat?: number; lng?: number; categories?: string[]; userId?: string;
+  // The locale the user picked in Profile → Settings. The server builds the
+  // whole notification from it, so it must travel with the subscription — the
+  // cron has no session and no other way to know what language to speak.
+  locale?: string;
   reminders?: { postId: string; title: string; venue?: string; fireAt: number; minutesBefore: number }[];
 }
 
