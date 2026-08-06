@@ -38,6 +38,28 @@ function NavButton({ Icon, label, isActive, onClick, badge }: {
   );
 }
 
+// How much room to leave under the labels for the iOS home indicator.
+//
+// `env(safe-area-inset-bottom)` reports 34px on iPhones that have one, and we
+// used to apply all 34px as padding. Measured on an iPhone 14 Pro Max viewport,
+// that left a 38px band of empty nav background under the labels — which reads
+// as "the bar is floating too high", because the dead space is most of the bar.
+//
+// The indicator itself is a ~5px pill sitting ~8px off the bottom edge, so ~20px
+// of clearance is plenty to keep labels clear of it. We reclaim 14px of the
+// inset and floor the result at 6px, so:
+//   iPhone with home indicator (34px) → 20px  (was 34px)
+//   Android gesture nav (~24px)       → 10px
+//   no inset at all (0px)             →  6px  (was 0 — labels sat on the edge)
+// The max() also guarantees it can never go negative on a device reporting a
+// small inset, which a bare subtraction would.
+export const SAFE_BOTTOM = 'max(calc(env(safe-area-inset-bottom, 0px) - 14px), 6px)';
+
+// Total space the fixed nav occupies. Anything that has to sit clear of the nav
+// must use THIS rather than re-deriving it from the raw inset — ChatTab did that
+// and would silently over-reserve by 14px the moment the padding above changed.
+export const NAV_CLEARANCE = `calc(52px + ${SAFE_BOTTOM})`;
+
 export default function BottomNav({ active, onChange }: Props) {
   const { t } = useLanguage();
 
@@ -52,8 +74,8 @@ export default function BottomNav({ active, onChange }: Props) {
   return (
     <nav className="glass-nav fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around"
       style={{
-        minHeight: 'calc(48px + env(safe-area-inset-bottom, 0px))',
-        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        minHeight: `calc(48px + ${SAFE_BOTTOM})`,
+        paddingBottom: SAFE_BOTTOM,
         paddingTop: 4,
       }}>
       {tabs.map(({ id, Icon, label, badge, center }) =>
