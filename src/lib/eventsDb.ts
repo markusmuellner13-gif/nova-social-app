@@ -6,6 +6,7 @@
 // app keeps working exactly as before.
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { canonicalCity } from './cityName';
 import type { ApiPost } from '@/lib/sources/shared';
 import { enforceRealImages } from '@/lib/sources/realImage';
 
@@ -74,7 +75,11 @@ export function postToRow(post: ApiPost & { eventDateRaw?: string | null }, sour
     category: post.category,
     title: post.caption?.split('\n')[0]?.slice(0, 300) ?? null,
     description: post.caption ?? null,
-    city: post.location?.name?.split(',').slice(-1)[0]?.trim() ?? null,
+    // Canonicalised so German/Italian/etc. sources don't create a second row for
+    // a city we already have — "Wien" and "Vienna" were two buckets, splitting
+    // Vienna's corpus 314/107 and shrinking the feed for whoever landed in the
+    // smaller one. See src/lib/cityName.ts.
+    city: canonicalCity(post.location?.name?.split(',').slice(-1)[0]),
     country: country ?? null,
     venue: post.eventVenue ?? null,
     lat: post.location?.lat ?? null,

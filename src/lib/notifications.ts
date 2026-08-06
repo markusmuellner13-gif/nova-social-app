@@ -17,6 +17,54 @@ const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? '';
 
 let swRegistration: ServiceWorkerRegistration | null = null;
 
+// ── Why push isn't working (the missing diagnosis) ───────────────────────────
+//
+// subscribeToPush() used to return a bare `false` from a catch-all, so every
+// failure looked identical and the user was told nothing. That hid the single
+// most common cause on iPhone:
+//
+//   **iOS only delivers Web Push to a site installed on the Home Screen.**
+//   In a normal Safari tab there is no push at all — permission can't even be
+//   granted. iOS 16.4+ is also required.
+//
+// So an iPhone user in Safari gets no push ever, silently, and only sees the
+// in-app notifications the running page creates — which is exactly the
+// "notifications only appear when I open the app" symptom.
+export type PushCapability =
+  | 'ready'             // push can be used (may still need permission)
+  | 'ios-needs-install' // iOS Safari tab — must Add to Home Screen first
+  | 'unsupported'       // no service worker / PushManager on this browser
+  | 'no-key'            // NEXT_PUBLIC_VAPID_PUBLIC_KEY not configured
+  | 'denied';           // user explicitly blocked notifications
+
+export function isIOS(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent)
+    // iPadOS 13+ reports as a Mac; the touch-point check distinguishes it.
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+/** Is the app running as an installed PWA / from the Home Screen? */
+export function isStandalone(): boolean {
+  if (typeof window === 'undefined') return false;
+  const iosStandalone = (window.navigator as Navigator & { standalone?: boolean }).standalone;
+  return window.matchMedia?.('(display-mode: standalone)').matches === true || iosStandalone === true;
+}
+
+export function pushCapability(): PushCapability {
+  if (typeof window === 'undefined') return 'unsupported';
+  if (!VAPID_PUBLIC_KEY) return 'no-key';
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    // On iOS this is what a plain Safari tab looks like — PushManager simply
+    // isn't there until the site is installed. Report the actionable reason
+    // rather than the generic one.
+    return isIOS() && !isStandalone() ? 'ios-needs-install' : 'unsupported';
+  }
+  if (isIOS() && !isStandalone()) return 'ios-needs-install';
+  if (typeof Notification !== 'undefined' && Notification.permission === 'denied') return 'denied';
+  return 'ready';
+}
+
 export async function initNotifications(): Promise<ServiceWorkerRegistration | null> {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return null;
   if (swRegistration) return swRegistration;
@@ -56,7 +104,13 @@ interface PushLocation { city?: string; lat?: number; lng?: number; categories?:
 // can send a personalised "events near you" for their actual city. Safe to call
 // repeatedly (re-registers location + interests).
 export async function subscribeToPush(loc?: PushLocation): Promise<boolean> {
-  if (!VAPID_PUBLIC_KEY) return false; // push backend not configured yet
+  // Bail with a logged reason rather than a silent false — a push subscription
+  // that never happens is invisible otherwise, and on iOS-in-Safari it never can.
+  const cap = pushCapability();
+  if (cap !== 'ready') {
+    console.info('[push] not subscribing —', cap);
+    return false;
+  }
   const reg = await initNotifications();
   if (!reg || !('pushManager' in reg)) return false;
   const granted = await ensureNotificationPermission();

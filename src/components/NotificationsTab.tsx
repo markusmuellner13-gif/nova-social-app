@@ -8,6 +8,7 @@ import { timeAgo } from '@/data/appDefaults';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import CommentsSheet from './CommentsSheet';
+import { pushCapability } from '@/lib/notifications';
 
 const TYPE_ICON = {
   ai_suggestion: Sparkles,
@@ -101,6 +102,10 @@ export default function NotificationsTab({ onClose }: { onClose?: () => void } =
   const notifPermission = typeof window !== 'undefined' && 'Notification' in window
     ? Notification.permission : 'denied';
 
+  // Why push can't be used here, if it can't. Computed on render (cheap, and it
+  // changes when the user installs to the Home Screen without a reload).
+  const pushBlockReason = pushCapability();
+
   return (
     <>
       <div className="flex flex-col h-full">
@@ -137,7 +142,44 @@ export default function NotificationsTab({ onClose }: { onClose?: () => void } =
         <div className="tab-content flex-1 overflow-y-auto">
           {/* Notification permission prompt */}
           <AnimatePresence>
-            {notifPermission === 'default' && (
+            {/* iOS delivers Web Push ONLY to a site installed on the Home Screen.
+                In a Safari tab there is no push at all, so the "Enable" button
+                below would do nothing — the user has to install first. Without
+                this the failure was completely silent, which is why push looked
+                broken rather than unavailable. */}
+            {pushBlockReason === 'ios-needs-install' && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }} className="overflow-hidden"
+              >
+                <div className="mx-4 mt-4 p-4 rounded-2xl" style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)' }}>
+                  <p className="text-sm font-semibold text-white mb-1">Add Nova to your Home Screen 📲</p>
+                  <p className="text-xs" style={{ color: '#888899' }}>
+                    iPhone only sends notifications to apps on the Home Screen. Tap
+                    the Share button below, choose <strong style={{ color: '#c4b5fd' }}>Add to Home Screen</strong>,
+                    then open Nova from there — you&apos;ll get alerts about what&apos;s on
+                    nearby even when the app is closed.
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
+            {pushBlockReason === 'denied' && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }} className="overflow-hidden"
+              >
+                <div className="mx-4 mt-4 p-4 rounded-2xl" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)' }}>
+                  <p className="text-sm font-semibold text-white mb-1">Notifications are blocked</p>
+                  <p className="text-xs" style={{ color: '#888899' }}>
+                    Re-enable them for Nova in your device settings — the app can&apos;t
+                    ask again once they&apos;ve been refused.
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
+            {pushBlockReason === 'ready' && notifPermission === 'default' && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
