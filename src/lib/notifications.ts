@@ -97,7 +97,57 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
   return arr;
 }
 
-interface PushLocation { city?: string; lat?: number; lng?: number; categories?: string[]; userId?: string }
+interface PushLocation {
+  city?: string; lat?: number; lng?: number; categories?: string[]; userId?: string;
+  reminders?: { postId: string; title: string; venue?: string; fireAt: number; minutesBefore: number }[];
+}
+
+/**
+ * Push the user's reminder list to the server so /api/cron/reminders can deliver
+ * them with the app closed.
+ *
+ * `fireAt` is computed HERE, not on the server: the browser knows the user's
+ * actual timezone, whereas the server only ever sees a longitude (which the
+ * digest uses to approximate local time — fine for "morning vs evening", not for
+ * "this event starts at 20:00").
+ *
+ * Returns false when push isn't usable, in which case AppContext keeps its
+ * in-page timer as the only available fallback.
+ */
+export async function syncReminders(
+  reminders: { postId: string; title: string; venue?: string; eventDateRaw?: string; minutesBefore: number }[],
+): Promise<boolean> {
+  if (pushCapability() !== 'ready') return false;
+  const reg = await initNotifications();
+  const sub = await reg?.pushManager?.getSubscription();
+  if (!sub) return false; // not subscribed yet; the next subscribeToPush carries them
+
+  const payload = reminders.flatMap(r => {
+    if (!r.eventDateRaw) return [];
+    // Event time-of-day is unknown, so anchor at noon local — the same
+    // assumption the old in-page scheduler made, kept so behaviour doesn't shift.
+    const eventMs = new Date(`${r.eventDateRaw}T12:00:00`).getTime();
+    if (!Number.isFinite(eventMs)) return [];
+    return [{
+      postId: r.postId,
+      title: r.title,
+      venue: r.venue,
+      fireAt: eventMs - r.minutesBefore * 60_000,
+      minutesBefore: r.minutesBefore,
+    }];
+  });
+
+  try {
+    await fetch(apiUrl('/api/push/subscribe'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription: sub, reminders: payload }),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Subscribe to web push. Returns true if a subscription was created & stored.
 // Pass the user's location (and learned top interests) so the daily digest cron

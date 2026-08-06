@@ -5,6 +5,7 @@ import { AppPersistedState, UserPreferences, NovaNotification, Post, Toast, Loca
 import { DEFAULT_PREFERENCES, welcomeNotification } from '@/data/appDefaults';
 import { learnFromInteraction, learnFromBrowse } from '@/lib/aiEngine';
 import { upsertInteraction, deleteInteraction } from '@/lib/supabase';
+import { syncReminders } from '@/lib/notifications';
 
 // Module-level user ID for Supabase sync — set by AppShell when auth state changes
 let _supabaseUserId: string | null = null;
@@ -369,9 +370,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(permTimer);
   }, []);
 
-  // Reminder scheduler — re-runs whenever reminders change
+  // Reminder scheduler — re-runs whenever reminders change.
+  //
+  // Preferred path: hand the list to the server (syncReminders) so
+  // /api/cron/reminders can deliver it with the app CLOSED. The in-page
+  // setTimeout below is a fallback only, because a setTimeout dies with the
+  // page — which made reminders effectively never fire, since the only time the
+  // timer survived was the one case where you're already looking at the app.
+  //
+  // We keep the fallback strictly for devices where push is unusable (notably
+  // iOS Safari outside the Home Screen, where Web Push does not exist at all).
+  // Running both would double-notify.
   useEffect(() => {
     if (typeof window === 'undefined' || !('Notification' in window)) return;
+
+    let serverHandled = false;
+    void syncReminders(
+      state.reminders.map(r => ({
+        postId: r.postId, title: r.title, venue: r.venue,
+        eventDateRaw: r.eventDateRaw, minutesBefore: r.minutesBefore,
+      })),
+    ).then(ok => { serverHandled = ok; });
+
     const timers: ReturnType<typeof setTimeout>[] = [];
     const now = Date.now();
 
@@ -385,6 +405,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (msUntil <= 0 || msUntil > 7 * 24 * 60 * 60 * 1000) continue;
 
       const t = setTimeout(() => {
+        // The server owns delivery when push is available — bail so the user
+        // doesn't get the same reminder twice.
+        if (serverHandled) return;
         if (Notification.permission === 'granted') {
           try {
             new Notification('Nova — Upcoming event 🎉', {

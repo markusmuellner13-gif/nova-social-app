@@ -1,5 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cacheEnabled, cacheSet } from '@/lib/serverCache';
+import { cacheEnabled, cacheSet, cacheGet } from '@/lib/serverCache';
+
+// A reminder the user set on an event, in the form the cron needs: an absolute
+// moment to fire at. The client does the date arithmetic (it knows the user's
+// real timezone; the server only ever sees a longitude) and sends the result.
+export interface StoredReminder {
+  postId: string;
+  title: string;
+  venue?: string | null;
+  fireAt: number;      // epoch ms
+  minutesBefore: number;
+}
+
+function sanitizeReminders(raw: unknown): StoredReminder[] {
+  if (!Array.isArray(raw)) return [];
+  const out: StoredReminder[] = [];
+  for (const r of raw.slice(0, 100)) {
+    if (!r || typeof r !== 'object') continue;
+    const o = r as Record<string, unknown>;
+    if (typeof o.postId !== 'string' || typeof o.title !== 'string') continue;
+    const fireAt = Number(o.fireAt);
+    if (!Number.isFinite(fireAt)) continue;
+    out.push({
+      postId: o.postId.slice(0, 128),
+      title: o.title.slice(0, 120),
+      venue: typeof o.venue === 'string' ? o.venue.slice(0, 120) : null,
+      fireAt,
+      minutesBefore: Number(o.minutesBefore) || 60,
+    });
+  }
+  return out;
+}
 
 // Stores a web-push subscription (+ the user's city/coords) so the daily digest
 // cron (/api/cron/push) can send "events near you". Persists in Redis when
@@ -13,6 +44,7 @@ export async function POST(request: NextRequest) {
       subscription?: { endpoint?: string };
       endpoint?: string;
       city?: string; lat?: number; lng?: number; categories?: unknown; userId?: unknown;
+      reminders?: unknown;
     };
     const sub = body.subscription ?? (body.endpoint ? body : null);
     if (!sub?.endpoint) {
@@ -27,7 +59,17 @@ export async function POST(request: NextRequest) {
       const categories = Array.isArray(body.categories)
         ? body.categories.filter((c): c is string => typeof c === 'string').slice(0, 5).map(c => c.slice(0, 24))
         : null;
+      const key = `nova:push:sub:${(h >>> 0).toString(36)}`;
+
+      // Merge onto what's already stored instead of overwriting it. This route
+      // is called again on every city change, and a wholesale overwrite wiped
+      // `lastPush` (the 10h anti-spam cooldown) and `sentReminderIds` — so
+      // simply moving city could re-trigger a digest or replay a reminder the
+      // user had already been sent.
+      const prev = (await cacheGet<Record<string, unknown>>(key)) ?? {};
+
       const envelope = {
+        ...prev,
         subscription: sub,
         city: typeof body.city === 'string' ? body.city.slice(0, 80) : null,
         lat: Number.isFinite(body.lat) ? body.lat : null,
@@ -36,9 +78,12 @@ export async function POST(request: NextRequest) {
         // The signed-in user's id, so the digest can surface "a friend you follow
         // is going to an event near you". Null for anonymous subscribers.
         userId: typeof body.userId === 'string' ? body.userId.slice(0, 64) : null,
+        // Only replace the reminder list when the client actually sent one, so a
+        // plain location re-sync doesn't clear the user's reminders.
+        ...(body.reminders !== undefined ? { reminders: sanitizeReminders(body.reminders) } : {}),
         ts: Date.now(),
       };
-      await cacheSet(`nova:push:sub:${(h >>> 0).toString(36)}`, envelope, 60 * 60 * 24 * 60); // 60 days
+      await cacheSet(key, envelope, 60 * 60 * 24 * 60); // 60 days
     }
     return NextResponse.json({ ok: true, stored: cacheEnabled });
   } catch {
