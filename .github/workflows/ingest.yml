@@ -13,6 +13,15 @@
 # Actions, add a repository secret named CRON_SECRET whose value matches the
 # CRON_SECRET env var set in Vercel. (Optional) add a variable NOVA_BASE_URL to
 # override the production URL below.
+#
+# WHY EVERY CALL CHECKS ITS HTTP STATUS — on 2026-08-06 this workflow reported
+# SUCCESS for fifteen hours while ingesting exactly nothing. `curl -s` exits 0 on
+# a 401, so the body `{"ok":false,"error":"unauthorized"}` was grepped for
+# "ingested":N, found nothing, defaulted to 0, saw no nextOffset, and cheerfully
+# announced "fast tier fully refreshed" in nine seconds. The one signal that
+# something was wrong — the run duration dropping from ~13 minutes to 9 seconds —
+# is not something GitHub alerts on. A job that cannot fail cannot be monitored,
+# so a non-2xx now ends the run red.
 # ─────────────────────────────────────────────────────────────────────────────
 name: Ingest events (autonomous)
 
@@ -51,14 +60,34 @@ jobs:
           # list, so a few slices cover the whole catalogue. Slow-moving places
           # (museums, restaurants, hotels, trails…) ride the daily full sweep below.
           offset=0
+          ok_slices=0
           for i in $(seq 1 8); do
-            resp=$(curl -s -m 90 -H "$auth" "$BASE_URL/api/cron/ingest?tier=fast&offset=$offset" || echo '{}')
+            code=$(curl -s -m 90 -H "$auth" -o body.json -w '%{http_code}' \
+              "$BASE_URL/api/cron/ingest?tier=fast&offset=$offset" || true)
+            # 401/403 is a configuration fault — the secret here and the one in
+            # Vercel have drifted. Retrying can never fix it, so stop loudly.
+            if [ "$code" = "401" ] || [ "$code" = "403" ]; then
+              echo "::error::HTTP $code from /api/cron/ingest — the CRON_SECRET repo secret no longer matches the CRON_SECRET env var in Vercel. Reset both to the same value."
+              exit 1
+            fi
+            if [ "$code" != "200" ]; then
+              echo "::warning::fast slice $i: HTTP $code — $(head -c 200 body.json 2>/dev/null)"
+              break
+            fi
+            resp=$(cat body.json)
             ing=$(echo "$resp" | grep -oE '"ingested":[0-9]+' | grep -oE '[0-9]+' || echo 0)
             nxt=$(echo "$resp" | grep -oE '"nextOffset":[0-9]+' | grep -oE '[0-9]+' || echo "")
+            ok_slices=$((ok_slices + 1))
             echo "fast slice $i: ingested=${ing:-0} nextOffset=${nxt:-done}"
             if [ -z "$nxt" ]; then echo "fast tier fully refreshed"; break; fi
             offset="$nxt"
           done
+          # Zero good slices means the tier did not refresh at all. Green here
+          # would be a lie, and a lie nobody would notice.
+          if [ "$ok_slices" -eq 0 ]; then
+            echo "::error::no fast-tier slice succeeded — the fast tier did not refresh."
+            exit 1
+          fi
 
       - name: Drive ingestion across several catalogue slices
         env:
@@ -73,22 +102,37 @@ jobs:
           offset=""
           total_ingested=0
           total_rejected=0
+          ok_slices=0
           # Each call processes a ~35s slice and returns nextOffset; chain up to
           # 10 calls (~6-7 min) so a big chunk of the catalogue refreshes per run.
           for i in $(seq 1 10); do
             url="$BASE_URL/api/cron/ingest"
             if [ -n "$offset" ]; then url="$url?offset=$offset"; fi
-            resp=$(curl -s -m 90 -H "$auth" "$url" || echo '{}')
+            code=$(curl -s -m 90 -H "$auth" -o body.json -w '%{http_code}' "$url" || true)
+            if [ "$code" = "401" ] || [ "$code" = "403" ]; then
+              echo "::error::HTTP $code from /api/cron/ingest — the CRON_SECRET repo secret no longer matches the CRON_SECRET env var in Vercel. Reset both to the same value."
+              exit 1
+            fi
+            if [ "$code" != "200" ]; then
+              echo "::warning::slice $i: HTTP $code — $(head -c 200 body.json 2>/dev/null)"
+              break
+            fi
+            resp=$(cat body.json)
             ing=$(echo "$resp" | grep -oE '"ingested":[0-9]+' | grep -oE '[0-9]+' || echo 0)
             rej=$(echo "$resp" | grep -oE '"rejected":[0-9]+' | grep -oE '[0-9]+' || echo 0)
             nxt=$(echo "$resp" | grep -oE '"nextOffset":[0-9]+' | grep -oE '[0-9]+' || echo "")
             total_ingested=$((total_ingested + ${ing:-0}))
             total_rejected=$((total_rejected + ${rej:-0}))
+            ok_slices=$((ok_slices + 1))
             echo "slice $i: ingested=${ing:-0} rejected=${rej:-0} nextOffset=${nxt:-done}"
             if [ -z "$nxt" ]; then echo "catalogue fully swept — restarting next run"; break; fi
             offset="$nxt"
           done
           echo "── total this run: ingested=$total_ingested rejected=$total_rejected ──"
+          if [ "$ok_slices" -eq 0 ]; then
+            echo "::error::no catalogue slice succeeded — nothing was swept this run."
+            exit 1
+          fi
 
       - name: Refresh small-town events (best-effort, never fails the run)
         env:
@@ -96,5 +140,14 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         continue-on-error: true
         run: |
-          curl -s -m 90 -H "Authorization: Bearer $CRON_SECRET" \
-            "$BASE_URL/api/cron/ingest-towns?offset=0" | head -c 400 || true
+          # Best-effort by design (it depends on Anthropic credit), but the status
+          # is still printed — a silent 401 here is what hid the outage of
+          # 2026-08-06, and this step calls the same secret as the two above.
+          code=$(curl -s -m 90 -H "Authorization: Bearer $CRON_SECRET" \
+            -o body.json -w '%{http_code}' "$BASE_URL/api/cron/ingest-towns?offset=0" || true)
+          echo "ingest-towns: HTTP $code"
+          head -c 400 body.json 2>/dev/null || true
+          echo ""
+          if [ "$code" != "200" ]; then
+            echo "::warning::ingest-towns returned HTTP $code (step is best-effort, run not failed)."
+          fi
