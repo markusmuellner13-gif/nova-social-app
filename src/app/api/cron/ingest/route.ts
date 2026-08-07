@@ -213,6 +213,12 @@ export async function GET(request: NextRequest) {
   // all on a pathological one.
   const SLICE_CEILING_MS = 54_000;
   const GEO_BUDGET_MS = 8_000;
+  // The per-item feed fetch, and the floor below which starting one is pointless.
+  const FETCH_TIMEOUT_MS = 24_000;
+  const MIN_FETCH_MS = 8_000;
+  // What the tail of an item needs after the fetch returns: the geocode pass, the
+  // upsert and the image prewarm. Reserved so the fetch can never consume it.
+  const TAIL_RESERVE_MS = 12_000;
 
   let ingested = 0;
   let rejected = 0;
@@ -233,6 +239,21 @@ export async function GET(request: NextRequest) {
   let i = offset;
   for (; i < work.length; i++) {
     if (Date.now() > deadline) break;
+    // The fetch is not the last thing an item does — curation, the geocode pass,
+    // the upsert and the image prewarm all run after it. Giving the fetch a flat
+    // 24s ignored that: an item starting at 29.9s spent 24s fetching and was
+    // still writing rows when the platform killed the function at 60s, losing
+    // the whole slice. MEASURED on the 13:09 run — two slices died this way, and
+    // a killed slice returns no nextOffset, so the workflow's chain stops early.
+    //
+    // So the fetch gets whatever is left under the ceiling, minus the reserve the
+    // tail needs. Below the floor there isn't time to do useful work, so stop and
+    // let the next invocation pick up from this offset with a full window.
+    const fetchBudget = Math.min(
+      FETCH_TIMEOUT_MS,
+      startedAt + SLICE_CEILING_MS - TAIL_RESERVE_MS - Date.now(),
+    );
+    if (fetchBudget < MIN_FETCH_MS) break;
     const { city, country, lat, lng, category, page } = work[i];
     try {
       const params = new URLSearchParams({
@@ -244,7 +265,7 @@ export async function GET(request: NextRequest) {
         // with a picture already on it.
         photoBudgetMs: '12000',
       });
-      const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(24000) });
+      const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(fetchBudget) });
       if (!res.ok) { errors.push(`${city}/${category}#${page}:${res.status}`); processed++; continue; }
       const data = await res.json() as { posts?: ApiPost[] };
       const raw = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
