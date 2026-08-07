@@ -135,6 +135,15 @@ export default function PostImage({
   const [stage, setStage] = useState(0);
   const hasPhoto = Boolean(src) && stage < 2;
 
+  // Has the photo actually painted? Until it has, the designed cover fills the
+  // frame, so a slow image never leaves a black rectangle on screen. Stored as
+  // "which attempt painted" rather than a boolean reset in an effect: a new src
+  // or a fallback retry changes the key, so `painted` goes false during render
+  // with no cascading re-render.
+  const attempt = `${src}#${stage}`;
+  const [paintedAttempt, setPaintedAttempt] = useState<string | null>(null);
+  const painted = paintedAttempt === attempt;
+
   // The cover fills the frame instantly, so tell the card it can stop shimmering
   // and size itself the way a photoless post should — a 4:5 portrait panel.
   useEffect(() => {
@@ -153,8 +162,9 @@ export default function PostImage({
       // exact fit and crops nothing. Outside it, letterbox rather than cut.
       setFit(a > MAX_ASPECT * 1.02 || a < MIN_ASPECT * 0.98 ? 'contain' : 'cover');
     }
+    setPaintedAttempt(attempt);
     onLoaded?.();
-  }, [onLoaded, onAspect]);
+  }, [onLoaded, onAspect, attempt]);
 
   const handleError = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
@@ -200,8 +210,19 @@ export default function PostImage({
 
   return (
     <div className={`relative w-full h-full overflow-hidden ${className}`} style={style}>
+      {/* The designed cover sits UNDER every photo until that photo actually
+          paints. Measured in New York on 2026-08-06: 18 of 28 feed images took
+          over 3s and one took 6.3s — all Eventbrite posters, which upgrade to
+          the full-resolution original on cdn.evbuc.com (4096px, ~1MB) and are
+          then downloaded and resized by /api/image-proxy on a cold request.
+          Every one of them returned 200 in the end; nothing was broken. But the
+          frame was EMPTY BLACK for those seconds, so a whole city's feed read
+          as a stack of dead cards. An unfilled frame is never acceptable — if
+          the photo is late, the card still looks deliberate. */}
+      {!painted && <NoPhotoCover label={alt} />}
+
       {/* Blurred fill behind a letterboxed photo — reads as designed, not empty. */}
-      {fit === 'contain' && (
+      {painted && fit === 'contain' && (
         <img
           src={postImageUrl(src, 480)}
           alt=""
@@ -216,7 +237,9 @@ export default function PostImage({
         srcSet={postImageSrcSet(src)}
         sizes={SIZES}
         className="relative w-full h-full"
-        style={{ objectFit: fit }}
+        // Fade in over the cover instead of popping, so a slow photo arriving
+        // late reads as the card resolving rather than as a flash.
+        style={{ objectFit: fit, opacity: painted ? 1 : 0, transition: 'opacity 220ms ease-out' }}
       />
     </div>
   );

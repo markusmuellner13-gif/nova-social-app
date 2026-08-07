@@ -3,6 +3,7 @@
 import { motion } from 'framer-motion';
 import { Post } from '@/types';
 import { postImageUrl } from '@/lib/imageUrl';
+import { postTitle } from '@/lib/postTitle';
 
 // A horizontal "Trending near you" strip at the top of the discover feed — the
 // hook that makes the app feel alive and gives the doom-scroll a curated lead-in.
@@ -46,7 +47,7 @@ export default function TrendingRail({ posts, onSelect }: Props) {
               style={{ fontSize: 10, background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>{i + 1}</div>
             <div className="absolute bottom-0 left-0 right-0 p-2">
               <p className="text-white font-bold leading-tight" style={{ fontSize: 11, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                {(p.caption.split('\n')[0] || p.location?.name || 'Trending').slice(0, 60)}
+                {postTitle(p, 'Trending', 60)}
               </p>
               <p className="font-semibold mt-0.5" style={{ fontSize: 9, color: '#c4b5fd' }}>{railMeta(p)}</p>
             </div>

@@ -492,6 +492,8 @@ export async function overpassToPost(
   return {
     id: `osm_${el.id}`,
     user: makeUser(name, domain || undefined),
+    // A place's name IS its headline.
+    title: name,
     image: image ?? '',
     images,
     caption: `${desc}\n\n${kind.emoji} ${name}${addr ? `\n📍 ${addr}, ${city}` : `\n📍 ${city}`}${extras}${website ? `\n🔗 ${website}` : `\n🗺️ ${osmUrl}`}`,

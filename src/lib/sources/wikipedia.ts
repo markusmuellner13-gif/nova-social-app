@@ -295,6 +295,7 @@ export async function wikiToPost(
   return {
     id: `wiki_${poi.pageid}`,
     user: makeUser(poi.title),
+    title: poi.title,
     image,
     images,
     // A card whose first line is blank reads as broken, and some Wikipedia

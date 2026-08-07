@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
       subscription?: { endpoint?: string };
       endpoint?: string;
       city?: string; lat?: number; lng?: number; categories?: unknown; userId?: unknown;
+      locale?: string;
       reminders?: unknown;
     };
     const sub = body.subscription ?? (body.endpoint ? body : null);
@@ -75,6 +76,12 @@ export async function POST(request: NextRequest) {
         lat: Number.isFinite(body.lat) ? body.lat : null,
         lng: Number.isFinite(body.lng) ? body.lng : null,
         categories,
+        // The language the user picked in Profile → Settings. Notifications are
+        // built ENTIRELY from it (src/lib/pushCopy.ts) — before this, an English
+        // template wrapped a German or Japanese event title and shipped two
+        // languages in one notification. Only replaced when the client sends
+        // one, so a location re-sync can't silently reset someone to English.
+        ...(typeof body.locale === 'string' ? { locale: body.locale.slice(0, 10) } : {}),
         // The signed-in user's id, so the digest can surface "a friend you follow
         // is going to an event near you". Null for anonymous subscribers.
         userId: typeof body.userId === 'string' ? body.userId.slice(0, 64) : null,

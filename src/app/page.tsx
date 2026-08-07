@@ -16,7 +16,7 @@ import ChatTab from '@/components/ChatTab';
 import LocationPermissionPrompt from '@/components/LocationPermissionPrompt';
 import { useApp, setSupabaseUser } from '@/context/AppContext';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
-import { LanguageProvider } from '@/context/LanguageContext';
+import { LanguageProvider, useLanguage } from '@/context/LanguageContext';
 import { getUserInteractions } from '@/lib/supabase';
 import { setFriendsGoingUser } from '@/lib/friendsGoing';
 import ErrorBoundary from '@/components/ErrorBoundary';
@@ -29,6 +29,7 @@ import { LocationState, Post } from '@/types';
 function AppShell() {
   const { state, unreadCount, setLocation, markSeenLocationPrompt, syncInteractions } = useApp();
   const { user } = useAuth();
+  const { locale } = useLanguage();
   const [splashDone,         setSplashDone]         = useState(false);
   const [activeTab,          setActiveTab]           = useState<Tab>('feed');
   const [showAuth,           setShowAuth]            = useState(false);
@@ -72,9 +73,11 @@ function AppShell() {
     // Send the user's learned top interests too, so the daily push can be
     // personalised ("for the music lovers near you") instead of generic.
     const categories = getTopCategories(state.preferences, state.aiProfile, 3);
-    void subscribeToPush({ city: loc.city, lat: loc.lat, lng: loc.lng, categories, userId: user?.id });
+    // `locale` rides along so the server can write the whole notification in the
+    // user's own language. Re-fires when they change it in Settings.
+    void subscribeToPush({ city: loc.city, lat: loc.lat, lng: loc.lng, categories, userId: user?.id, locale });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.location?.city, user?.id]);
+  }, [state.location?.city, user?.id, locale]);
 
   // Keep the app-icon badge in sync with unread notifications — like any other
   // app. While the notifications panel is open the user is actively reading them,

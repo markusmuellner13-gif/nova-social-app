@@ -158,6 +158,7 @@ export async function fetchEventbriteEvents(
     return {
       id: `eb_${idMatch?.[1] ?? `${slugify(city)}_${slug}_${page}_${i}`}`,
       user: makeUser(venue, 'eventbrite.com'),
+      title: ev.name,
       image,
       caption: `${(ev.description ?? `${ev.name} in ${evCity}.`).slice(0, 300)}\n\n📅 ${dateStr}${time ? ` · ${time}` : ''}\n📍 ${venue}${addr ? `, ${addr}` : ''}\n🎟️ See website\n🔗 Tickets & info: ${evUrl}`,
       likes: 0,

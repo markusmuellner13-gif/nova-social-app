@@ -44,6 +44,11 @@ export interface Post {
   // Optional extra photos for a swipeable gallery (e.g. several real Wikimedia
   // photos of a landmark). When absent or length<=1, the post shows just `image`.
   images?: string[];
+  // The event's REAL name, as published by the source (Ticketmaster `name`,
+  // Eventbrite `name`, SeatGeek `title`, JSON-LD `name`…). Optional only for
+  // back-compat with rows written before it existed; render it through
+  // `postTitle()` in src/lib/postTitle.ts, never directly.
+  title?: string;
   caption: string;
   likes: number;
   comments: number;

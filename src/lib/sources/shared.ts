@@ -16,6 +16,11 @@ export interface ApiPost {
   };
   image: string;
   images?: string[]; // optional gallery (multiple real photos) for a carousel
+  // The event/place's REAL published name. Render via `postTitle()` in
+  // src/lib/postTitle.ts — never read this (or the caption) directly, or the
+  // fallback chain drifts apart per component, which is how a raw URL and a
+  // mid-sentence blurb both ended up as headlines in production.
+  title?: string;
   caption: string;
   likes: number;
   comments: number;

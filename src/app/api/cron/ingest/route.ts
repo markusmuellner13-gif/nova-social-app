@@ -5,6 +5,7 @@ import { validateBatch } from '@/lib/eventValidation';
 import { recordSourceYield } from '@/lib/sourceStats';
 import { curate, recordCuration, prewarmImages, type CurationReport } from '@/lib/brain/curator';
 import type { ApiPost } from '@/lib/sources/shared';
+import { backfillVenueCoords } from '@/lib/sources/venueGeo';
 
 export const maxDuration = 60; // Hobby plan cap; the route self-limits to ~45s and resumes via ?offset
 
@@ -127,6 +128,17 @@ const CITIES: [string, string, number, number][] = [
 //   ?tier=slow → only the slow-moving places (refresh ~daily)
 //   (no tier)  → the full catalogue, fast categories first
 const FAST_CATEGORIES = ['events', 'music', 'sports', 'art', 'venues', 'community'];
+
+// How many pages deep to sweep the fast (event) categories. Page 0 alone capped
+// every city at `PER_PAGE` events per category regardless of what the sources
+// held; 3 pages triples the ceiling from the SAME free sources at no API cost.
+// Raising this lengthens the work list, so each city comes round less often —
+// 3 is the point where extra depth stops beating extra freshness.
+const EXTRA_PAGES = 3;
+
+// Posts requested per (city × category × page). Was 12; the free sources return
+// more than that per page, so the extra was simply being discarded.
+const PER_PAGE = 20;
 const SLOW_CATEGORIES = [
   'sightseeing', 'restaurants', 'hotels', 'rentals', 'shops',
   'food', 'fitness', 'lifestyle', 'tech', 'fashion', 'travel', 'pets', 'outdoors',
@@ -163,9 +175,22 @@ export async function GET(request: NextRequest) {
   // the Hobby plan caps functions at ~60s, so each call processes a time-bounded
   // slice and returns nextOffset. Call repeatedly until done=true. Offsets are
   // relative to the selected tier's work list.
-  const work: { city: string; country: string; lat: number; lng: number; category: string }[] = [];
+  // The sweep only ever fetched page 0, so a city's catalogue was capped at
+  // `count` posts per category no matter how much the sources actually had.
+  // Pages are added as EXTRA WORK ITEMS rather than extra work inside an item:
+  // each item keeps its existing ~24s cost and the offset/rotation machinery
+  // already handles a longer list, so this deepens coverage without pushing any
+  // single invocation towards the 60s platform cap.
+  //
+  // Only the fast tier gets extra pages. Slow categories are OSM/Wikipedia
+  // places, where page>0 mostly returns nothing — spending slices on empty
+  // pages would make coverage worse, not better.
+  const work: { city: string; country: string; lat: number; lng: number; category: string; page: number }[] = [];
   for (const [city, country, lat, lng] of CITIES) {
-    for (const category of cats) work.push({ city, country, lat, lng, category });
+    for (const category of cats) {
+      const pages = FAST_CATEGORIES.includes(category) ? EXTRA_PAGES : 1;
+      for (let page = 0; page < pages; page++) work.push({ city, country, lat, lng, category, page });
+    }
   }
   // When invoked by the daily cron (no offset), rotate the starting point each
   // day so every city gets refreshed over a few days despite the 60s cap.
@@ -178,7 +203,16 @@ export async function GET(request: NextRequest) {
   // check — so deadline + per-item timeout must stay < 60s. A cold city's live
   // compute (Overpass + image enrichment across a dozen places) runs 16–22s, so
   // the per-item timeout below is 24s; 30s + 24s = 54s, safely under the cap.
-  const deadline = Date.now() + 30_000;
+  const startedAt = Date.now();
+  const deadline = startedAt + 30_000;
+  // The hard ceiling that whole-slice work must finish by. The geocode pass runs
+  // AFTER the 24s fetch inside the same item, so it cannot have a fixed budget of
+  // its own: 30s + 24s + 8s would be 62s and the platform would kill the function
+  // mid-item, losing the slice's upsert entirely. It gets whatever is left under
+  // this ceiling instead, which is the full 8s on a normal item and nothing at
+  // all on a pathological one.
+  const SLICE_CEILING_MS = 54_000;
+  const GEO_BUDGET_MS = 8_000;
 
   let ingested = 0;
   let rejected = 0;
@@ -187,6 +221,9 @@ export async function GET(request: NextRequest) {
   // as filler, and how many image renders we warmed for the accepted posts.
   let curatedOut = 0;
   let prewarmed = 0;
+  // How many city-centred posts got their venue's real coordinates this slice.
+  let located = 0;
+  let geoAttempted = 0;
   const curationReports: CurationReport[] = [];
   const errors: string[] = [];
   // Accumulate per-source accept/reject so the learning layer knows which
@@ -196,11 +233,11 @@ export async function GET(request: NextRequest) {
   let i = offset;
   for (; i < work.length; i++) {
     if (Date.now() > deadline) break;
-    const { city, country, lat, lng, category } = work[i];
+    const { city, country, lat, lng, category, page } = work[i];
     try {
       const params = new URLSearchParams({
         city, country, lat: String(lat), lng: String(lng),
-        page: '0', radius: '25', count: '12', category, fresh: '1',
+        page: String(page), radius: '25', count: String(PER_PAGE), category, fresh: '1',
         // Ingest has a 24s window per city and its result is STORED, so it can
         // afford to chase down a real photo for every post. A visitor's request
         // gets the short budget; this pass is what makes the stored row arrive
@@ -208,7 +245,7 @@ export async function GET(request: NextRequest) {
         photoBudgetMs: '12000',
       });
       const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(24000) });
-      if (!res.ok) { errors.push(`${city}/${category}:${res.status}`); processed++; continue; }
+      if (!res.ok) { errors.push(`${city}/${category}#${page}:${res.status}`); processed++; continue; }
       const data = await res.json() as { posts?: ApiPost[] };
       const raw = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
 
@@ -237,6 +274,22 @@ export async function GET(request: NextRequest) {
       }
 
       if (curated.length) {
+        // GATE 3 — put each post where it actually IS. Crawled listings rarely
+        // publish geo, so they fall back to the CITY CENTRE: measured Vienna,
+        // 8 posts shared 2 coordinate pairs and every distanceKm was 0. That
+        // silently broke distance labels, stacked every map pin on one dot and
+        // fed the ranker's `proximity` feature a constant. Geocoding here means
+        // the stored row is correct forever and no user request ever pays for
+        // it. Time-boxed, and unresolved posts simply keep the centre.
+        const geoBudget = Math.min(GEO_BUDGET_MS, startedAt + SLICE_CEILING_MS - Date.now());
+        if (geoBudget > 0) {
+          const geo = await backfillVenueCoords(curated, {
+            city, cityLat: lat, cityLng: lng, budgetMs: geoBudget,
+          }).catch(() => ({ located: 0, attempted: 0 }));
+          located += geo.located;
+          geoAttempted += geo.attempted;
+        }
+
         const rows = curated.map(p => postToRow(p, sourceOf(p.id), country));
         ingested += await upsertEvents(rows);
         // Warm the image renders for what we just stored, so the first real
@@ -245,7 +298,7 @@ export async function GET(request: NextRequest) {
       }
       processed++;
     } catch (err) {
-      errors.push(`${city}/${category}:${err instanceof Error ? err.message : 'err'}`);
+      errors.push(`${city}/${category}#${page}:${err instanceof Error ? err.message : 'err'}`);
       processed++;
     }
   }
@@ -263,7 +316,8 @@ export async function GET(request: NextRequest) {
   ));
 
   return NextResponse.json({
-    ok: true, tier: tier ?? 'all', ingested, rejected, curatedOut, prewarmed, processed, offset, nextOffset: done ? null : i,
+    ok: true, tier: tier ?? 'all', ingested, rejected, curatedOut, prewarmed,
+    located, geoAttempted, processed, offset, nextOffset: done ? null : i,
     total: work.length, done, errors: errors.slice(0, 8),
   });
 }

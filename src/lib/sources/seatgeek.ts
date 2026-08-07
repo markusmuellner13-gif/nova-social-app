@@ -63,6 +63,7 @@ export async function fetchSeatGeekEvents(
     return {
       id: `sg_${ev.id}`,
       user: makeUser(venueName, 'seatgeek.com'),
+      title: ev.title,
       // The performer's own photo, or none — never a stand-in.
       image: ev.performers?.[0]?.image ?? '',
       caption: `${ev.title} — live at ${venueName}.\n\n📅 ${dateStr}${time ? ` · ${time}` : ''}\n📍 ${venueName}${ev.venue?.address ? `, ${ev.venue.address}` : ''}\n🎟️ ${price}\n🔗 Tickets & info: ${ev.url}`,

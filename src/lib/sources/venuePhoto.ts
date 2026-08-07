@@ -17,6 +17,7 @@ import type { ApiPost } from './shared';
 import { enforceRealImages } from './realImage';
 import { fetchCommonsImagesByWikidata } from './wikipedia';
 import { placesBudgetExceeded, notePlacesCall } from '@/lib/placesBudget';
+import { dropIncompletePosts } from '@/lib/postQuality';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Quality guards
@@ -492,5 +493,9 @@ export async function backfillPostPhotos<T extends ApiPost>(
 export async function finalizePhotos<T extends ApiPost>(
   posts: T[], budgetMs?: number
 ): Promise<T[]> {
-  return enforceRealImages(await backfillPostPhotos(posts, { budgetMs }));
+  // The quality floor runs LAST, after the photo work: `enforceRealImages` can
+  // blank an unrelated photo, and a post that ends up with neither a photo nor
+  // a headline should not ship. Both feed routes funnel through here, so this
+  // is the one place that guarantees no blank card reaches a screen.
+  return dropIncompletePosts(enforceRealImages(await backfillPostPhotos(posts, { budgetMs })));
 }
