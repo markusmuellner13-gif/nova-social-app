@@ -59,9 +59,9 @@ jobs:
           # see the 2026-08-06 note in ingest.yml. A dead notification pipeline is
           # invisible from the outside: nobody reports the push they never got.
           code=$(curl -s -m 60 -H "Authorization: Bearer $CRON_SECRET" \
-            -o body.json -w '%{http_code}' "$BASE_URL/api/cron/push?slot=$slot" || echo 000)
+            -o body.json -w '%{http_code}' "$BASE_URL/api/cron/push?slot=$slot" || true)
           echo "HTTP $code"
-          head -c 500 body.json || true
+          head -c 500 body.json 2>/dev/null || true
           echo ""
           if [ "$code" = "401" ] || [ "$code" = "403" ]; then
             echo "::error::HTTP $code from /api/cron/push — the CRON_SECRET repo secret no longer matches the CRON_SECRET env var in Vercel. Reset both to the same value."

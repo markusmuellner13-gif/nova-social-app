@@ -63,7 +63,7 @@ jobs:
           ok_slices=0
           for i in $(seq 1 8); do
             code=$(curl -s -m 90 -H "$auth" -o body.json -w '%{http_code}' \
-              "$BASE_URL/api/cron/ingest?tier=fast&offset=$offset" || echo 000)
+              "$BASE_URL/api/cron/ingest?tier=fast&offset=$offset" || true)
             # 401/403 is a configuration fault — the secret here and the one in
             # Vercel have drifted. Retrying can never fix it, so stop loudly.
             if [ "$code" = "401" ] || [ "$code" = "403" ]; then
@@ -71,7 +71,7 @@ jobs:
               exit 1
             fi
             if [ "$code" != "200" ]; then
-              echo "::warning::fast slice $i: HTTP $code — $(head -c 200 body.json)"
+              echo "::warning::fast slice $i: HTTP $code — $(head -c 200 body.json 2>/dev/null)"
               break
             fi
             resp=$(cat body.json)
@@ -108,13 +108,13 @@ jobs:
           for i in $(seq 1 10); do
             url="$BASE_URL/api/cron/ingest"
             if [ -n "$offset" ]; then url="$url?offset=$offset"; fi
-            code=$(curl -s -m 90 -H "$auth" -o body.json -w '%{http_code}' "$url" || echo 000)
+            code=$(curl -s -m 90 -H "$auth" -o body.json -w '%{http_code}' "$url" || true)
             if [ "$code" = "401" ] || [ "$code" = "403" ]; then
               echo "::error::HTTP $code from /api/cron/ingest — the CRON_SECRET repo secret no longer matches the CRON_SECRET env var in Vercel. Reset both to the same value."
               exit 1
             fi
             if [ "$code" != "200" ]; then
-              echo "::warning::slice $i: HTTP $code — $(head -c 200 body.json)"
+              echo "::warning::slice $i: HTTP $code — $(head -c 200 body.json 2>/dev/null)"
               break
             fi
             resp=$(cat body.json)
@@ -144,9 +144,9 @@ jobs:
           # is still printed — a silent 401 here is what hid the outage of
           # 2026-08-06, and this step calls the same secret as the two above.
           code=$(curl -s -m 90 -H "Authorization: Bearer $CRON_SECRET" \
-            -o body.json -w '%{http_code}' "$BASE_URL/api/cron/ingest-towns?offset=0" || echo 000)
+            -o body.json -w '%{http_code}' "$BASE_URL/api/cron/ingest-towns?offset=0" || true)
           echo "ingest-towns: HTTP $code"
-          head -c 400 body.json || true
+          head -c 400 body.json 2>/dev/null || true
           echo ""
           if [ "$code" != "200" ]; then
             echo "::warning::ingest-towns returned HTTP $code (step is best-effort, run not failed)."
