@@ -123,4 +123,30 @@ describe('backfillVenueCoords', () => {
     const out = await backfillVenueCoords([], { city: 'Vienna', cityLat: VIENNA.lat, cityLng: VIENNA.lng });
     expect(out).toEqual({ posts: [], located: 0, attempted: 0 });
   });
+
+  // This runs inside the ingest route's per-item window, after a fetch that can
+  // already take 24s of the 60s the platform allows. If the budget is advisory,
+  // one venue's three-step cascade — each step pacing then waiting on a hung
+  // Nominatim — runs ~15s past it and the function is killed mid-item, which
+  // throws away the slice's upsert. The budget has to be a real ceiling.
+  it('honours its budget even when every lookup hangs', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      (_u, init) => new Promise((_res, rej) => {
+        // Behave like a hung server: only ever settle via the caller's abort.
+        (init as RequestInit)?.signal?.addEventListener('abort', () => rej(new Error('aborted')));
+      }) as Promise<Response>,
+    );
+    const posts = Array.from({ length: 5 }, () =>
+      post({ eventVenue: 'Somewhere, 1 Test Straße, Wien' }));
+
+    const startedAt = Date.now();
+    const out = await backfillVenueCoords(posts, {
+      city: 'Wien', cityLat: VIENNA.lat, cityLng: VIENNA.lng, budgetMs: 1000,
+    });
+    const elapsed = Date.now() - startedAt;
+
+    expect(out.located).toBe(0);
+    // Generous, but far below the ~15s a single unbounded cascade would take.
+    expect(elapsed).toBeLessThan(3000);
+  });
 });

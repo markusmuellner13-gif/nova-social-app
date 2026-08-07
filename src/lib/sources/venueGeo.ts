@@ -103,7 +103,8 @@ function streetWithoutNumber(street: string): string {
  */
 export async function geocodeVenue(
   parts: { name: string; street: string; city: string },
-  { cityLat, cityLng, timeoutMs = 4000 }: { cityLat: number; cityLng: number; timeoutMs?: number },
+  { cityLat, cityLng, timeoutMs = 4000, deadline }:
+    { cityLat: number; cityLng: number; timeoutMs?: number; deadline?: number },
 ): Promise<Coords | null> {
   const { name, street, city } = parts;
   if (!city || (!name && !street)) return null;
@@ -121,11 +122,20 @@ export async function geocodeVenue(
 
   let transientOnly = attempts.length > 0;
   for (const url of attempts) {
+    // The cascade is up to three lookups, each pacing then waiting on Nominatim.
+    // Without this the caller's budget is advisory only: three attempts can run
+    // 3 × (1.1s pace + 4s timeout) ≈ 15s past it, and this runs inside the
+    // ingest route's slice, where overshooting means the platform kills the
+    // function. Stop when the caller's deadline is spent, and never let a single
+    // request outlive it.
+    if (deadline !== undefined && Date.now() >= deadline) break;
     try {
       await pace();
+      const left = deadline === undefined ? timeoutMs : Math.min(timeoutMs, deadline - Date.now());
+      if (left <= 0) break;
       const res = await fetch(url, {
         headers: { 'User-Agent': UA, 'Accept-Language': 'en' },
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: AbortSignal.timeout(left),
       });
       if (!res.ok) continue; // 429/5xx — transient, keep `transientOnly` true
       const rows = (await res.json()) as { lat?: string; lon?: string }[];
@@ -184,7 +194,7 @@ export async function backfillVenueCoords<T extends ApiPost>(
     const parts = venueParts(post, city);
     if (!parts.name && !parts.street) continue; // nothing to look up
     attempted++;
-    const hit = await geocodeVenue(parts, { cityLat, cityLng });
+    const hit = await geocodeVenue(parts, { cityLat, cityLng, deadline });
     if (hit && post.location) {
       post.location.lat = hit.lat;
       post.location.lng = hit.lng;

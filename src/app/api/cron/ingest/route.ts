@@ -203,7 +203,16 @@ export async function GET(request: NextRequest) {
   // check — so deadline + per-item timeout must stay < 60s. A cold city's live
   // compute (Overpass + image enrichment across a dozen places) runs 16–22s, so
   // the per-item timeout below is 24s; 30s + 24s = 54s, safely under the cap.
-  const deadline = Date.now() + 30_000;
+  const startedAt = Date.now();
+  const deadline = startedAt + 30_000;
+  // The hard ceiling that whole-slice work must finish by. The geocode pass runs
+  // AFTER the 24s fetch inside the same item, so it cannot have a fixed budget of
+  // its own: 30s + 24s + 8s would be 62s and the platform would kill the function
+  // mid-item, losing the slice's upsert entirely. It gets whatever is left under
+  // this ceiling instead, which is the full 8s on a normal item and nothing at
+  // all on a pathological one.
+  const SLICE_CEILING_MS = 54_000;
+  const GEO_BUDGET_MS = 8_000;
 
   let ingested = 0;
   let rejected = 0;
@@ -272,11 +281,14 @@ export async function GET(request: NextRequest) {
         // fed the ranker's `proximity` feature a constant. Geocoding here means
         // the stored row is correct forever and no user request ever pays for
         // it. Time-boxed, and unresolved posts simply keep the centre.
-        const geo = await backfillVenueCoords(curated, {
-          city, cityLat: lat, cityLng: lng, budgetMs: 8000,
-        }).catch(() => ({ located: 0, attempted: 0 }));
-        located += geo.located;
-        geoAttempted += geo.attempted;
+        const geoBudget = Math.min(GEO_BUDGET_MS, startedAt + SLICE_CEILING_MS - Date.now());
+        if (geoBudget > 0) {
+          const geo = await backfillVenueCoords(curated, {
+            city, cityLat: lat, cityLng: lng, budgetMs: geoBudget,
+          }).catch(() => ({ located: 0, attempted: 0 }));
+          located += geo.located;
+          geoAttempted += geo.attempted;
+        }
 
         const rows = curated.map(p => postToRow(p, sourceOf(p.id), country));
         ingested += await upsertEvents(rows);
