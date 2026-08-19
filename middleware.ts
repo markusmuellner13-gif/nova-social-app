@@ -69,7 +69,10 @@ function tierFor(pathname: string): Tier {
   if (
     pathname.startsWith('/api/chat') ||
     pathname.startsWith('/api/feed') ||
-    pathname.startsWith('/api/events')
+    pathname.startsWith('/api/events') ||
+    // Same shape as /api/feed: fans out to Overpass/Wikipedia and reads operator
+    // pages, so it belongs with the expensive routes rather than the cheap ones.
+    pathname.startsWith('/api/activities')
   ) return 'ai';
   if (
     pathname.startsWith('/api/business') ||

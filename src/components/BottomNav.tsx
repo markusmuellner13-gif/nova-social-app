@@ -1,10 +1,10 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { Compass, Search, Users, Sparkles, User } from 'lucide-react';
+import { Compass, Search, Users, Sparkles, User, Plane } from 'lucide-react';
 import { useLanguage } from '@/context/LanguageContext';
 
-export type Tab = 'feed' | 'explore' | 'groups' | 'chat' | 'profile';
+export type Tab = 'feed' | 'explore' | 'faraway' | 'groups' | 'chat' | 'profile';
 
 interface Props {
   active: Tab;
@@ -31,7 +31,16 @@ function NavButton({ Icon, label, isActive, onClick, badge }: {
           )}
         </AnimatePresence>
       </motion.div>
-      <span className="text-xs font-semibold" style={{ color: isActive ? '#a78bfa' : '#55556a', transition: 'color 0.2s', letterSpacing: '0.01em' }}>
+      {/* Six tabs share the bar, so a long label ("Far Far Away") gets a smaller
+          type size rather than being truncated or wrapped — the name is the
+          point of that tab and an ellipsis would defeat it. */}
+      <span className="font-semibold" style={{
+        color: isActive ? '#a78bfa' : '#55556a',
+        transition: 'color 0.2s',
+        letterSpacing: label.length > 9 ? '-0.02em' : '0.01em',
+        fontSize: label.length > 9 ? 8.5 : 11,
+        whiteSpace: 'nowrap',
+      }}>
         {label}
       </span>
     </button>
@@ -66,6 +75,7 @@ export default function BottomNav({ active, onChange }: Props) {
   const tabs: { id: Tab; Icon: React.ElementType; label: string; badge?: number; center?: boolean }[] = [
     { id: 'feed',    Icon: Compass,  label: t.nav.discover },
     { id: 'explore', Icon: Search,   label: t.nav.explore  },
+    { id: 'faraway', Icon: Plane,    label: t.nav.farAway  },
     { id: 'groups',  Icon: Users,    label: t.nav.groups,  center: true },
     { id: 'chat',    Icon: Sparkles, label: 'AI' },
     { id: 'profile', Icon: User,     label: t.nav.profile  },
@@ -85,7 +95,7 @@ export default function BottomNav({ active, onChange }: Props) {
               style={{ width: 44, height: 30, background: active === id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : 'linear-gradient(135deg, rgba(139,92,246,0.55), rgba(236,72,153,0.55))', boxShadow: active === id ? '0 2px 10px rgba(139,92,246,0.4)' : 'none' }}>
               <Icon size={21} color="white" strokeWidth={active === id ? 2.5 : 1.8} />
             </motion.div>
-            <span className="text-xs font-semibold" style={{ color: active === id ? '#a78bfa' : '#55556a', letterSpacing: '0.01em' }}>{t.nav.groups}</span>
+            <span className="font-semibold" style={{ color: active === id ? '#a78bfa' : '#55556a', letterSpacing: '0.01em', fontSize: 11, whiteSpace: 'nowrap' }}>{t.nav.groups}</span>
           </button>
         ) : (
           <NavButton key={id} Icon={Icon} label={label} isActive={active === id} onClick={() => onChange(id)} badge={badge} />

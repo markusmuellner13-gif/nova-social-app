@@ -21,6 +21,9 @@ import { ApiPost, makeUser, slugify, todayStr, haversineKm, fetchOgImage, proxyI
 import { cleanTitle } from '../postTitle';
 import { validateBatch } from '@/lib/eventValidation';
 import { sameLabel, dedupeAddressParts } from './eventbrite';
+import { decodeEntities } from '@/lib/htmlEntities';
+import { readPage } from '@/lib/brain/extractor';
+import type { ExtractedRecord } from '@/lib/brain/extractor';
 
 // The schema.org Event subtypes we treat as real events.
 const EVENT_TYPES = new Set([
@@ -59,35 +62,10 @@ function typeMatches(t: unknown): boolean {
   return false;
 }
 
-// Publishers routinely HTML-escape the text inside their JSON-LD, so titles
-// arrive as "Hans Zimmer, John Williams &amp; mehr" and get shown to the user
-// with the entity intact. There is no DOM on the server to decode with, and the
-// set of entities that actually appears in event titles is small.
-const NAMED_ENTITIES: Record<string, string> = {
-  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
-  ndash: '–', mdash: '—', hellip: '…', rsquo: '’', lsquo: '‘',
-  rdquo: '”', ldquo: '“', eacute: 'é', egrave: 'è', auml: 'ä', ouml: 'ö',
-  uuml: 'ü', Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü', szlig: 'ß', deg: '°', euro: '€',
-};
-
-export function decodeEntities(s: string): string {
-  if (!s.includes('&')) return s;
-  // Two passes: some feeds double-escape ("&amp;#39;"), and one pass would leave
-  // a bare "&#39;" behind.
-  let out = s;
-  for (let pass = 0; pass < 2 && out.includes('&'); pass++) {
-    out = out.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, body: string) => {
-      if (body[0] === '#') {
-        const code = body[1] === 'x' || body[1] === 'X'
-          ? parseInt(body.slice(2), 16)
-          : parseInt(body.slice(1), 10);
-        return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
-      }
-      return NAMED_ENTITIES[body] ?? NAMED_ENTITIES[body.toLowerCase()] ?? m;
-    });
-  }
-  return out;
-}
+// Moved to src/lib/htmlEntities.ts so the extraction engine can use it without
+// creating a webCrawler ↔ extractor import cycle. Re-exported here because this
+// is where callers (and the tests) have always imported it from.
+export { decodeEntities };
 
 function firstString(v: unknown): string | undefined {
   if (typeof v === 'string') return decodeEntities(v);
@@ -291,16 +269,51 @@ const CITY_ALIASES: Record<string, string> = {
   lisboa: 'lisbon', dublin: 'dublin',
 };
 
-function normCity(s: string): string {
-  const n = s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z]/g, '');
-  return CITY_ALIASES[n] ?? n;
+function foldCity(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/ß/g, 'ss').replace(/ø/g, 'o').replace(/æ/g, 'ae').replace(/å/g, 'a')
+    .replace(/[^a-z]/g, '');
 }
 
-function isDifferentMajorCity(venueCity: string, searchCity: string): boolean {
-  const v = normCity(venueCity);
-  const known = v in CITY_ALIASES || Object.values(CITY_ALIASES).includes(v);
-  if (!v || !known) return false;
-  return v !== normCity(searchCity);
+/**
+ * Does this listing's own city plausibly mean the city we searched for?
+ *
+ * The old check only said "no" for cities in CITY_ALIASES — a hand-written list
+ * of ~30 European cities. Every other place on earth was therefore treated as a
+ * match, which is how listings from other countries entirely rode a city page
+ * into a local feed: nothing recognised the name, so nothing rejected it, and
+ * `toApiPost` then stamped the SEARCH city's coordinates on it so the distance
+ * validator downstream saw a perfectly local event.
+ *
+ * Now the default is the other way round: an unrecognised, non-matching city
+ * name is a mismatch. Districts and suffixed forms ("Wien-Donaustadt", "Vienna
+ * 3rd District") still match, because either name contains the other.
+ */
+export function sameCityish(venueCity: string, searchCity: string): boolean {
+  const rawV = foldCity(venueCity), rawS = foldCity(searchCity);
+  if (!rawV || !rawS) return true;               // nothing to compare on
+
+  // Compare on every form each name can legitimately take: the whole string,
+  // its alias (Wien→vienna), and each of its own words plus their aliases. That
+  // last part is what makes "Wien-Donaustadt" match Vienna — the district
+  // suffix hides the alias inside a longer string, where a whole-string lookup
+  // never finds it.
+  const keys = (s: string): Set<string> => {
+    const raw = foldCity(s);
+    const out = new Set<string>([raw, CITY_ALIASES[raw] ?? raw]);
+    for (const word of s.split(/[^\p{L}]+/u)) {
+      const w = foldCity(word);
+      if (w.length < 3) continue;                // "3rd", "am", "bei" — noise
+      out.add(w);
+      const alias = CITY_ALIASES[w];
+      if (alias) out.add(alias);
+    }
+    return out;
+  };
+
+  const kv = keys(venueCity), ks = keys(searchCity);
+  for (const v of kv) if (ks.has(v)) return true;
+  return rawV.includes(rawS) || rawS.includes(rawV);
 }
 
 // ── Source URL builders (worldwide, no key) ───────────────────────────────────
@@ -450,7 +463,9 @@ async function fetchHtml(url: string, timeoutMs: number): Promise<string | null>
 
 // ── Map a crawled event → the app's ApiPost shape ─────────────────────────────
 
-function toApiPost(
+// Exported for tests: the locality guard below is the one piece of this module
+// that decides whether a listing is allowed to claim it is in the user's city.
+export function toApiPost(
   ev: CrawledEvent, idx: number, searchCity: string, searchCountry: string,
   fallbackLat: number, fallbackLng: number, category: string,
 ): ApiPost | null {
@@ -459,12 +474,18 @@ function toApiPost(
   if (rawDate < todayStr()) return null;
 
   const evCity = ev.locality || searchCity;
-  if (ev.locality && isDifferentMajorCity(ev.locality, searchCity)) return null;
 
   // Use the event's own coordinates when the page provided them (precise pins!),
   // otherwise fall back to the search-city centroid like the other sources.
   const hasGeo = typeof ev.lat === 'number' && typeof ev.lng === 'number'
     && Math.abs(ev.lat) <= 90 && Math.abs(ev.lng) <= 180 && (ev.lat !== 0 || ev.lng !== 0);
+
+  // A listing that names a different city is only kept when it brought its own
+  // coordinates — those go through `validateBatch`'s distance check, which can
+  // tell a genuine neighbouring suburb from another continent. Without them we
+  // would have to invent a location for it, and inventing the location is what
+  // let foreign listings pass as local.
+  if (ev.locality && !sameCityish(ev.locality, searchCity) && !hasGeo) return null;
   const lat = hasGeo ? ev.lat! : fallbackLat;
   const lng = hasGeo ? ev.lng! : fallbackLng;
 
@@ -523,6 +544,36 @@ function toApiPost(
   };
 }
 
+/**
+ * An engine record → this module's event shape.
+ *
+ * Only DATED records cross over: this crawler feeds the events half of the
+ * feed, and an undated museum arriving here would be filed as an event with a
+ * made-up date. Undated records are the Far Far Away tab's business instead.
+ */
+function recordToCrawled(rec: ExtractedRecord): CrawledEvent | null {
+  if (!rec.startDate || !rec.name) return null;
+  return {
+    name: rec.name,
+    description: rec.description ?? '',
+    startDate: rec.startDate,
+    endDate: rec.endDate,
+    // Prefer the page about the thing; a booking link is better than nothing.
+    url: rec.url ?? rec.ticketUrl ?? '',
+    image: rec.image,
+    venue: rec.venue,
+    street: rec.street,
+    locality: rec.locality,
+    region: rec.region,
+    country: rec.country,
+    lat: rec.lat,
+    lng: rec.lng,
+    price: rec.price,
+    currency: rec.currency,
+    organizer: rec.organizer,
+  };
+}
+
 // ── Public entry point ────────────────────────────────────────────────────────
 
 export async function crawlCityEvents(opts: {
@@ -533,17 +584,32 @@ export async function crawlCityEvents(opts: {
   const urls = buildSourceUrls(city, country, category);
   if (urls.length === 0) return [];
 
-  const htmls = await Promise.all(urls.map(u => fetchHtml(u, 7000)));
+  const htmls = await Promise.all(urls.map(async u => ({ url: u, html: await fetchHtml(u, 7000) })));
   const seen = new Set<string>();
   const events: CrawledEvent[] = [];
-  for (const html of htmls) {
+  const add = (ev: CrawledEvent) => {
+    const key = `${ev.name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40)}|${ev.startDate.slice(0, 10)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    events.push(ev);
+  };
+
+  for (const { url, html } of htmls) {
     if (!html) continue;
-    for (const ev of extractEventsFromHtml(html)) {
-      const key = `${ev.name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40)}|${ev.startDate.slice(0, 10)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      events.push(ev);
-    }
+    for (const ev of extractEventsFromHtml(html)) add(ev);
+
+    // Then the adaptive engine over the SAME html — no extra fetch. It brings
+    // microdata, the learned per-host readers, and the ability to learn a site
+    // whose format neither reader above understands. The two paths overlap on
+    // well-behaved sites, which is what the dedupe key is for; the point is the
+    // sites where the path above returns nothing at all.
+    try {
+      const { records } = await readPage(html, { url, kind: 'event' });
+      for (const rec of records) {
+        const ev = recordToCrawled(rec);
+        if (ev) add(ev);
+      }
+    } catch { /* the engine never throws, but never let it break the crawl */ }
   }
 
   let posts: ApiPost[] = [];

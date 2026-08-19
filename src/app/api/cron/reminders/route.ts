@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isCronRequest } from '@/lib/cronAuth';
 import { cacheEnabled, cacheScanKeys, cacheGet, cacheSet, cacheDelete } from '@/lib/serverCache';
 import { webPushEnabled, sendPush, PushSub } from '@/lib/webpush';
+import { buildReminderBody } from '@/lib/pushCopy';
 import type { StoredReminder } from '@/app/api/push/subscribe/route';
 
 export const runtime = 'nodejs';
@@ -29,6 +30,8 @@ interface Envelope {
   subscription: PushSub;
   reminders?: StoredReminder[];
   sentReminderIds?: string[];
+  /** The language the user picked — the reminder body is written in it. */
+  locale?: string;
   ts?: number;
 }
 
@@ -36,9 +39,17 @@ interface Envelope {
 // at 3am for a concert that finished yesterday is worse than staying silent.
 const MAX_LATENESS_MS = 3 * 60 * 60 * 1000;
 
-function body(r: StoredReminder): string {
-  const when = r.minutesBefore >= 1440 ? 'tomorrow' : 'in about an hour';
-  return r.venue ? `${r.title} at ${r.venue} — ${when}` : `${r.title} — ${when}`;
+// The reminder names the event, because the user set it on that event — but the
+// name goes in the TITLE and the sentence around it goes in the BODY, in their
+// own language. The old single line ("<German title> at <venue> — in about an
+// hour") was an English sentence wrapped around foreign text, the exact mixed
+// -language problem pushCopy exists to prevent.
+function reminderMessage(r: StoredReminder, locale?: string): { title: string; body: string } {
+  const name = (r.title ?? '').trim().replace(/\s+/g, ' ').slice(0, 70);
+  return {
+    title: name || 'Nova',
+    body: buildReminderBody(r.minutesBefore, { locale, venue: r.venue }),
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -77,9 +88,10 @@ export async function GET(request: NextRequest) {
         alreadySent.add(id); changed = true; skippedStale++; continue;
       }
 
+      const { title, body } = reminderMessage(r, env.locale);
       const res = await sendPush(env.subscription, {
-        title: 'Nova — Upcoming event 🎉',
-        body: body(r),
+        title,
+        body,
         url: `/e/${r.postId}`,
         tag: `nova-reminder-${r.postId}`,
       });
