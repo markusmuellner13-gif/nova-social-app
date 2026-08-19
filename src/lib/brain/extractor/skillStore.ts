@@ -111,13 +111,28 @@ export async function reward(host: string, skillId: string, records: number): Pr
   if (!skill) return;
 
   const observed = records > 0 ? Math.min(1, 0.4 + records / 20) : 0;
+  const before = skill.score;
   skill.trials += 1;
   if (records > 0) skill.wins += 1;
   skill.score = skill.score + ALPHA * (observed - skill.score);
   skill.lastUsed = Date.now();
 
   const kept = skills.filter(s => !(s.trials >= MIN_TRIALS && s.score < DROP_SCORE));
-  await persist(host, kept);
+  const dropped = kept.length !== skills.length;
+
+  // Writing on every single use would mean a Redis write per crawled page per
+  // host — the crawler reads several pages per feed request, so that is a lot
+  // of traffic to record a heuristic that barely moved. The in-memory mirror is
+  // always updated (above); Redis is written only when the outcome actually
+  // matters: a skill was dropped, the score moved materially, or every few
+  // trials so a long quiet run still checkpoints. Losing a couple of trials'
+  // stats to an instance recycle costs nothing — the score re-converges.
+  const moved = Math.abs(skill.score - before) > 0.05;
+  if (dropped || moved || skill.trials % 5 === 0) {
+    await persist(host, kept);
+  } else {
+    memory.set(host, { skills: sortSkills(kept), at: Date.now() });
+  }
 }
 
 /** Everything the engine has learned — powers the /api/cron/brain self-report. */
