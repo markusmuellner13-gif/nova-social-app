@@ -10,6 +10,7 @@ import { assessQuality, qualityFloorFor, filterByQuality } from './quality';
 import { curate, mergeDuplicates } from './curator';
 import type { ApiPost } from '@/lib/sources/shared';
 import { parseTripQuery } from './trip';
+import { learnSkill, harvestPayloads } from './extractor';
 
 function post(o: Partial<ApiPost> = {}): ApiPost {
   return {
@@ -317,10 +318,25 @@ describe('Nova Brain still does every job', () => {
     }
   });
 
-  it('JOB 5 (new) — plans a trip, without disturbing the others', () => {
+  it('JOB 5 — plans a trip, without disturbing the others', () => {
     const q = parseTripQuery('going to Rome in three weeks');
     expect(q.isTrip).toBe(true);
     // …and an ordinary local question still falls through to the normal path.
     expect(parseTripQuery("what's on tonight?").isTrip).toBe(false);
+  });
+
+  it('JOB 6 (new) — learns to read a site whose format it has never seen', () => {
+    // The engine's own suite covers this properly; the point of asserting it
+    // here is that adding it did not cost the brain any of the five jobs above.
+    const rows = Array.from({ length: 8 }, (_, i) => ({
+      rubrik: `Sonderausstellung Nummer ${i + 1}`,
+      startet: `2026-11-0${(i % 9) + 1}T10:00:00`,
+      seite: `https://haus.example/ausstellung/${i}`,
+    }));
+    const html = `<html><body><script id="__NEXT_DATA__" type="application/json">${
+      JSON.stringify({ props: { pageProps: { items: rows } } })}</script></body></html>`;
+    const learned = learnSkill(harvestPayloads(html), { host: 'haus.example' });
+    expect(learned).not.toBeNull();
+    expect(learned!.records.length).toBeGreaterThanOrEqual(8);
   });
 });

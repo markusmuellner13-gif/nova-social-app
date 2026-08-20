@@ -13,6 +13,7 @@ import AuthModal from '@/components/AuthModal';
 import CityExplorer from '@/components/CityExplorer';
 import ToastContainer from '@/components/ToastContainer';
 import ChatTab from '@/components/ChatTab';
+import FarAwayTab from '@/components/FarAwayTab';
 import LocationPermissionPrompt from '@/components/LocationPermissionPrompt';
 import { useApp, setSupabaseUser } from '@/context/AppContext';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
@@ -162,6 +163,7 @@ function AppShell() {
             <ErrorBoundary>
               {activeTab === 'feed'    && <FeedTab onOpenLocationPrompt={() => setShowLocationPrompt(true)} onOpenCityExplorer={() => setShowCityExplorer(true)} onOpenNotifications={() => setShowNotifications(true)} locationLoading={permission === 'loading'} />}
               {activeTab === 'explore' && <SearchTab />}
+              {activeTab === 'faraway' && <FarAwayTab />}
               {activeTab === 'groups'  && <GroupsTab onOpenAuth={() => setShowAuth(true)} />}
               {activeTab === 'chat'    && <ChatTab location={state.location} />}
               {activeTab === 'profile' && <ProfileTab onOpenAuth={() => setShowAuth(true)} />}

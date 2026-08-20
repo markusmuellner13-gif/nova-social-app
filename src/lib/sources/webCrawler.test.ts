@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractEventsFromHtml, extractEmbeddedEvents, decodeEntities } from './webCrawler';
+import { extractEventsFromHtml, extractEmbeddedEvents, decodeEntities, sameCityish, toApiPost } from './webCrawler';
 
 describe('decodeEntities', () => {
   it('decodes the entities publishers escape into their JSON-LD', () => {
@@ -90,5 +90,64 @@ describe('extractEventsFromHtml', () => {
     </script>`;
     // "Bob" has a name + date but no venue/url → not trusted; "Settings" has no date.
     expect(extractEmbeddedEvents(html)).toHaveLength(0);
+  });
+});
+
+describe('locality guard', () => {
+  it('matches a city against its own aliases and districts', () => {
+    expect(sameCityish('Wien', 'Vienna')).toBe(true);
+    expect(sameCityish('Roma', 'Rome')).toBe(true);
+    expect(sameCityish('Wien-Donaustadt', 'Vienna')).toBe(true);
+    expect(sameCityish('Vienna 3rd District', 'Vienna')).toBe(true);
+    expect(sameCityish('Zürich', 'Zurich')).toBe(true);
+  });
+
+  it('treats an UNRECOGNISED different city as a mismatch', () => {
+    // The old check only knew a hand-written list of European cities, so every
+    // other place on earth defaulted to "match" and rode the city page in.
+    expect(sameCityish('Mumbai', 'Vienna')).toBe(false);
+    expect(sameCityish('Ahmedabad', 'Graz')).toBe(false);
+    expect(sameCityish('Toronto', 'Turin')).toBe(false);
+  });
+
+  it('does not judge when one side is missing', () => {
+    expect(sameCityish('', 'Vienna')).toBe(true);
+    expect(sameCityish('Vienna', '')).toBe(true);
+  });
+});
+
+describe('toApiPost locality handling', () => {
+  const ev = (over: Partial<Parameters<typeof toApiPost>[0]> = {}) => ({
+    name: 'Some Real Concert',
+    description: 'A concert.',
+    startDate: '2099-09-12T20:00',
+    url: 'https://example.org/e/1',
+    ...over,
+  });
+
+  it('drops a listing from another city that brought no coordinates of its own', () => {
+    // This is the exact shape that produced foreign events in a local feed:
+    // no geo, so the search city's centroid would have been stamped on it and
+    // the distance validator downstream would have seen a local event.
+    expect(toApiPost(ev({ locality: 'Mumbai' }), 0, 'Vienna', 'Austria', 48.2, 16.37, 'events'))
+      .toBeNull();
+  });
+
+  it('keeps a listing from another city when it carries real coordinates', () => {
+    // Its own geo means the distance validator can judge it honestly.
+    const post = toApiPost(
+      ev({ locality: 'Schwechat', lat: 48.14, lng: 16.56 }), 0, 'Vienna', 'Austria', 48.2, 16.37, 'events',
+    );
+    expect(post).not.toBeNull();
+    expect(post!.location.lat).toBeCloseTo(48.14);
+  });
+
+  it('keeps a normal local listing', () => {
+    expect(toApiPost(ev({ locality: 'Wien' }), 0, 'Vienna', 'Austria', 48.2, 16.37, 'events'))
+      .not.toBeNull();
+  });
+
+  it('keeps a listing that states no city at all', () => {
+    expect(toApiPost(ev(), 0, 'Vienna', 'Austria', 48.2, 16.37, 'events')).not.toBeNull();
   });
 });

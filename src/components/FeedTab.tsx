@@ -11,6 +11,8 @@ import { useApp } from '@/context/AppContext';
 import { useAIFeed } from '@/hooks/useAIFeed';
 import { initBrain, rankPosts, setBrainContext, flushBrain } from '@/lib/brain/client';
 import { hasRealPhoto } from '@/lib/brain/features';
+import { chooseNudge, loadNudgeMemory, saveNudgeMemory, rememberNudge } from '@/lib/inAppNudge';
+import { postTitle } from '@/lib/postTitle';
 import { apiUrl } from '@/lib/apiBase';
 import PostComponent from './Post';
 import { useLanguage } from '@/context/LanguageContext';
@@ -123,7 +125,7 @@ interface Props {
 
 export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOpenNotifications, locationLoading }: Props) {
   const { state, unreadCount, learnCategory, addNotification } = useApp();
-  const { t } = useLanguage();
+  const { t, locale } = useLanguage();
   const { preferences, aiProfile } = state;
   const location = state.location;
 
@@ -233,17 +235,40 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     prevAiIdsRef.current = new Set(aiPosts.map(p => p.id));
     if (newPosts.length === 0) return;
 
-    const topCats = getTopCategories(preferences, aiProfile, 3);
-    const match = newPosts.find(p => topCats.includes(p.category as Category));
-    if (!match) return;
+    // Which post — if any — has earned an interruption. The memory is read from
+    // localStorage rather than a ref, because this component unmounts every time
+    // the user visits another tab: a ref meant the same post announced itself
+    // again on every return, which is exactly what made this notification the
+    // one people wanted turned off.
+    const memory = loadNudgeMemory();
+    const decision = chooseNudge({
+      candidates: newPosts.map(p => ({
+        id: p.id,
+        category: p.category,
+        hasPhoto: hasRealPhoto(p.image),
+        eventDateRaw: p.eventDateRaw,
+        isEvent: p.isEvent,
+      })),
+      topCategories: getTopCategories(preferences, aiProfile, 3),
+      memory,
+      city: location?.city ?? '',
+      locale,
+    });
+    if (!decision) return;
 
-    // In-app notification carrying the REAL post — tapping it opens that post.
+    const match = newPosts.find(p => p.id === decision.post.id);
+    if (!match) return;
+    saveNudgeMemory(rememberNudge(memory, match.id));
+
+    // The in-app list still carries the REAL post — tapping it opens that post,
+    // and there the source's own title is exactly what you want to read. It is
+    // only the OS-level notification that must not quote it.
     addNotification({
       id: `evt_${match.id}`,
       user: NOVA_AI_USER,
       type: match.isEvent ? 'event' : 'ai_suggestion',
       postImage: match.image,
-      text: `New in ${location?.city || 'your area'}: ${match.caption.split('\n')[0].slice(0, 70)}`,
+      text: `${decision.title} — ${postTitle(match, decision.body)}`,
       timestamp: Date.now(),
       read: false,
       postId: match.id,
@@ -252,9 +277,12 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
 
     if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
       try {
-        new Notification('Nova — New event just listed ✨', {
-          body: match.caption.split('\n')[0].slice(0, 80),
+        new Notification(decision.title, {
+          body: decision.body,
           icon: '/favicon.ico',
+          // Same tag as the push digest family, so a new nudge REPLACES the old
+          // one in the tray instead of stacking up behind it.
+          tag: 'nova-nudge',
         });
       } catch { /* permission revoked */ }
     }

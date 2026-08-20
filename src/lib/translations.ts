@@ -11,7 +11,19 @@ export const LOCALE_FLAGS: Record<Locale, string> = {
 };
 
 export interface AppTranslations {
-  nav: { discover: string; explore: string; groups: string; activity: string; profile: string };
+  nav: { discover: string; explore: string; groups: string; activity: string; profile: string; farAway: string };
+  // "Far Far Away" — the trip-planning tab. The NAME stays in English in every
+  // locale because it is the product's name for the screen, not a description
+  // of it; everything around it is translated normally.
+  farAway: {
+    title: string; subtitle: string; destination: string; pickCity: string;
+    pickCityHint: string; finding: string; empty: string; emptyHint: string;
+    failed: string; retry: string; disclaimer: string; from: string;
+    getTickets: string; visitSite: string; noLink: string; booksOn: string;
+    chips: { all: string; sightseeing: string; museums: string; activities: string; tours: string; events: string };
+    when: { anytime: string; today: string; weekend: string; week: string; month: string };
+    kinds: { museum: string; sightseeing: string; activity: string; tour: string; event: string };
+  };
   feed: {
     events: string; sightseeing: string; sport: string; partners: string;
     forYou: string; recent: string; chooseCity: string; filters: string;
@@ -71,7 +83,21 @@ export interface AppTranslations {
 }
 
 const en: AppTranslations = {
-  nav: { discover: 'Discover', explore: 'Explore', groups: 'Groups', activity: 'Activity', profile: 'Profile' },
+  nav: { discover: 'Discover', explore: 'Explore', groups: 'Groups', activity: 'Activity', profile: 'Profile', farAway: 'Far Far Away' },
+  farAway: {
+    title: 'Far Far Away', subtitle: 'Pick a city and see what is worth doing there.',
+    destination: 'DESTINATION', pickCity: 'Pick a city',
+    pickCityHint: 'Choose a destination to see what is on.',
+    finding: 'Finding things to do in', empty: 'Nothing found yet in',
+    emptyHint: 'Try a wider date range, or another category.',
+    failed: "Couldn't load that city.", retry: 'Try again',
+    disclaimer: 'Nova does not sell tickets. Every link goes straight to the provider that does.',
+    from: 'FROM', getTickets: 'Get tickets', visitSite: 'Visit website',
+    noLink: 'No booking link found', booksOn: 'You book on',
+    chips: { all: 'All', sightseeing: 'Sights', museums: 'Museums', activities: 'Activities', tours: 'Tours', events: 'Events' },
+    when: { anytime: 'Anytime', today: 'Today', weekend: 'Weekend', week: 'This week', month: 'This month' },
+    kinds: { museum: 'Museum', sightseeing: 'Sight', activity: 'Activity', tour: 'Tour', event: 'Event' },
+  },
   feed: {
     events: 'Events', sightseeing: 'Sightseeing', sport: 'Sport', partners: 'Partners',
     forYou: 'For You', recent: 'Recent', chooseCity: 'Choose city', filters: 'Filters',
@@ -145,7 +171,21 @@ const en: AppTranslations = {
 };
 
 const de: AppTranslations = {
-  nav: { discover: 'Entdecken', explore: 'Erkunden', groups: 'Gruppen', activity: 'Aktivität', profile: 'Profil' },
+  nav: { discover: 'Entdecken', explore: 'Erkunden', groups: 'Gruppen', activity: 'Aktivität', profile: 'Profil', farAway: 'Far Far Away' },
+  farAway: {
+    title: 'Far Far Away', subtitle: 'Stadt wählen und sehen, was sich dort lohnt.',
+    destination: 'REISEZIEL', pickCity: 'Stadt wählen',
+    pickCityHint: 'Wähle ein Reiseziel, um zu sehen, was läuft.',
+    finding: 'Suche Dinge zu tun in', empty: 'Noch nichts gefunden in',
+    emptyHint: 'Versuch einen größeren Zeitraum oder eine andere Kategorie.',
+    failed: 'Stadt konnte nicht geladen werden.', retry: 'Nochmal',
+    disclaimer: 'Nova verkauft keine Tickets. Jeder Link führt direkt zum Anbieter.',
+    from: 'AB', getTickets: 'Tickets holen', visitSite: 'Website öffnen',
+    noLink: 'Kein Buchungslink gefunden', booksOn: 'Du buchst auf',
+    chips: { all: 'Alle', sightseeing: 'Sehenswertes', museums: 'Museen', activities: 'Aktivitäten', tours: 'Touren', events: 'Events' },
+    when: { anytime: 'Jederzeit', today: 'Heute', weekend: 'Wochenende', week: 'Diese Woche', month: 'Diesen Monat' },
+    kinds: { museum: 'Museum', sightseeing: 'Sehenswürdigkeit', activity: 'Aktivität', tour: 'Tour', event: 'Event' },
+  },
   feed: {
     events: 'Events', sightseeing: 'Sehenswürdigkeiten', sport: 'Sport', partners: 'Partner',
     forYou: 'Für dich', recent: 'Aktuell', chooseCity: 'Stadt wählen', filters: 'Filter',
@@ -219,7 +259,21 @@ const de: AppTranslations = {
 };
 
 const es: AppTranslations = {
-  nav: { discover: 'Descubrir', explore: 'Explorar', groups: 'Grupos', activity: 'Actividad', profile: 'Perfil' },
+  nav: { discover: 'Descubrir', explore: 'Explorar', groups: 'Grupos', activity: 'Actividad', profile: 'Perfil', farAway: 'Far Far Away' },
+  farAway: {
+    title: 'Far Far Away', subtitle: 'Elige una ciudad y descubre qué merece la pena.',
+    destination: 'DESTINO', pickCity: 'Elegir ciudad',
+    pickCityHint: 'Elige un destino para ver qué hay.',
+    finding: 'Buscando planes en', empty: 'Todavía no hay nada en',
+    emptyHint: 'Prueba con más fechas u otra categoría.',
+    failed: 'No se pudo cargar esa ciudad.', retry: 'Reintentar',
+    disclaimer: 'Nova no vende entradas. Cada enlace lleva directo al proveedor.',
+    from: 'DESDE', getTickets: 'Comprar entradas', visitSite: 'Ver web',
+    noLink: 'Sin enlace de reserva', booksOn: 'Reservas en',
+    chips: { all: 'Todo', sightseeing: 'Lugares', museums: 'Museos', activities: 'Actividades', tours: 'Tours', events: 'Eventos' },
+    when: { anytime: 'Cualquier día', today: 'Hoy', weekend: 'Finde', week: 'Esta semana', month: 'Este mes' },
+    kinds: { museum: 'Museo', sightseeing: 'Lugar', activity: 'Actividad', tour: 'Tour', event: 'Evento' },
+  },
   feed: {
     events: 'Eventos', sightseeing: 'Turismo', sport: 'Deporte', partners: 'Socios',
     forYou: 'Para ti', recent: 'Reciente', chooseCity: 'Elegir ciudad', filters: 'Filtros',
@@ -293,7 +347,21 @@ const es: AppTranslations = {
 };
 
 const fr: AppTranslations = {
-  nav: { discover: 'Découvrir', explore: 'Explorer', groups: 'Groupes', activity: 'Activité', profile: 'Profil' },
+  nav: { discover: 'Découvrir', explore: 'Explorer', groups: 'Groupes', activity: 'Activité', profile: 'Profil', farAway: 'Far Far Away' },
+  farAway: {
+    title: 'Far Far Away', subtitle: 'Choisis une ville et vois ce qui vaut le détour.',
+    destination: 'DESTINATION', pickCity: 'Choisir une ville',
+    pickCityHint: 'Choisis une destination pour voir ce qui se passe.',
+    finding: 'Recherche de choses à faire à', empty: 'Rien trouvé pour le moment à',
+    emptyHint: 'Essaie une période plus large ou une autre catégorie.',
+    failed: 'Impossible de charger cette ville.', retry: 'Réessayer',
+    disclaimer: 'Nova ne vend pas de billets. Chaque lien mène directement au prestataire.',
+    from: 'À PARTIR DE', getTickets: 'Réserver', visitSite: 'Voir le site',
+    noLink: 'Aucun lien de réservation', booksOn: 'Tu réserves sur',
+    chips: { all: 'Tout', sightseeing: 'Sites', museums: 'Musées', activities: 'Activités', tours: 'Visites', events: 'Événements' },
+    when: { anytime: "N'importe quand", today: "Aujourd'hui", weekend: 'Week-end', week: 'Cette semaine', month: 'Ce mois-ci' },
+    kinds: { museum: 'Musée', sightseeing: 'Site', activity: 'Activité', tour: 'Visite', event: 'Événement' },
+  },
   feed: {
     events: 'Événements', sightseeing: 'Tourisme', sport: 'Sport', partners: 'Partenaires',
     forYou: 'Pour toi', recent: 'Récent', chooseCity: 'Choisir une ville', filters: 'Filtres',
@@ -367,7 +435,21 @@ const fr: AppTranslations = {
 };
 
 const it: AppTranslations = {
-  nav: { discover: 'Scopri', explore: 'Esplora', groups: 'Gruppi', activity: 'Attività', profile: 'Profilo' },
+  nav: { discover: 'Scopri', explore: 'Esplora', groups: 'Gruppi', activity: 'Attività', profile: 'Profilo', farAway: 'Far Far Away' },
+  farAway: {
+    title: 'Far Far Away', subtitle: 'Scegli una città e scopri cosa vale la pena fare.',
+    destination: 'DESTINAZIONE', pickCity: 'Scegli una città',
+    pickCityHint: 'Scegli una destinazione per vedere cosa c’è.',
+    finding: 'Cerco cose da fare a', empty: 'Ancora niente a',
+    emptyHint: 'Prova con più date o un’altra categoria.',
+    failed: 'Non riesco a caricare quella città.', retry: 'Riprova',
+    disclaimer: 'Nova non vende biglietti. Ogni link porta direttamente al fornitore.',
+    from: 'DA', getTickets: 'Prendi i biglietti', visitSite: 'Vai al sito',
+    noLink: 'Nessun link di prenotazione', booksOn: 'Prenoti su',
+    chips: { all: 'Tutto', sightseeing: 'Luoghi', museums: 'Musei', activities: 'Attività', tours: 'Tour', events: 'Eventi' },
+    when: { anytime: 'Quando sia', today: 'Oggi', weekend: 'Weekend', week: 'Questa settimana', month: 'Questo mese' },
+    kinds: { museum: 'Museo', sightseeing: 'Luogo', activity: 'Attività', tour: 'Tour', event: 'Evento' },
+  },
   feed: {
     events: 'Eventi', sightseeing: 'Turismo', sport: 'Sport', partners: 'Partner',
     forYou: 'Per te', recent: 'Recenti', chooseCity: 'Scegli città', filters: 'Filtri',
@@ -441,7 +523,21 @@ const it: AppTranslations = {
 };
 
 const pt: AppTranslations = {
-  nav: { discover: 'Descobrir', explore: 'Explorar', groups: 'Grupos', activity: 'Atividade', profile: 'Perfil' },
+  nav: { discover: 'Descobrir', explore: 'Explorar', groups: 'Grupos', activity: 'Atividade', profile: 'Perfil', farAway: 'Far Far Away' },
+  farAway: {
+    title: 'Far Far Away', subtitle: 'Escolhe uma cidade e vê o que vale a pena.',
+    destination: 'DESTINO', pickCity: 'Escolher cidade',
+    pickCityHint: 'Escolhe um destino para ver o que há.',
+    finding: 'A procurar coisas para fazer em', empty: 'Ainda nada em',
+    emptyHint: 'Tenta mais datas ou outra categoria.',
+    failed: 'Não deu para carregar essa cidade.', retry: 'Tentar de novo',
+    disclaimer: 'A Nova não vende bilhetes. Cada link vai direto para quem vende.',
+    from: 'A PARTIR DE', getTickets: 'Comprar bilhetes', visitSite: 'Ver site',
+    noLink: 'Sem link de reserva', booksOn: 'Reservas em',
+    chips: { all: 'Tudo', sightseeing: 'Pontos', museums: 'Museus', activities: 'Atividades', tours: 'Tours', events: 'Eventos' },
+    when: { anytime: 'Qualquer dia', today: 'Hoje', weekend: 'Fim de semana', week: 'Esta semana', month: 'Este mês' },
+    kinds: { museum: 'Museu', sightseeing: 'Ponto turístico', activity: 'Atividade', tour: 'Tour', event: 'Evento' },
+  },
   feed: {
     events: 'Eventos', sightseeing: 'Turismo', sport: 'Esporte', partners: 'Parceiros',
     forYou: 'Para você', recent: 'Recente', chooseCity: 'Escolher cidade', filters: 'Filtros',
@@ -515,7 +611,21 @@ const pt: AppTranslations = {
 };
 
 const nl: AppTranslations = {
-  nav: { discover: 'Ontdekken', explore: 'Verkennen', groups: 'Groepen', activity: 'Activiteit', profile: 'Profiel' },
+  nav: { discover: 'Ontdekken', explore: 'Verkennen', groups: 'Groepen', activity: 'Activiteit', profile: 'Profiel', farAway: 'Far Far Away' },
+  farAway: {
+    title: 'Far Far Away', subtitle: 'Kies een stad en zie wat er de moeite waard is.',
+    destination: 'BESTEMMING', pickCity: 'Kies een stad',
+    pickCityHint: 'Kies een bestemming om te zien wat er is.',
+    finding: 'Zoeken naar dingen om te doen in', empty: 'Nog niets gevonden in',
+    emptyHint: 'Probeer een ruimere periode of een andere categorie.',
+    failed: 'Kon die stad niet laden.', retry: 'Opnieuw',
+    disclaimer: 'Nova verkoopt geen tickets. Elke link gaat direct naar de aanbieder.',
+    from: 'VANAF', getTickets: 'Tickets halen', visitSite: 'Site openen',
+    noLink: 'Geen boekingslink gevonden', booksOn: 'Je boekt op',
+    chips: { all: 'Alles', sightseeing: 'Bezienswaardig', museums: 'Musea', activities: 'Activiteiten', tours: 'Tours', events: 'Events' },
+    when: { anytime: 'Altijd', today: 'Vandaag', weekend: 'Weekend', week: 'Deze week', month: 'Deze maand' },
+    kinds: { museum: 'Museum', sightseeing: 'Bezienswaardigheid', activity: 'Activiteit', tour: 'Tour', event: 'Event' },
+  },
   feed: {
     events: 'Evenementen', sightseeing: 'Bezienswaardigheden', sport: 'Sport', partners: 'Partners',
     forYou: 'Voor jou', recent: 'Recent', chooseCity: 'Kies stad', filters: 'Filters',
@@ -589,7 +699,21 @@ const nl: AppTranslations = {
 };
 
 const ja: AppTranslations = {
-  nav: { discover: '発見', explore: '探索', groups: 'グループ', activity: '通知', profile: 'プロフィール' },
+  nav: { discover: '発見', explore: '探索', groups: 'グループ', activity: '通知', profile: 'プロフィール', farAway: 'Far Far Away' },
+  farAway: {
+    title: 'Far Far Away', subtitle: '街を選んで、行く価値のあるものを見つけよう。',
+    destination: '目的地', pickCity: '街を選ぶ',
+    pickCityHint: '目的地を選ぶと、何があるか見られます。',
+    finding: '楽しみ方を探しています：', empty: 'まだ何も見つかりません：',
+    emptyHint: '期間を広げるか、別のカテゴリを試してみて。',
+    failed: 'その街を読み込めませんでした。', retry: 'もう一度',
+    disclaimer: 'Nova はチケットを販売しません。リンクはすべて販売元へ直接つながります。',
+    from: '最安', getTickets: 'チケットへ', visitSite: '公式サイト',
+    noLink: '予約リンクなし', booksOn: '予約先：',
+    chips: { all: 'すべて', sightseeing: '名所', museums: '美術館・博物館', activities: 'アクティビティ', tours: 'ツアー', events: 'イベント' },
+    when: { anytime: 'いつでも', today: '今日', weekend: '週末', week: '今週', month: '今月' },
+    kinds: { museum: '美術館・博物館', sightseeing: '名所', activity: 'アクティビティ', tour: 'ツアー', event: 'イベント' },
+  },
   feed: {
     events: 'イベント', sightseeing: '観光', sport: 'スポーツ', partners: 'パートナー',
     forYou: 'あなたへ', recent: '最新', chooseCity: '都市を選ぶ', filters: 'フィルター',

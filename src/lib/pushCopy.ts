@@ -136,6 +136,42 @@ export function buildLocalisedPush(
   return fn(place || fallbackCity(loc), n, (name || '').trim().split(/\s+/)[0]?.slice(0, 24) ?? '');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Reminders are the ONE case where naming the event is right.
+//
+// Everywhere else this file refuses to quote a source, because the user never
+// asked about that specific listing and a foreign-language title in an English
+// template is just confusing. A reminder is the opposite: the user picked that
+// exact event and asked to be told before it starts, so its name is the whole
+// message — anonymising it would produce "Something starts in an hour", which
+// is useless.
+//
+// The two-languages problem is still avoided, because the split is clean: the
+// TITLE is the event's own name (a proper noun, untouched) and the BODY is
+// entirely in the user's language. No sentence ever mixes the two.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const REMINDER_BODY: Record<Locale, { soon: string; tomorrow: string; at: (venue: string) => string }> = {
+  en: { soon: 'Starts in about an hour',   tomorrow: 'On tomorrow',        at: v => ` · ${v}` },
+  de: { soon: 'Startet in etwa einer Stunde', tomorrow: 'Läuft morgen',    at: v => ` · ${v}` },
+  es: { soon: 'Empieza en una hora',       tomorrow: 'Es mañana',          at: v => ` · ${v}` },
+  fr: { soon: 'Ça commence dans une heure', tomorrow: "C'est demain",      at: v => ` · ${v}` },
+  it: { soon: 'Inizia tra circa un’ora',   tomorrow: 'È domani',           at: v => ` · ${v}` },
+  pt: { soon: 'Começa daqui a uma hora',   tomorrow: 'É amanhã',           at: v => ` · ${v}` },
+  nl: { soon: 'Begint over ongeveer een uur', tomorrow: 'Is morgen',       at: v => ` · ${v}` },
+  ja: { soon: 'まもなく開始（約1時間後）',      tomorrow: '明日です',            at: v => ` · ${v}` },
+};
+
+/** The body of an event reminder, in the user's language only. */
+export function buildReminderBody(
+  minutesBefore: number, { locale = 'en', venue = '' }: { locale?: Locale | string; venue?: string | null },
+): string {
+  const table = REMINDER_BODY[resolveLocale(locale)] ?? REMINDER_BODY.en;
+  const when = minutesBefore >= 1440 ? table.tomorrow : table.soon;
+  const place = (venue ?? '').trim().slice(0, 60);
+  return place ? `${when}${table.at(place)}` : when;
+}
+
 function fallbackCity(loc: Locale): string {
   const byLocale: Record<Locale, string> = {
     en: 'your area', de: 'deiner Nähe', es: 'tu zona', fr: 'ta région',

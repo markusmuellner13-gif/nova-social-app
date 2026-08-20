@@ -8,6 +8,7 @@ import { assessQuality } from '@/lib/brain/quality';
 import { mergeDuplicates } from '@/lib/brain/curator';
 import { FEATURE_NAMES } from '@/lib/brain/features';
 import { topDestinations, gather } from '@/lib/brain/assistant';
+import { skillReport } from '@/lib/brain/extractor';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -102,6 +103,12 @@ export async function GET(req: NextRequest) {
     ok: true,
     model: { version: MODEL_VERSION, examplesSeen: model.n, trained: model.n >= 25, weights },
     sourceReliability: sources,
+    // What the extraction engine has taught itself: how many hosts it holds a
+    // learned reader for, and how those readers are scoring. This is the only
+    // window into that learning, so if a skill starts failing after a site
+    // redesign its score falling is visible here before anyone notices thin
+    // feeds.
+    extractor: await skillReport().catch(() => null),
     corpus,
     destinations: { tracked: destinations.length, warmed },
     generatedAt: new Date().toISOString(),
