@@ -20,26 +20,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  // sharp must be required from node_modules at runtime, never bundled.
-  //
-  // Without this, production returned 500 for EVERY proxied image while the
-  // upstream sources were perfectly healthy:
-  //
-  //   Failed to load external module sharp-…: Could not load the "sharp"
-  //   module using the linux-x64 runtime
-  //   ERR_DLOPEN_FAILED: libvips-cpp.so.8.18.3: cannot open shared object file
-  //
-  // The versions were never the problem — @img/sharp-linux-x64@0.35.3 asks for
-  // @img/sharp-libvips-linux-x64@1.3.2 and the lockfile pins exactly that. The
-  // problem is that the bundler rewrote the import into its own external-module
-  // loader, which brings sharp.node without the libvips shared library sitting
-  // beside it, so the dlopen fails at runtime and only at runtime — the build
-  // is perfectly green, and it works locally on Windows where the binary is
-  // already unpacked in node_modules.
-  //
-  // Listing it here makes Next leave `require('sharp')` alone and trace the
-  // whole package, .so files included. /api/image-proxy is the only importer.
-  serverExternalPackages: ['sharp'],
+  // NOTE: `serverExternalPackages: ['sharp']` is deliberately NOT set here. It
+  // was tried against the image-proxy outage and changed nothing — the built
+  // chunk came out byte-identical, because sharp is already on Next's default
+  // external list. The actual cause was a duplicate sharp version in the tree;
+  // see the `sharp` pin in package.json.
   // Native build only (NATIVE_EXPORT=1, via `npm run build:native`): emit a
   // static front-end bundle (`out/`) that Capacitor ships inside the iOS/Android
   // app. Never set on Vercel, so the web app keeps its server rendering, API
