@@ -142,6 +142,16 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Horizontal chip rails: swipeable, but without the native bar drawn across
+   the chips. Paired with overflow-x-auto, never on its own. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* ── Responsive app frame ─────────────────────────────────────────────────────
    On phones the app is edge-to-edge (unchanged). On laptops/desktops a full-
    width feed stretches the 4:5 images into a blurry mess, so we centre the whole
