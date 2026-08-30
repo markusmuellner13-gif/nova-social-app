@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MapPin, Loader2, ExternalLink, Ticket, Clock, Star, CalendarDays,
-  ChevronRight, RefreshCw, Plane,
+  ChevronRight, RefreshCw, Plane, Bookmark,
 } from 'lucide-react';
 import { apiUrl } from '@/lib/apiBase';
 import { postTitle } from '@/lib/postTitle';
@@ -13,7 +13,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import PostImage, { coverBackground } from './PostImage';
 import CityExplorer from './CityExplorer';
 import { NAV_CLEARANCE } from './BottomNav';
-import type { LocationState } from '@/types';
+import type { LocationState, Post, Category } from '@/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Far Far Away — the trip-planning half of Nova.
@@ -26,6 +26,12 @@ import type { LocationState } from '@/types';
 // primary action is an outbound link to the operator, the host is printed on
 // the button so nobody is surprised where they land, and a card with no
 // verified booking link says "check the website" rather than inventing one.
+//
+// Layout note — this tab lives inside the shell's `position:absolute; inset:0`
+// pane, whose parent is `overflow:hidden`. A tab that does not own a scroll
+// container simply gets clipped: taps land, nothing moves. So the root is
+// `flex flex-col h-full` with exactly one `.tab-content` scroller under a
+// fixed top bar, matching every other tab.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Kind = 'museum' | 'sightseeing' | 'activity' | 'tour' | 'event';
@@ -52,6 +58,15 @@ interface ActivityPost {
   duration?: string;
   rating?: number;
   distanceKm?: number;
+  // The activities API hands back full feed-post rows. These ride along so a
+  // shortlisted activity can be stored as an ordinary post and show up in the
+  // profile's collection next to everything else the user saved.
+  user?: Post['user'];
+  likes?: number;
+  comments?: number;
+  hashtags?: string[];
+  timestamp?: number;
+  isEvent?: boolean;
 }
 
 const KIND_CHIPS: { id: Kind | 'all'; emoji: string; labelKey: string }[] = [
@@ -81,6 +96,41 @@ function shortDate(raw?: string): string | null {
   return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+/**
+ * Widen an activity back into an ordinary Post so it can go through the same
+ * save pipeline as the feed (local state + Supabase + the profile grid). The
+ * defaults only ever fill in fields the API omitted; nothing is invented that
+ * the card itself displays.
+ */
+function toPost(a: ActivityPost, kindLabel: string): Post {
+  return {
+    id: a.id,
+    user: a.user ?? {
+      id: 'nova-activities', name: kindLabel, username: 'nova',
+      avatar: '', bio: '', followers: 0, following: 0, posts: 0,
+    },
+    image: a.image,
+    title: a.title,
+    caption: a.caption,
+    likes: a.likes ?? 0,
+    comments: a.comments ?? 0,
+    category: (a.category || 'travel') as Category,
+    hashtags: a.hashtags ?? [],
+    timestamp: a.timestamp ?? Date.now(),
+    location: a.location,
+    saved: true,
+    liked: false,
+    isEvent: a.isEvent ?? a.activityKind === 'event',
+    eventDate: a.eventDate,
+    eventDateRaw: a.eventDateRaw,
+    eventVenue: a.eventVenue,
+    eventUrl: a.ticketUrl ?? a.officialUrl ?? a.eventUrl,
+    organizer: a.organizer,
+    price: a.price,
+    distanceKm: a.distanceKm,
+  };
+}
+
 export default function FarAwayTab() {
   const { t } = useLanguage();
   const { state } = useApp();
@@ -96,6 +146,7 @@ export default function FarAwayTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reqIdRef = useRef(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Default to where the user is, purely as a starting point they can change.
   const city = destination ?? state.location ?? null;
@@ -136,133 +187,169 @@ export default function FarAwayTab() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // A new filter means a new list — reading it from halfway down is disorienting.
+  const toTop = useCallback(() => scrollRef.current?.scrollTo({ top: 0 }), []);
+  const pickKind = useCallback((k: Kind | 'all') => { setKind(k); toTop(); }, [toTop]);
+  const pickWhen = useCallback((w: When) => { setWhen(w); toTop(); }, [toTop]);
+
   const hasCity = Boolean(cityName);
 
   return (
-    <div className="min-h-full" style={{ paddingBottom: NAV_CLEARANCE }}>
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="px-4 pt-4 pb-2">
-        <div className="flex items-center gap-2 mb-1">
-          <Plane size={18} style={{ color: '#a78bfa' }} />
-          <h1 className="text-2xl font-black text-white tracking-tight">{copy.title}</h1>
+    <div className="flex flex-col h-full">
+      {/* ── Top bar — the destination stays visible and one tap away, however
+             far down the list the user has planned. ───────────────────────── */}
+      <div className="glass flex items-center justify-between gap-2 px-4 flex-shrink-0"
+        style={{ height: 56, borderBottom: '1px solid #1e1e2a' }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+            style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
+            <Plane size={15} color="white" strokeWidth={2.5} />
+          </div>
+          <h1 className="text-xl font-bold truncate" style={{
+            background: 'linear-gradient(135deg, #c4b5fd, #f0abfc)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+          }}>
+            {copy.title}
+          </h1>
         </div>
-        <p className="text-xs mb-3" style={{ color: '#666677' }}>{copy.subtitle}</p>
 
-        {/* Destination picker */}
-        <button
-          onClick={() => setShowCityPicker(true)}
-          className="w-full flex items-center gap-3 p-3.5 rounded-2xl text-left"
-          style={{ background: '#13131a', border: '1px solid #2a2a38' }}
-        >
-          <div className="flex items-center justify-center rounded-xl flex-shrink-0"
-            style={{ width: 34, height: 34, background: 'linear-gradient(135deg,#8b5cf6,#ec4899)' }}>
-            <MapPin size={17} color="#fff" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold" style={{ color: '#a78bfa' }}>{copy.destination}</p>
-            <p className="text-sm font-semibold text-white truncate">
-              {hasCity ? cityName : copy.pickCity}
-            </p>
-          </div>
-          <ChevronRight size={18} style={{ color: '#55556a' }} />
-        </button>
-      </div>
-
-      {/* ── Filters ────────────────────────────────────────────────────────── */}
-      <div className="flex gap-2 overflow-x-auto px-4 pb-2 no-scrollbar">
-        {KIND_CHIPS.map(chip => {
-          const active = kind === chip.id;
-          return (
-            <motion.button key={chip.id} whileTap={{ scale: 0.94 }} onClick={() => setKind(chip.id)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full flex-shrink-0 text-xs font-semibold"
-              style={{
-                background: active ? 'linear-gradient(135deg,#8b5cf6,#ec4899)' : '#13131a',
-                border: `1px solid ${active ? 'transparent' : '#2a2a38'}`,
-                color: active ? '#fff' : '#888899',
-              }}>
-              <span>{chip.emoji}</span>
-              <span>{copy.chips[chip.labelKey as keyof typeof copy.chips]}</span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {hasCity && (
+            <motion.button whileTap={{ scale: 0.9 }} onClick={() => void load()}
+              aria-label={copy.retry} className="p-1.5 rounded-full"
+              style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.2)' }}>
+              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} style={{ color: '#a78bfa' }} />
             </motion.button>
-          );
-        })}
+          )}
+          <motion.button whileTap={{ scale: 0.92 }} onClick={() => setShowCityPicker(true)}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium max-w-[45vw]"
+            style={hasCity
+              ? { background: 'rgba(139,92,246,0.1)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.2)' }
+              : { background: 'rgba(236,72,153,0.1)', color: '#f9a8d4', border: '1px solid rgba(236,72,153,0.2)' }}>
+            <MapPin size={10} className="flex-shrink-0" />
+            <span className="truncate">{hasCity ? cityName : copy.pickCity}</span>
+          </motion.button>
+        </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto px-4 pb-3 no-scrollbar">
-        {WHEN_CHIPS.map(w => {
-          const active = when === w;
-          return (
-            <motion.button key={w} whileTap={{ scale: 0.94 }} onClick={() => setWhen(w)}
-              className="flex items-center gap-1 px-3 py-1 rounded-full flex-shrink-0 text-[11px] font-semibold"
-              style={{
-                background: active ? 'rgba(139,92,246,0.18)' : 'transparent',
-                border: `1px solid ${active ? 'rgba(139,92,246,0.5)' : '#2a2a38'}`,
-                color: active ? '#a78bfa' : '#666677',
-              }}>
-              {w === 'anytime' ? null : <CalendarDays size={11} />}
-              {copy.when[w]}
-            </motion.button>
-          );
-        })}
-      </div>
+      {/* ── Scrollable content ─────────────────────────────────────────────── */}
+      <div ref={scrollRef} className="tab-content flex-1 overflow-y-auto"
+        style={{ paddingBottom: NAV_CLEARANCE }}>
 
-      {/* We link out, we don't sell. Said once, plainly, above the results. */}
-      <p className="px-4 pb-3 text-[10px] leading-relaxed" style={{ color: '#55556a' }}>
-        {copy.disclaimer}
-      </p>
+        <p className="px-4 pt-3 pb-2 text-xs" style={{ color: '#666677' }}>{copy.subtitle}</p>
 
-      {/* ── Results ────────────────────────────────────────────────────────── */}
-      <div className="px-4 flex flex-col gap-3">
-        {!hasCity && (
-          <div className="text-center py-12">
-            <p className="text-sm" style={{ color: '#666677' }}>{copy.pickCityHint}</p>
+        {/* Filters stick to the top of the scroller: on a planning screen you
+            re-cut the same city by kind and by date constantly, and hunting back
+            up a long list for the chips every time is the whole friction. */}
+        <div className="sticky top-0 z-10 pt-1" style={{ background: '#0a0a0f' }}>
+          <div className="flex gap-2 overflow-x-auto px-4 pb-2 no-scrollbar">
+            {KIND_CHIPS.map(chip => {
+              const active = kind === chip.id;
+              return (
+                <motion.button key={chip.id} whileTap={{ scale: 0.94 }} onClick={() => pickKind(chip.id)}
+                  aria-pressed={active}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full flex-shrink-0 text-xs font-semibold"
+                  style={{
+                    background: active ? 'linear-gradient(135deg,#8b5cf6,#ec4899)' : '#13131a',
+                    border: `1px solid ${active ? 'transparent' : '#2a2a38'}`,
+                    color: active ? '#fff' : '#888899',
+                  }}>
+                  <span>{chip.emoji}</span>
+                  <span>{copy.chips[chip.labelKey as keyof typeof copy.chips]}</span>
+                </motion.button>
+              );
+            })}
           </div>
-        )}
 
-        {hasCity && loading && posts.length === 0 && (
-          <>
-            <div className="flex items-center gap-2 justify-center py-4">
-              <Loader2 size={14} className="animate-spin" style={{ color: '#8b5cf6' }} />
-              <span className="text-xs" style={{ color: '#666677' }}>
-                {copy.finding} {cityName}…
-              </span>
+          <div className="flex gap-2 overflow-x-auto px-4 pb-3 no-scrollbar">
+            {WHEN_CHIPS.map(w => {
+              const active = when === w;
+              return (
+                <motion.button key={w} whileTap={{ scale: 0.94 }} onClick={() => pickWhen(w)}
+                  aria-pressed={active}
+                  className="flex items-center gap-1 px-3 py-1 rounded-full flex-shrink-0 text-[11px] font-semibold"
+                  style={{
+                    background: active ? 'rgba(139,92,246,0.18)' : 'transparent',
+                    border: `1px solid ${active ? 'rgba(139,92,246,0.5)' : '#2a2a38'}`,
+                    color: active ? '#a78bfa' : '#666677',
+                  }}>
+                  {w === 'anytime' ? null : <CalendarDays size={11} />}
+                  {copy.when[w]}
+                </motion.button>
+              );
+            })}
+          </div>
+          <div style={{ height: 1, background: '#1e1e2a' }} />
+        </div>
+
+        {/* We link out, we don't sell. Said once, plainly, above the results. */}
+        <p className="px-4 pt-3 pb-3 text-[10px] leading-relaxed" style={{ color: '#55556a' }}>
+          {copy.disclaimer}
+        </p>
+
+        {/* ── Results ──────────────────────────────────────────────────────── */}
+        <div className="px-4 flex flex-col gap-3">
+          {!hasCity && (
+            <div className="text-center py-12">
+              <div className="mx-auto mb-4 flex items-center justify-center rounded-2xl"
+                style={{ width: 56, height: 56, background: 'linear-gradient(135deg,#8b5cf6,#ec4899)' }}>
+                <Plane size={26} color="#fff" />
+              </div>
+              <p className="text-sm mb-4" style={{ color: '#666677' }}>{copy.pickCityHint}</p>
+              <button onClick={() => setShowCityPicker(true)}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold text-white"
+                style={{ background: 'linear-gradient(135deg,#8b5cf6,#ec4899)' }}>
+                <MapPin size={14} /> {copy.pickCity} <ChevronRight size={14} />
+              </button>
             </div>
-            {[0, 1, 2].map(i => (
-              <div key={i} className="rounded-2xl shimmer" style={{ height: 260 }} />
+          )}
+
+          {hasCity && loading && posts.length === 0 && (
+            <>
+              <div className="flex items-center gap-2 justify-center py-4">
+                <Loader2 size={14} className="animate-spin" style={{ color: '#8b5cf6' }} />
+                <span className="text-xs" style={{ color: '#666677' }}>
+                  {copy.finding} {cityName}…
+                </span>
+              </div>
+              {[0, 1, 2].map(i => (
+                <div key={i} className="rounded-2xl shimmer" style={{ height: 260 }} />
+              ))}
+            </>
+          )}
+
+          {hasCity && !loading && error && (
+            <div className="text-center py-10">
+              <p className="text-sm mb-3" style={{ color: '#888899' }}>{error}</p>
+              <button onClick={() => void load()}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white"
+                style={{ background: 'linear-gradient(135deg,#8b5cf6,#ec4899)' }}>
+                <RefreshCw size={13} /> {copy.retry}
+              </button>
+            </div>
+          )}
+
+          {hasCity && !loading && !error && posts.length === 0 && (
+            <div className="text-center py-12">
+              <p className="text-sm mb-1" style={{ color: '#888899' }}>
+                {copy.empty} {cityName}
+              </p>
+              <p className="text-xs" style={{ color: '#55556a' }}>{copy.emptyHint}</p>
+            </div>
+          )}
+
+          <AnimatePresence mode="popLayout">
+            {posts.map((post, i) => (
+              <ActivityCard key={post.id} post={post} index={i} copy={copy} />
             ))}
-          </>
-        )}
-
-        {hasCity && !loading && error && (
-          <div className="text-center py-10">
-            <p className="text-sm mb-3" style={{ color: '#888899' }}>{error}</p>
-            <button onClick={() => void load()}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white"
-              style={{ background: 'linear-gradient(135deg,#8b5cf6,#ec4899)' }}>
-              <RefreshCw size={13} /> {copy.retry}
-            </button>
-          </div>
-        )}
-
-        {hasCity && !loading && !error && posts.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-sm mb-1" style={{ color: '#888899' }}>
-              {copy.empty} {cityName}
-            </p>
-            <p className="text-xs" style={{ color: '#55556a' }}>{copy.emptyHint}</p>
-          </div>
-        )}
-
-        <AnimatePresence mode="popLayout">
-          {posts.map((post, i) => (
-            <ActivityCard key={post.id} post={post} index={i} copy={copy} />
-          ))}
-        </AnimatePresence>
+          </AnimatePresence>
+        </div>
       </div>
 
       {showCityPicker && (
         <CityExplorer
           currentCity={city?.city ?? ''}
-          onSelectCity={loc => { setDestination(loc); setPosts([]); }}
+          onSelectCity={loc => { setDestination(loc); setPosts([]); toTop(); }}
           onClose={() => setShowCityPicker(false)}
         />
       )}
@@ -275,9 +362,12 @@ function ActivityCard({ post, index, copy }: {
   index: number;
   copy: ReturnType<typeof useLanguage>['t']['farAway'];
 }) {
+  const { isSaved, savePost, addToast } = useApp();
   const badge = KIND_BADGE[post.activityKind] ?? KIND_BADGE.activity;
-  const title = postTitle(post, copy.kinds[post.activityKind]);
+  const kindLabel = copy.kinds[post.activityKind];
+  const title = postTitle(post, kindLabel);
   const date = shortDate(post.eventDateRaw);
+  const saved = isSaved(post.id);
   // Where the button sends them: the verified booking page if we found one,
   // otherwise the operator's own page. Never a search we can't stand behind.
   const outbound = post.ticketUrl ?? post.officialUrl ?? post.eventUrl;
@@ -291,6 +381,14 @@ function ActivityCard({ post, index, copy }: {
     .find(line => line.trim().length > 30 && !line.startsWith('📅') && !line.startsWith('📍')
       && !line.startsWith('🎟️') && !line.startsWith('🔗'))
     ?.trim();
+
+  // Shortlisting is the actual work of planning a trip: gather the maybes now,
+  // decide later. It goes through the same store as a saved feed post, so the
+  // list is one list — in the profile, and synced when signed in.
+  const handleSave = useCallback(() => {
+    savePost(toPost(post, kindLabel));
+    if (!saved) addToast('Saved to collection 🔖', 'success');
+  }, [savePost, post, kindLabel, saved, addToast]);
 
   return (
     <motion.article
@@ -320,15 +418,29 @@ function ActivityCard({ post, index, copy }: {
           style={{ background: 'rgba(10,10,15,0.75)', backdropFilter: 'blur(6px)' }}>
           <span style={{ fontSize: 11 }}>{badge.emoji}</span>
           <span className="text-[10px] font-bold" style={{ color: badge.tint }}>
-            {copy.kinds[post.activityKind]}
+            {kindLabel}
           </span>
         </div>
-        {date && (
-          <div className="absolute top-2 right-2 px-2 py-1 rounded-lg"
-            style={{ background: 'rgba(139,92,246,0.9)' }}>
-            <span className="text-[10px] font-bold text-white">{date}</span>
-          </div>
-        )}
+        <div className="absolute top-2 right-2 flex items-center gap-1.5">
+          {date && (
+            <div className="px-2 py-1 rounded-lg" style={{ background: 'rgba(139,92,246,0.9)' }}>
+              <span className="text-[10px] font-bold text-white">{date}</span>
+            </div>
+          )}
+          <motion.button
+            whileTap={{ scale: 0.85 }}
+            onClick={handleSave}
+            aria-pressed={saved}
+            aria-label="Save"
+            className="flex items-center justify-center rounded-lg"
+            style={{
+              width: 28, height: 28,
+              background: saved ? 'rgba(139,92,246,0.9)' : 'rgba(10,10,15,0.75)',
+              backdropFilter: 'blur(6px)',
+            }}>
+            <Bookmark size={14} color="#fff" fill={saved ? '#fff' : 'transparent'} />
+          </motion.button>
+        </div>
       </div>
 
       <div className="p-3.5">
