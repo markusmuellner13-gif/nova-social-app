@@ -18,7 +18,12 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 1500,
+      // NativeShell hides this the moment React has mounted, so the user never
+      // sees a blank frame between splash and UI. The duration below is only a
+      // safety net for the case where the bundle fails to boot at all — without
+      // it, a broken build would leave the splash on screen forever.
+      launchShowDuration: 3000,
+      launchAutoHide: true,
       backgroundColor: '#0a0a0f',
       androidSplashResourceName: 'splash',
       androidScaleType: 'CENTER_CROP',
@@ -29,7 +34,13 @@ const config: CapacitorConfig = {
       backgroundColor: '#0a0a0f',
     },
     PushNotifications: {
+      // Show banners even while Nova is foregrounded — iOS suppresses them by
+      // default, which makes a live app look like it isn't receiving push.
       presentationOptions: ['badge', 'sound', 'alert'],
+    },
+    LocalNotifications: {
+      smallIcon: 'ic_stat_icon',
+      iconColor: '#8b5cf6',
     },
   },
   android: {
@@ -41,6 +52,12 @@ const config: CapacitorConfig = {
   ios: {
     scheme: 'Nova',
   },
+  // NOTE — social sign-in also needs the custom URL scheme
+  // `com.nova.discover://auth/callback` registered in three places, or the
+  // provider has nowhere to return to (see src/lib/nativeAuth.ts):
+  //   • ios/App/App/Info.plist            → CFBundleURLSchemes
+  //   • android/.../AndroidManifest.xml   → a BROWSABLE intent-filter
+  //   • Supabase dashboard                → Authentication → URL Configuration
 };
 
 export default config;

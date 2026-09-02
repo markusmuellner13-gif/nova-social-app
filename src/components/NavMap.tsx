@@ -5,6 +5,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { X, Layers, Navigation, Volume2, VolumeX, LocateFixed, Car, Footprints, Flag, Palette } from 'lucide-react';
 import { Post, Category } from '@/types';
+import { getPosition, watchPosition, geolocationAvailable, type GeoWatch } from '@/lib/geolocate';
 
 // ── Navigation themes ─────────────────────────────────────────────────────────
 interface NavTheme {
@@ -117,15 +118,11 @@ function maneuverText(type: string, modifier: string, road: string): string {
 }
 
 // Request a GPS fix. maximumAge lets callers trade staleness for speed.
-function getGPSPosition(timeoutMs = 7000, maximumAge = 0): Promise<{ lat: number; lng: number } | null> {
-  return new Promise(resolve => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) { resolve(null); return; }
-    navigator.geolocation.getCurrentPosition(
-      p => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-      () => resolve(null),
-      { enableHighAccuracy: true, maximumAge, timeout: timeoutMs },
-    );
-  });
+// Goes through @/lib/geolocate, so this is the real OS locator in the native
+// app and `navigator.geolocation` in a browser — same contract either way.
+async function getGPSPosition(timeoutMs = 7000, maximumAge = 0): Promise<{ lat: number; lng: number } | null> {
+  const fix = await getPosition({ enableHighAccuracy: true, maximumAge, timeout: timeoutMs });
+  return fix ? { lat: fix.lat, lng: fix.lng } : null;
 }
 
 export default function NavMap({ posts, userLocation, initialTarget, onClose }: Props) {
@@ -134,7 +131,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   // Posts backing the GPU pin layer, indexed by the feature's `idx` property.
   const pinPostsRef = useRef<Post[]>([]);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const watchIdRef = useRef<number | null>(null);
+  const watchIdRef = useRef<GeoWatch | null>(null);
   const stepsRef = useRef<RouteStep[]>([]);
   const lastSpokenRef = useRef<string>('');
   const ttsVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
@@ -337,7 +334,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     });
 
     return () => {
-      if (watchIdRef.current !== null) navigator.geolocation?.clearWatch(watchIdRef.current);
+      watchIdRef.current?.clear();
       map.remove();
       mapRef.current = null;
       satelliteLayerAddedRef.current = false;
@@ -552,12 +549,11 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
 
   // ── Live turn-by-turn guidance ────────────────────────────────────────────────
   const startGuidance = useCallback(() => {
-    if (!navigator.geolocation || !target) return;
+    if (!geolocationAvailable() || !target) return;
     setNavigating(true);
     speak(`Starting navigation to ${target.caption.split('\n')[0].slice(0, 40)}. ${stepsRef.current[0]?.instruction ?? ''}`);
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        const { latitude: lat, longitude: lng } = pos.coords;
+    watchIdRef.current = watchPosition(
+      ({ lat, lng }) => {
         setUserMarker(lat, lng);
         const map = mapRef.current;
         if (map) map.easeTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 16), duration: 800 });
@@ -588,19 +584,19 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
 
   const stopGuidance = useCallback(() => {
     setNavigating(false);
-    if (watchIdRef.current !== null) { navigator.geolocation?.clearWatch(watchIdRef.current); watchIdRef.current = null; }
+    watchIdRef.current?.clear();
+    watchIdRef.current = null;
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
   }, []);
 
   const recenter = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(p => {
-        setUserMarker(p.coords.latitude, p.coords.longitude);
-        map.easeTo({ center: [p.coords.longitude, p.coords.latitude], zoom: 15 });
-      }, undefined, { enableHighAccuracy: true, maximumAge: 5000 });
-    }
+    void getPosition({ enableHighAccuracy: true, maximumAge: 5000 }).then(fix => {
+      if (!fix) return;
+      setUserMarker(fix.lat, fix.lng);
+      map.easeTo({ center: [fix.lng, fix.lat], zoom: 15 });
+    });
   }, [setUserMarker]);
 
   return (

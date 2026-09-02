@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { X, Link2, Share2, Users } from 'lucide-react';
 import { Post } from '@/types';
 import { buildShareUrl } from '@/lib/shareLink';
+import { share } from '@/lib/nativeShare';
 import { coverBackground } from '@/components/PostImage';
 import { useApp } from '@/context/AppContext';
 
@@ -80,18 +81,16 @@ export default function InviteSheet({ post, onClose }: Props) {
   }, [inviteText, shareUrl, onClose]);
 
   const handleNativeShare = useCallback(async () => {
-    if (typeof navigator !== 'undefined' && navigator.share) {
-      try {
-        await navigator.share({ title: 'Nova', text: inviteText, url: shareUrl });
-        onClose();
-      } catch { /* user cancelled */ }
-    } else {
+    // Goes through the OS share sheet in the bundled app and navigator.share in
+    // a browser; the clipboard remains the fallback where neither exists.
+    const outcome = await share({ title: 'Nova', text: inviteText, url: shareUrl });
+    if (outcome === 'unsupported') {
       try {
         await navigator.clipboard.writeText(`${inviteText} ${shareUrl}`);
         addToast('Invite link copied!', 'success', '🔗');
       } catch { /* clipboard blocked */ }
-      onClose();
     }
+    onClose();
   }, [inviteText, shareUrl, addToast, onClose]);
 
   const handleCopy = useCallback(async () => {

@@ -4,10 +4,11 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Mail, Lock, User, Eye, EyeOff, Check, AlertCircle } from 'lucide-react';
 import {
-  signUpEmail, signInEmail, signInGoogle, supabase,
+  signUpEmail, signInEmail, signInGoogle, signInApple, supabase,
   checkUsernameAvailable, usernameMessage, requestPasswordReset,
   type UsernameStatus,
 } from '@/lib/supabase';
+import { isNative } from '@/lib/native';
 import { checkPassword, MIN_PASSWORD_LENGTH } from '@/lib/passwordPolicy';
 import { checkPasswordBreached, type BreachResult } from '@/lib/passwordBreach';
 import TurnstileWidget from './TurnstileWidget';
@@ -129,6 +130,21 @@ export default function AuthModal({ onClose }: Props) {
     }
   }
 
+  async function handleApple() {
+    setError('');
+    try { await signInApple(); }
+    catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Apple sign-in failed';
+      setError(msg);
+    }
+  }
+
+  // Guideline 4.8 makes this mandatory in the iOS app, where Google sign-in is
+  // also offered. On the web it stays hidden until the Apple provider is
+  // actually enabled in Supabase (NEXT_PUBLIC_APPLE_AUTH=1) — showing a button
+  // that can only error would be a regression for existing web users.
+  const showApple = isNative() || process.env.NEXT_PUBLIC_APPLE_AUTH === '1';
+
   function switchMode(next: AuthMode) {
     setMode(next);
     setError('');
@@ -195,6 +211,17 @@ export default function AuthModal({ onClose }: Props) {
               </svg>
               Continue with Google
             </motion.button>
+
+            {showApple && (
+              <motion.button whileTap={{ scale: 0.97 }} onClick={handleApple}
+                className="w-full flex items-center justify-center gap-3 py-3.5 rounded-2xl font-semibold text-sm mb-4"
+                style={{ background: '#13131a', border: '1px solid #2a2a38', color: 'white' }}>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M17.05 12.54c-.03-2.72 2.22-4.03 2.32-4.09-1.27-1.85-3.24-2.1-3.94-2.13-1.68-.17-3.28.99-4.13.99-.85 0-2.16-.97-3.55-.94-1.83.03-3.51 1.06-4.45 2.7-1.9 3.29-.48 8.16 1.37 10.83.9 1.31 1.98 2.78 3.39 2.72 1.36-.05 1.87-.88 3.52-.88 1.64 0 2.11.88 3.55.85 1.47-.02 2.4-1.33 3.29-2.65 1.04-1.52 1.47-2.99 1.49-3.07-.03-.01-2.86-1.1-2.89-4.33zM14.4 4.6c.75-.91 1.25-2.17 1.11-3.43-1.08.04-2.38.72-3.15 1.62-.69.8-1.29 2.08-1.13 3.31 1.2.09 2.43-.61 3.17-1.5z"/>
+                </svg>
+                Continue with Apple
+              </motion.button>
+            )}
 
             <div className="flex items-center gap-3 mb-4">
               <div className="flex-1 h-px" style={{ background: '#2a2a38' }} />

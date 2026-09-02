@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isCronRequest } from '@/lib/cronAuth';
 import { cacheEnabled, cacheScanKeys, cacheGet, cacheSet, cacheDelete } from '@/lib/serverCache';
-import { webPushEnabled, sendPush, PushSub } from '@/lib/webpush';
+import { type PushSub } from '@/lib/webpush';
+import { anyPushEnabled, sendToSubscriber, type NativeTarget } from '@/lib/pushSend';
 import { dbReadEnabled, queryTopEventsNear } from '@/lib/eventsDb';
 import { chooseSmartPush } from '@/lib/pushContent';
 import { buildLocalisedPush, resolveLocale } from '@/lib/pushCopy';
@@ -25,7 +26,10 @@ export const maxDuration = 60;
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface Envelope {
-  subscription: PushSub;
+  // Exactly one of these is set: a browser holds a Web Push subscription, a
+  // phone running the bundled app holds an APNs/FCM device token instead.
+  subscription?: PushSub | null;
+  native?: NativeTarget | null;
   city?: string | null;
   lat?: number | null;
   lng?: number | null;
@@ -67,8 +71,8 @@ export async function GET(request: NextRequest) {
   if (!isCronRequest(request)) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
-  if (!webPushEnabled) {
-    return NextResponse.json({ ok: false, sent: 0, note: 'web push disabled (set NEXT_PUBLIC_VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY)' });
+  if (!anyPushEnabled) {
+    return NextResponse.json({ ok: false, sent: 0, note: 'no push transport configured (set VAPID keys for web, FCM_* for Android, APNS_* for iOS)' });
   }
   if (!cacheEnabled) {
     return NextResponse.json({ ok: false, sent: 0, note: 'no subscription store (set Redis/Upstash)' });
@@ -87,7 +91,7 @@ export async function GET(request: NextRequest) {
   for (const key of keys) {
     if (Date.now() > deadline) break;
     const env = await cacheGet<Envelope>(key);
-    if (!env?.subscription?.endpoint) continue;
+    if (!env?.subscription?.endpoint && !env?.native?.token) continue;
     processed++;
 
     // Cooldown — don't re-push a user we already reached recently.
@@ -148,7 +152,7 @@ export async function GET(request: NextRequest) {
     }
     const payload = { ...msg, url, tag };
 
-    const res = await sendPush(env.subscription, payload);
+    const res = await sendToSubscriber(env, payload);
     if (res.ok) {
       sent++;
       // Record the send so the cooldown holds across the day's triggers.

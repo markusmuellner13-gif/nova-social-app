@@ -12,6 +12,13 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The native projects. `cap sync` copies the built bundle into
+    // android/app/src/main/assets/public and ios/App/App/public, so without
+    // these the linter walks thousands of minified chunks and buries the real
+    // findings under ~12k phantom errors. Same reason "out/**" is ignored —
+    // these are just two more copies of it.
+    "android/**",
+    "ios/**",
   ]),
   {
     rules: {

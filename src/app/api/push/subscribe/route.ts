@@ -32,29 +32,52 @@ function sanitizeReminders(raw: unknown): StoredReminder[] {
   return out;
 }
 
-// Stores a web-push subscription (+ the user's city/coords) so the daily digest
-// cron (/api/cron/push) can send "events near you". Persists in Redis when
+// A device registration from the bundled native app. Phones can't hold a
+// PushSubscription (no service worker in a Capacitor WebView), so they send the
+// APNs/FCM token the OS issued instead. Everything downstream — city, coords,
+// interests, locale, reminders, the 10h cooldown — is identical either way.
+interface NativeRegistration { platform: 'ios' | 'android'; token: string }
+
+function sanitizeNative(raw: unknown): NativeRegistration | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const platform = o.platform;
+  if (platform !== 'ios' && platform !== 'android') return null;
+  // APNs tokens are 64 hex chars; FCM tokens are longer and base64-ish. Bound the
+  // length rather than pattern-match, so a future token format still registers.
+  if (typeof o.token !== 'string' || o.token.length < 32 || o.token.length > 512) return null;
+  return { platform, token: o.token };
+}
+
+// Stores a push destination (+ the user's city/coords) so the daily digest cron
+// (/api/cron/push) can send "events near you". Persists in Redis when
 // configured; otherwise accepts and no-ops (in-session reminders still work).
 //
-// Accepts both the new envelope { subscription, city, lat, lng } and the legacy
-// bare PushSubscription for backwards compatibility.
+// Accepts three shapes: the native envelope { native: { platform, token }, … },
+// the web envelope { subscription, city, lat, lng }, and the legacy bare
+// PushSubscription — the last two unchanged, for backwards compatibility.
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as {
+      native?: unknown;
       subscription?: { endpoint?: string };
       endpoint?: string;
       city?: string; lat?: number; lng?: number; categories?: unknown; userId?: unknown;
       locale?: string;
       reminders?: unknown;
     };
-    const sub = body.subscription ?? (body.endpoint ? body : null);
-    if (!sub?.endpoint) {
+    const native = sanitizeNative(body.native);
+    const sub = native ? null : (body.subscription ?? (body.endpoint ? body : null));
+    if (!native && !sub?.endpoint) {
       return NextResponse.json({ ok: false, error: 'invalid subscription' }, { status: 400 });
     }
     if (cacheEnabled) {
-      // Key by a hash of the endpoint so re-subscribing overwrites cleanly.
+      // Key by a hash of the destination so re-subscribing overwrites cleanly.
+      // A device token is namespaced by platform so the two token spaces can
+      // never collide on one key.
+      const identity = native ? `native:${native.platform}:${native.token}` : sub!.endpoint!;
       let h = 2166136261;
-      for (let i = 0; i < sub.endpoint.length; i++) { h ^= sub.endpoint.charCodeAt(i); h = Math.imul(h, 16777619); }
+      for (let i = 0; i < identity.length; i++) { h ^= identity.charCodeAt(i); h = Math.imul(h, 16777619); }
       // Keep only a few short, sane category strings — these personalise the
       // push copy ("for the music lovers near you").
       const categories = Array.isArray(body.categories)
@@ -71,7 +94,10 @@ export async function POST(request: NextRequest) {
 
       const envelope = {
         ...prev,
-        subscription: sub,
+        // Exactly one destination is ever set, and re-registering clears the
+        // other — a device that somehow wrote both would get double-pushed.
+        subscription: native ? null : sub,
+        native,
         city: typeof body.city === 'string' ? body.city.slice(0, 80) : null,
         lat: Number.isFinite(body.lat) ? body.lat : null,
         lng: Number.isFinite(body.lng) ? body.lng : null,

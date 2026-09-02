@@ -1,5 +1,9 @@
 'use client';
 import { apiUrl } from '@/lib/apiBase';
+import { isNative } from '@/lib/native';
+import {
+  registerNativePush, clearNativeNotifications, showNativeLocalNotification,
+} from '@/lib/nativePush';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Notifications & web push (#4)
@@ -53,6 +57,12 @@ export function isStandalone(): boolean {
 
 export function pushCapability(): PushCapability {
   if (typeof window === 'undefined') return 'unsupported';
+  // In the bundled native app push goes through APNs/FCM, not Web Push. None of
+  // the checks below apply — there is no service worker on iOS, no PushManager,
+  // and the VAPID key is irrelevant — and every one of them would answer
+  // "unsupported", which is how the native app would end up with no push at all.
+  // The OS permission prompt is raised later, by registerNativePush().
+  if (isNative()) return 'ready';
   if (!VAPID_PUBLIC_KEY) return 'no-key';
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
     // On iOS this is what a plain Safari tab looks like — PushManager simply
@@ -77,6 +87,9 @@ export async function initNotifications(): Promise<ServiceWorkerRegistration | n
 }
 
 export async function ensureNotificationPermission(): Promise<boolean> {
+  // No `Notification` global exists in a Capacitor WebView — asking it would
+  // always answer "no permission" and quietly kill every reminder. Ask the OS.
+  if (isNative()) return (await registerNativePush()) !== null;
   if (typeof window === 'undefined' || !('Notification' in window)) return false;
   if (Notification.permission === 'granted') return true;
   if (Notification.permission === 'denied') return false;
@@ -122,9 +135,18 @@ export async function syncReminders(
   reminders: { postId: string; title: string; venue?: string; eventDateRaw?: string; minutesBefore: number }[],
 ): Promise<boolean> {
   if (pushCapability() !== 'ready') return false;
-  const reg = await initNotifications();
-  const sub = await reg?.pushManager?.getSubscription();
-  if (!sub) return false; // not subscribed yet; the next subscribeToPush carries them
+
+  let identity: { subscription: unknown } | { native: unknown };
+  if (isNative()) {
+    const native = await registerNativePush();
+    if (!native) return false; // not registered yet; the next subscribeToPush carries them
+    identity = { native };
+  } else {
+    const reg = await initNotifications();
+    const sub = await reg?.pushManager?.getSubscription();
+    if (!sub) return false; // not subscribed yet; the next subscribeToPush carries them
+    identity = { subscription: sub };
+  }
 
   const payload = reminders.flatMap(r => {
     if (!r.eventDateRaw) return [];
@@ -145,7 +167,7 @@ export async function syncReminders(
     await fetch(apiUrl('/api/push/subscribe'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subscription: sub, reminders: payload }),
+      body: JSON.stringify({ ...identity, reminders: payload }),
     });
     return true;
   } catch {
@@ -164,6 +186,24 @@ export async function subscribeToPush(loc?: PushLocation): Promise<boolean> {
   if (cap !== 'ready') {
     console.info('[push] not subscribing —', cap);
     return false;
+  }
+
+  // Native: register with the OS and store the device token under the same
+  // envelope (city / coords / interests / locale) the digest cron already reads,
+  // so one cron serves browsers and phones alike.
+  if (isNative()) {
+    const native = await registerNativePush();
+    if (!native) { console.info('[push] native registration failed'); return false; }
+    try {
+      const res = await fetch(apiUrl('/api/push/subscribe'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ native, ...(loc ?? {}) }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
   const reg = await initNotifications();
   if (!reg || !('pushManager' in reg)) return false;
@@ -219,6 +259,7 @@ export function clearAppBadge(): void {
 // sitting in the tray/lock-screen forever. Call this whenever the app comes
 // to the foreground so opening it any way always clears stale banners.
 export async function dismissActiveNotifications(): Promise<void> {
+  if (isNative()) { await clearNativeNotifications(); return; }
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
   try {
     const reg = swRegistration ?? await navigator.serviceWorker.getRegistration();
@@ -230,6 +271,8 @@ export async function dismissActiveNotifications(): Promise<void> {
 
 // Show a notification immediately via the SW (preferred) or the page API.
 export async function showLocalNotification(title: string, body: string, url = '/'): Promise<void> {
+  // Native has no service worker to post through — schedule an OS notification.
+  if (isNative()) { await showNativeLocalNotification(title, body, url); return; }
   const granted = await ensureNotificationPermission();
   if (!granted) return;
   const reg = await initNotifications();

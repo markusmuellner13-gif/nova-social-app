@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isCronRequest } from '@/lib/cronAuth';
 import { cacheEnabled, cacheScanKeys, cacheGet, cacheSet, cacheDelete } from '@/lib/serverCache';
-import { webPushEnabled, sendPush, PushSub } from '@/lib/webpush';
+import { type PushSub } from '@/lib/webpush';
+import { anyPushEnabled, sendToSubscriber, type NativeTarget } from '@/lib/pushSend';
 import { buildReminderBody } from '@/lib/pushCopy';
 import type { StoredReminder } from '@/app/api/push/subscribe/route';
 
@@ -27,7 +28,9 @@ export const maxDuration = 60;
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface Envelope {
-  subscription: PushSub;
+  // Exactly one of these is set — see the digest cron for the full note.
+  subscription?: PushSub | null;
+  native?: NativeTarget | null;
   reminders?: StoredReminder[];
   sentReminderIds?: string[];
   /** The language the user picked — the reminder body is written in it. */
@@ -56,8 +59,8 @@ export async function GET(request: NextRequest) {
   if (!isCronRequest(request)) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
-  if (!webPushEnabled) {
-    return NextResponse.json({ ok: false, sent: 0, note: 'web push disabled (set VAPID keys)' });
+  if (!anyPushEnabled) {
+    return NextResponse.json({ ok: false, sent: 0, note: 'no push transport configured (set VAPID keys for web, FCM_* for Android, APNS_* for iOS)' });
   }
   if (!cacheEnabled) {
     return NextResponse.json({ ok: false, sent: 0, note: 'no subscription store (set Redis/Upstash)' });
@@ -71,7 +74,7 @@ export async function GET(request: NextRequest) {
   for (const key of keys) {
     if (Date.now() > deadline) break;
     const env = await cacheGet<Envelope>(key);
-    if (!env?.subscription?.endpoint || !env.reminders?.length) continue;
+    if ((!env?.subscription?.endpoint && !env?.native?.token) || !env.reminders?.length) continue;
     scanned++;
 
     const alreadySent = new Set(env.sentReminderIds ?? []);
@@ -89,7 +92,7 @@ export async function GET(request: NextRequest) {
       }
 
       const { title, body } = reminderMessage(r, env.locale);
-      const res = await sendPush(env.subscription, {
+      const res = await sendToSubscriber(env, {
         title,
         body,
         url: `/e/${r.postId}`,
