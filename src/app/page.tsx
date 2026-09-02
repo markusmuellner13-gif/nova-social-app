@@ -21,6 +21,7 @@ import { LanguageProvider, useLanguage } from '@/context/LanguageContext';
 import { getUserInteractions } from '@/lib/supabase';
 import { setFriendsGoingUser } from '@/lib/friendsGoing';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import NativeShell from '@/components/NativeShell';
 import Onboarding from '@/components/Onboarding';
 import { useLocation } from '@/hooks/useLocation';
 import { initNotifications, subscribeToPush, setAppBadge, clearAppBadge, dismissActiveNotifications } from '@/lib/notifications';
@@ -142,6 +143,28 @@ function AppShell() {
     setActiveTab(tab);
   }, []);
 
+  // Where a deep link or a tapped notification lands. The bundled app has no
+  // server and no router to hand a path to, so URLs are resolved to app state
+  // here: an event link opens the feed (which is where the event lives), a
+  // ?tab= link selects that tab, and anything unrecognised falls back to the
+  // feed rather than a blank screen.
+  const handleNativeNavigate = useCallback((url: string) => {
+    const TABS: Tab[] = ['feed', 'explore', 'faraway', 'groups', 'chat', 'profile'];
+    let path = url, query = '';
+    const q = url.indexOf('?');
+    if (q !== -1) { path = url.slice(0, q); query = url.slice(q + 1); }
+
+    const wanted = new URLSearchParams(query).get('tab');
+    if (wanted && (TABS as string[]).includes(wanted)) {
+      setShowNotifications(false);
+      setActiveTab(wanted as Tab);
+      return;
+    }
+    if (path.startsWith('/notifications')) { setShowNotifications(true); return; }
+    setShowNotifications(false);
+    setActiveTab('feed');
+  }, []);
+
   if (!splashDone) return <SplashScreen onComplete={handleSplashComplete} />;
   if (!state.hasOnboarded) return <Onboarding onRequestLocation={requestLocation} locationGranted={permission === 'granted'} />;
 
@@ -174,6 +197,9 @@ function AppShell() {
 
       <BottomNav active={activeTab} onChange={handleTabChange} />
       <ToastContainer />
+
+      {/* Native OS behaviours (splash, status bar, Back, deep links). No-op on web. */}
+      <NativeShell onNavigate={handleNativeNavigate} />
 
       {/* Notifications — opened from the header bell (Instagram-style) */}
       <AnimatePresence>

@@ -24,6 +24,7 @@ import {
 import { apiUrl } from '@/lib/apiBase';
 import { postImageUrl } from '@/lib/imageUrl';
 import { coverBackground } from '@/components/PostImage';
+import { openHostedPage, canShowBusinessPortal } from '@/lib/openExternal';
 
 const ALL_LOCALES = Object.keys(LOCALE_NAMES) as Locale[];
 
@@ -304,11 +305,19 @@ export default function ProfileTab({ onOpenAuth }: Props) {
               </div>
 
               {[
-                { icon: Star,          label: 'List your business ✨', action: () => window.open('/business', '_blank') },
+                // Web-hosted portal: absolute + system browser in the app, and
+                // hidden entirely on iOS (App Store 3.1.1 — see openExternal.ts).
+                ...(canShowBusinessPortal()
+                  ? [{ icon: Star, label: 'List your business ✨', action: () => { void openHostedPage('/business'); } }]
+                  : []),
                 { icon: MessageSquare, label: 'Contact Leone Nero', action: () => { setShowContactSheet(true); setShowSettings(false); } },
-                { icon: Shield,        label: 'Privacy Policy',     action: () => window.open('/privacy', '_blank') },
-                { icon: FileText,      label: 'Terms of Service',   action: () => window.open('/terms', '_blank') },
-                { icon: Info,          label: 'Cookie Policy',      action: () => window.open('/cookie', '_blank') },
+                // Same treatment as the portal: `window.open` on a capacitor://
+                // origin opens an empty WebView window rather than the page. The
+                // privacy link in particular has to work — App Store review and
+                // Play's Data Safety form both check it.
+                { icon: Shield,        label: 'Privacy Policy',     action: () => { void openHostedPage('/privacy'); } },
+                { icon: FileText,      label: 'Terms of Service',   action: () => { void openHostedPage('/terms'); } },
+                { icon: Info,          label: 'Cookie Policy',      action: () => { void openHostedPage('/cookie'); } },
               ].map(({ icon: Icon, label, action }) => (
                 <button key={label} onClick={action}
                   className="w-full flex items-center gap-3 px-5 py-4 text-sm font-medium"

@@ -1,0 +1,4 @@
+# The Gradle wrapper is a POSIX shell script. Windows checkouts would otherwise
+# get CRLF line endings, which makes it unrunnable on macOS/Linux CI with
+# "bad interpreter: /bin/sh^M".
+android/gradlew text eol=lf

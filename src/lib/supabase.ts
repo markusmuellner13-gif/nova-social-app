@@ -2,6 +2,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { makeAuthProxyFetch } from './authProxy';
+import { isNative } from './native';
 
 const url  = process.env.NEXT_PUBLIC_SUPABASE_URL  ?? '';
 const key  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -137,13 +138,40 @@ export async function signInEmail(email: string, password: string, captchaToken?
   return data;
 }
 
-export async function signInGoogle() {
+// ── Social sign-in ───────────────────────────────────────────────────────────
+//
+// Two providers, two runtimes. On the web this is the ordinary redirect it has
+// always been. In the bundled app the same call has to go out to the system
+// browser and come back through a custom URL scheme — an embedded WebView can't
+// host Google's consent screen and can't be redirected back to — so it detours
+// through nativeAuth.ts. The import is dynamic so the web bundle never carries
+// the Capacitor Browser plugin.
+async function signInWithProvider(provider: 'google' | 'apple') {
   if (!supabase) throw new Error('Supabase not configured');
+
+  if (isNative()) {
+    const { startNativeOAuth } = await import('./nativeAuth');
+    await startNativeOAuth(provider);
+    return;
+  }
+
   const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
+    provider,
     options: { redirectTo: `${window.location.origin}/auth/callback` },
   });
   if (error) throw error;
+}
+
+export async function signInGoogle() {
+  return signInWithProvider('google');
+}
+
+// Sign in with Apple. Required, not optional: App Store Guideline 4.8 says an
+// app offering any third-party social login (Nova offers Google) must also offer
+// a privacy-preserving equivalent, and shipping without it is a straight
+// rejection. Enable the Apple provider in the Supabase dashboard to activate it.
+export async function signInApple() {
+  return signInWithProvider('apple');
 }
 
 export async function signOut() {

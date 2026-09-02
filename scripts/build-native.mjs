@@ -23,8 +23,23 @@ const ROOT = process.cwd();
 const APP = join(ROOT, 'src', 'app');
 const STASH = join(ROOT, '.native-stash');
 
-// Server-only routes that must not be part of a static export.
-const SERVER_ONLY = ['api', 'e'];
+// Routes kept OUT of the native bundle.
+//
+//  api      — the backend. Stays on Vercel; the app calls it via NEXT_PUBLIC_API_BASE.
+//  e        — the public share page. Dynamic SSR, and its whole job is to be a
+//             link-previewable web page for people who don't have the app.
+//  business — the self-serve advertising portal. Excluded for two reasons:
+//             (1) it is the one screen whose fetches are same-origin and NOT
+//                 routed through apiUrl(), so on a device they would resolve
+//                 against the Capacitor bundle and 404;
+//             (2) it sells €29–€149 plans through Stripe Checkout, and digital
+//                 purchases inside an iOS binary that don't use In-App Purchase
+//                 are an App Store Guideline 3.1.1 rejection. Businesses buy on
+//                 the web, where they already do.
+//  .well-known — the App Links / Universal Links association files. Route
+//             handlers, so they can't be statically exported; they're also
+//             web-only by definition (the phone reads them FROM the website).
+const SERVER_ONLY = ['api', 'e', 'business', '.well-known'];
 
 // The strict CSP mints a nonce per response, which means the document shell has
 // to render per request — so layout.tsx declares `force-dynamic`. A static

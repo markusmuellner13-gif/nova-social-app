@@ -19,6 +19,7 @@ import { useLanguage } from '@/context/LanguageContext';
 import AdSlot from './AdSlot';
 import FeedSkeleton from './FeedSkeleton';
 import TrendingRail from './TrendingRail';
+import { openHostedPage, canShowBusinessPortal } from '@/lib/openExternal';
 
 // Ad placement: every AD_EVERY posts starting at AD_START
 const AD_START = 3;
@@ -901,11 +902,13 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
               <p className="text-sm text-center leading-relaxed" style={{ color: '#888899', maxWidth: 280 }}>
                 Local restaurants, bars, hotels and experiences can promote themselves here — geo-targeted to people exploring{location?.city ? ` ${location.city}` : ' their city'}.
               </p>
-              <motion.button whileTap={{ scale: 0.96 }} onClick={() => window.open('/business', '_blank')}
-                className="mt-1 px-6 py-3 rounded-2xl text-sm font-bold"
-                style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)', color: '#0a0a0f' }}>
-                ✨ List your business
-              </motion.button>
+              {canShowBusinessPortal() && (
+                <motion.button whileTap={{ scale: 0.96 }} onClick={() => { void openHostedPage('/business'); }}
+                  className="mt-1 px-6 py-3 rounded-2xl text-sm font-bold"
+                  style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)', color: '#0a0a0f' }}>
+                  ✨ List your business
+                </motion.button>
+              )}
             </div>
           )}
 

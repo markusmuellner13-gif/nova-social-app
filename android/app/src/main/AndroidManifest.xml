@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+              Social sign-in return leg. signInWithOAuth() opens the provider in
+              a Custom Tab; the provider redirects to com.nova.discover://auth/
+              callback and this filter is what routes that back into the app.
+              Without it the Custom Tab dead-ends on an "unknown scheme" error.
+              Must match NATIVE_AUTH_REDIRECT in src/lib/nativeAuth.ts and the
+              Redirect URLs list in the Supabase dashboard.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.nova.discover" />
+            </intent-filter>
+
+            <!--
+              Android App Links: shared event links open IN Nova instead of a
+              browser tab. autoVerify makes the OS check
+              https://nova-phi-liart.vercel.app/.well-known/assetlinks.json —
+              which must list this app's release signing fingerprint, or the
+              links silently keep opening in the browser (see NATIVE.md).
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="nova-phi-liart.vercel.app" android:pathPrefix="/e" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+
+    <!-- Permissions -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      Location. COARSE alone is enough for "events near your city", but
+      turn-by-turn guidance in NavMap needs FINE to be usable at street level.
+      Both are runtime permissions, requested by ensureLocationPermission()
+      at the moment the user asks for their location.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!--
+      Android 13+ requires this to show ANY notification. Without it the digest
+      and reminder pushes arrive and are silently discarded by the OS.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+</manifest>

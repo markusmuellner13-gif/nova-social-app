@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { LocationState } from '@/types';
+import { getPosition, geolocationAvailable, ensureLocationPermission, checkLocationPermission } from '@/lib/geolocate';
+import { isNative } from '@/lib/native';
 
 type PermissionStatus = 'loading' | 'granted' | 'denied' | 'prompt';
 
@@ -172,6 +174,19 @@ export function useLocation(): UseLocationReturn {
       } catch { /* ignore */ }
     }
 
+    // On native the OS owns permission state: `navigator.permissions` is either
+    // absent or reports the WebView's idea of it rather than CoreLocation's. Ask
+    // the plugin instead, and only fetch silently when it says permission is
+    // already granted — so launching the app never fires an unprompted dialog.
+    if (isNative()) {
+      void (async () => {
+        const granted = await checkLocationPermission();
+        if (granted) { setPermission('granted'); void requestLocationSilent(); }
+        else setPermission('prompt');
+      })();
+      return;
+    }
+
     // Check browser permission state
     if (navigator.permissions) {
       navigator.permissions
@@ -196,50 +211,41 @@ export function useLocation(): UseLocationReturn {
   }, []);
 
   async function requestLocationSilent() {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude: lat, longitude: lng } = pos.coords;
-        const geo = sanitizeGeo(await reverseGeocode(lat, lng));
-        const loc: LocationState = { lat, lng, ...geo, enabled: true };
-        setLocation(loc);
-        setPermission('granted');
-        persistLocation(loc);
-      },
-      () => { /* silent fail */ },
-      // maximumAge kept short so a reopen in a new city (after travel) always
-      // gets an actually-current fix instead of reusing a stale one — the
-      // whole point of this call is to correct a possibly-wrong cached city.
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 }
-    );
+    if (!geolocationAvailable()) return;
+    // maximumAge kept short so a reopen in a new city (after travel) always
+    // gets an actually-current fix instead of reusing a stale one — the
+    // whole point of this call is to correct a possibly-wrong cached city.
+    const fix = await getPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000, prompt: false });
+    if (!fix) return; /* silent fail */
+    const geo = sanitizeGeo(await reverseGeocode(fix.lat, fix.lng));
+    const loc: LocationState = { lat: fix.lat, lng: fix.lng, ...geo, enabled: true };
+    setLocation(loc);
+    setPermission('granted');
+    persistLocation(loc);
   }
 
   const requestLocation = useCallback(async () => {
-    if (!navigator.geolocation) {
+    if (!geolocationAvailable()) {
       setPermission('denied');
       return;
     }
     // Explicit GPS request — switch back from a hand-picked city
     try { localStorage.removeItem(MANUAL_KEY); } catch { /* ignore */ }
     setPermission('loading');
-    return new Promise<void>((resolve) => {
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          const { latitude: lat, longitude: lng } = pos.coords;
-          const geo = sanitizeGeo(await reverseGeocode(lat, lng));
-          const loc: LocationState = { lat, lng, ...geo, enabled: true };
-          setLocation(loc);
-          setPermission('granted');
-          persistLocation(loc);
-          resolve();
-        },
-        () => {
-          setPermission('denied');
-          resolve();
-        },
-        { enableHighAccuracy: false, timeout: 10000 }
-      );
-    });
+    // A deliberate user action, so this is the right moment to raise the OS
+    // permission dialog on native (a no-op on web, where the browser prompts).
+    const fix = (await ensureLocationPermission())
+      ? await getPosition({ enableHighAccuracy: false, timeout: 10000 })
+      : null;
+    if (!fix) {
+      setPermission('denied');
+      return;
+    }
+    const geo = sanitizeGeo(await reverseGeocode(fix.lat, fix.lng));
+    const loc: LocationState = { lat: fix.lat, lng: fix.lng, ...geo, enabled: true };
+    setLocation(loc);
+    setPermission('granted');
+    persistLocation(loc);
   }, []);
 
   const setLocationEnabled = useCallback((enabled: boolean) => {
