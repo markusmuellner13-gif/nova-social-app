@@ -83,9 +83,57 @@ function upstreamHeaders(target: URL): HeadersInit {
   return h;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Failure responses
+//
+// A third-party photo that is gone is NOT this server failing, and it must stop
+// being reported as one. Every unusable upstream used to come back as a bare
+// 502 with no cache lifetime, which cost us twice:
+//
+//   • It tripped the platform's 5xx alerting. One expired Facebook-CDN link on
+//     one card generated a "15 failed requests" mail about something no deploy
+//     could fix — so the alert that should mean "Nova is broken" instead meant
+//     "a venue deleted a JPEG", and stopped being worth reading.
+//   • Nothing cached it. A 502 carries no `Cache-Control`, so the edge re-ran
+//     the whole dead fetch for every viewer and every srcset width, forever.
+//     That is how a single dead photo became a steady drip of logged failures.
+//
+// So a failure now carries an honest status AND a lifetime. A URL that is
+// permanently gone answers 404 — the truth, and a status the edge will cache —
+// and is held for a day. A genuinely transient outage stays a 502, because that
+// IS worth alerting on if it persists, but is held a minute so one bad moment
+// collapses into a single origin attempt instead of a burst.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const GONE_TTL = 86_400; // deterministic for this URL — safe to hold for a day
+const RETRY_TTL = 60;    // upstream may come back — hold only briefly
+
+function failure(status: number, reason: string, ttl: number): NextResponse {
+  return new NextResponse(reason, {
+    status,
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      // The status is deliberately coarse (the client treats every failure the
+      // same), so keep the real cause on the response — this is the header to
+      // read when a card shows the no-photo cover and you want to know why.
+      'X-Nova-Proxy-Reason': reason,
+      'Cache-Control': `public, max-age=${ttl}, s-maxage=${ttl}`,
+    },
+  });
+}
+
+/** The upstream answered, but not with an image we can use. */
+function upstreamFailure(status: number): NextResponse {
+  // 4xx from the source means the photo is deleted, moved, or hotlink-protected
+  // against us. For this URL that is permanent, and it is not our fault — 404
+  // says both, and is the status the edge caches.
+  if (status >= 400 && status < 500) return failure(404, `Upstream ${status}`, GONE_TTL);
+  return failure(502, `Upstream ${status}`, RETRY_TTL);
+}
+
 export async function GET(req: NextRequest) {
   const raw = req.nextUrl.searchParams.get('url');
-  if (!raw) return new NextResponse('Missing url param', { status: 400 });
+  if (!raw) return failure(400, 'Missing url param', GONE_TTL);
 
   // Ask the source for its best version before we render it.
   const upgraded = upgradeImageUrl(raw);
@@ -94,10 +142,10 @@ export async function GET(req: NextRequest) {
   try {
     target = new URL(upgraded);
   } catch {
-    return new NextResponse('Invalid URL', { status: 400 });
+    return failure(400, 'Invalid URL', GONE_TTL);
   }
-  if (target.protocol !== 'https:') return new NextResponse('HTTPS only', { status: 400 });
-  if (!(await isPublicHost(target.hostname))) return new NextResponse('Host not allowed', { status: 403 });
+  if (target.protocol !== 'https:') return failure(400, 'HTTPS only', GONE_TTL);
+  if (!(await isPublicHost(target.hostname))) return failure(403, 'Host not allowed', GONE_TTL);
 
   // Requested render width, snapped to the allowed ladder so the edge cache has
   // a small, predictable set of variants per image.
@@ -115,13 +163,14 @@ export async function GET(req: NextRequest) {
       next: { revalidate: 86400 },
     });
   } catch {
-    return retryOriginal(raw, upgraded, width);
+    // Timeout, DNS failure, connection reset — we never heard back at all.
+    return retryOriginal(raw, upgraded, width, null);
   }
 
   if (!upstream.ok) {
     // The upgraded variant may not exist (e.g. a Wikimedia thumb width that was
     // never rendered) — fall back to exactly what the source gave us.
-    return retryOriginal(raw, upgraded, width);
+    return retryOriginal(raw, upgraded, width, upstream.status);
   }
 
   // Don't insist on an `image/*` content type: several CDNs (cdn.evbuc.com among
@@ -129,38 +178,53 @@ export async function GET(req: NextRequest) {
   // is definitely NOT an image; sharp is the real arbiter below.
   const contentType = upstream.headers.get('Content-Type') ?? '';
   if (/^(text\/|application\/(json|xml|javascript))/i.test(contentType)) {
-    return new NextResponse('Not an image', { status: 415 });
+    // A page where a photo should be — a venue whose og:image points at its own
+    // homepage, say. There is no image at this URL and there never will be, so
+    // this is a 404 like any other dead photo, not a live server problem.
+    return failure(404, 'Not an image', GONE_TTL);
   }
 
   const declared = parseInt(upstream.headers.get('Content-Length') ?? '', 10);
   if (Number.isFinite(declared) && declared > MAX_BYTES) {
-    return new NextResponse('Image too large', { status: 413 });
+    return failure(413, 'Image too large', GONE_TTL);
   }
 
   const source = Buffer.from(await upstream.arrayBuffer());
-  if (source.byteLength > MAX_BYTES) return new NextResponse('Image too large', { status: 413 });
+  if (source.byteLength > MAX_BYTES) return failure(413, 'Image too large', GONE_TTL);
 
   return render(source, width, req.headers.get('accept') ?? '', contentType);
 }
 
-/** Second chance with the untouched source URL when the upgraded one fails. */
-async function retryOriginal(raw: string, upgraded: string, width: number): Promise<NextResponse> {
-  if (raw === upgraded) return new NextResponse('Upstream error', { status: 502 });
+/**
+ * Second chance with the untouched source URL when the upgraded one fails.
+ *
+ * `firstStatus` is what the upgraded attempt got back, or `null` if it never
+ * completed — it is what we report when there is no second chance to take.
+ */
+async function retryOriginal(
+  raw: string, upgraded: string, width: number, firstStatus: number | null,
+): Promise<NextResponse> {
+  // Nothing to retry: the URL that just failed IS the source's own URL.
+  if (raw === upgraded) {
+    return firstStatus === null
+      ? failure(502, 'Upstream unreachable', RETRY_TTL)
+      : upstreamFailure(firstStatus);
+  }
   let target: URL;
-  try { target = new URL(raw); } catch { return new NextResponse('Invalid URL', { status: 400 }); }
-  if (target.protocol !== 'https:') return new NextResponse('HTTPS only', { status: 400 });
-  if (!(await isPublicHost(target.hostname))) return new NextResponse('Host not allowed', { status: 403 });
+  try { target = new URL(raw); } catch { return failure(400, 'Invalid URL', GONE_TTL); }
+  if (target.protocol !== 'https:') return failure(400, 'HTTPS only', GONE_TTL);
+  if (!(await isPublicHost(target.hostname))) return failure(403, 'Host not allowed', GONE_TTL);
   try {
     const res = await fetch(target.toString(), {
       headers: upstreamHeaders(target), redirect: 'follow',
       signal: AbortSignal.timeout(12_000), next: { revalidate: 86400 },
     });
-    if (!res.ok) return new NextResponse('Upstream error', { status: res.status });
+    if (!res.ok) return upstreamFailure(res.status);
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.byteLength > MAX_BYTES) return new NextResponse('Image too large', { status: 413 });
+    if (buf.byteLength > MAX_BYTES) return failure(413, 'Image too large', GONE_TTL);
     return render(buf, width, '', res.headers.get('Content-Type') ?? 'image/jpeg');
   } catch {
-    return new NextResponse('Upstream fetch failed', { status: 502 });
+    return failure(502, 'Upstream unreachable', RETRY_TTL);
   }
 }
 
