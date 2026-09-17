@@ -131,16 +131,33 @@ function hotPerCold(): number {
 }
 
 /**
+ * Split a work list into what people want and what nobody has asked for,
+ * wanted-most first.
+ *
+ * `hot` is empty when nothing has been measured yet (a fresh Redis, or no
+ * traffic), which every caller treats as "behave exactly as before".
+ */
+export function partitionByDemand<T>(
+  items: T[],
+  score: (item: T) => number,
+): { hot: T[]; cold: T[] } {
+  const scored: { item: T; score: number }[] = [];
+  const cold: T[] = [];
+  for (const item of items) {
+    const s = score(item);
+    if (s > 0) scored.push({ item, score: s }); else cold.push(item);
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return { hot: scored.map(s => s.item), cold };
+}
+
+/**
  * Reorder a work list so wanted items come first, WITHOUT starving the rest.
  *
- * Returns a flat array, because the ingest route resumes across invocations with
- * a plain integer `?offset` and the GitHub workflow chains on the `nextOffset`
- * it returns. Changing the ORDER of that array changes what gets refreshed
- * first; changing its shape would break the chain.
- *
- * `coldCursor` rotates the long tail so that the cold slots land on different
- * items each sweep — otherwise the same handful of unwanted items would take the
- * cold quota every time and the actual tail would never move.
+ * Used by the `?offset` path — a caller that walks one flat array from a plain
+ * integer, which is how a manual run and the (now manual-only) GitHub workflow
+ * drive a bulk sweep. The scheduled path uses buildSweepQueue instead; see the
+ * note there for why a single cursor is not enough.
  */
 export function interleaveByDemand<T>(
   items: T[],
@@ -150,18 +167,8 @@ export function interleaveByDemand<T>(
   const ratio = hotPerCold();
   if (ratio <= 0 || items.length === 0) return items;
 
-  const hot: { item: T; score: number }[] = [];
-  const cold: T[] = [];
-  for (const item of items) {
-    const s = score(item);
-    if (s > 0) hot.push({ item, score: s }); else cold.push(item);
-  }
-  // Nothing measured yet (a fresh Redis, or no traffic): keep the given order
-  // exactly, so the sweep behaves as it always has.
-  if (hot.length === 0) return items;
-
-  hot.sort((a, b) => b.score - a.score);
-  const hotQ = hot.map(h => h.item);
+  const { hot: hotQ, cold } = partitionByDemand(items, score);
+  if (hotQ.length === 0) return items;
 
   // Rotate the cold list so consecutive sweeps take different long-tail items.
   const rot = cold.length ? ((coldCursor % cold.length) + cold.length) % cold.length : 0;
@@ -175,6 +182,58 @@ export function interleaveByDemand<T>(
     if (c < coldQ.length) out.push(coldQ[c++]);
     // Hot is exhausted — the remaining cold items follow in rotated order.
     if (h >= hotQ.length) { while (c < coldQ.length) out.push(coldQ[c++]); }
+  }
+  return out;
+}
+
+export interface SweepItem<T> { item: T; from: 'hot' | 'cold' }
+
+/**
+ * Build the queue for ONE scheduled invocation, from two independent cursors.
+ *
+ * WHY TWO CURSORS. The obvious design — order the list by demand and walk it
+ * with one cursor — quietly throws the ordering away. A cursor sitting at
+ * position 500 is not refreshing the wanted items at position 0; they come round
+ * once per full sweep, exactly like everything else, and all the ranking bought
+ * was a nicer-looking array. Demand ordering only pays off if the wanted items
+ * are revisited FREQUENTLY, which means they need a cursor of their own that
+ * wraps around a short list.
+ *
+ * So `hot` and `cold` each advance at their own pace, and the ratio decides how
+ * much of each invocation goes to which. With ~40 wanted items, a 3:1 ratio and
+ * ~20 items an invocation, the wanted set comes round about every third run —
+ * minutes — while the ~1,400-item tail still completes a full pass roughly daily.
+ *
+ * `take` over-provisions: the caller stops on its own time budget and reports
+ * how far it actually got, so the cursors advance by what was really done.
+ */
+export function buildSweepQueue<T>(
+  hot: T[], cold: T[], hotCursor: number, coldCursor: number, take: number,
+): SweepItem<T>[] {
+  const ratio = hotPerCold();
+  const out: SweepItem<T>[] = [];
+  if (take <= 0) return out;
+
+  // Nothing wanted yet, or ranking disabled: a plain pass over the cold list,
+  // which at that point is the whole list.
+  if (ratio <= 0 || hot.length === 0) {
+    for (let i = 0; i < take && cold.length > 0; i++) {
+      out.push({ item: cold[(coldCursor + i) % cold.length], from: 'cold' });
+    }
+    return out;
+  }
+
+  let h = 0;
+  let c = 0;
+  while (out.length < take) {
+    for (let i = 0; i < ratio && out.length < take && hot.length > 0; i++) {
+      out.push({ item: hot[(hotCursor + h++) % hot.length], from: 'hot' });
+    }
+    if (cold.length > 0 && out.length < take) {
+      out.push({ item: cold[(coldCursor + c++) % cold.length], from: 'cold' });
+    }
+    // Only one of the two lists has anything in it — avoid spinning forever.
+    if (hot.length === 0 && cold.length === 0) break;
   }
   return out;
 }

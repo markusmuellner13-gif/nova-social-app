@@ -26,9 +26,20 @@
 name: Ingest events (autonomous)
 
 on:
-  schedule:
-    - cron: '*/30 * * * *'   # every 30 minutes
-  workflow_dispatch:          # ...and a manual "Run workflow" button
+  # NO SCHEDULE ANY MORE — this is now a manual bulk-sweep button.
+  #
+  # Scheduled ingestion moved to Vercel crons (see vercel.json). This workflow
+  # existed only to work around the Hobby plan's one-cron-per-day limit, and the
+  # project has been on Pro for a long time. It had also become the SLOWER path:
+  # GitHub throttles scheduled workflows hard, and the `*/30` schedule here was
+  # actually firing about once every 3.4 hours (measured 2026-09-17 from the run
+  # history). The Vercel cron runs every 10 minutes and actually means it.
+  #
+  # Kept, because a chained ?offset sweep is still the right tool for forcing a
+  # complete pass over the whole catalogue in one go — after adding cities, say.
+  # The scheduled path uses stored cursors instead and is unaffected by runs
+  # started here (see src/lib/ingestCursor.ts).
+  workflow_dispatch:
 
 # Never run two ingests at once.
 concurrency:
