@@ -102,6 +102,10 @@ export async function gather(
   });
   if (opts.visiting) params.set('visiting', '1');
   try {
+    // Deliberately NOT marked x-nova-internal: a user asking the assistant about
+    // a city is real interest in that city, and should pull it up the ingest
+    // queue exactly like opening its feed does. Only the crons, which generate
+    // their own traffic, are excluded. See src/lib/demand.ts.
     const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(26_000) });
     if (!res.ok) return [];
     const data = await res.json() as { posts?: ApiPost[] };

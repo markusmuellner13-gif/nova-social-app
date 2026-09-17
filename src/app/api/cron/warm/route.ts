@@ -54,7 +54,13 @@ export async function GET(request: NextRequest) {
           city, country, lat: String(lat), lng: String(lng),
           page: '0', radius: '25', count: '8', category, fresh: '1',
         });
-        const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(45000) });
+        // Internal traffic: this cron warms a HARDCODED city list, so counting
+        // its own requests as demand would permanently pin those nine cities to
+        // the front of the ingest queue no matter what users actually open.
+        const res = await fetch(`${origin}/api/feed?${params}`, {
+          headers: { 'x-nova-internal': '1' },
+          signal: AbortSignal.timeout(45000),
+        });
         if (res.ok) warmed++;
         else errors.push(`${city}/${category}:${res.status}`);
       } catch (err) {

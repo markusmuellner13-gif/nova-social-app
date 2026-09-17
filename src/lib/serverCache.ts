@@ -92,6 +92,37 @@ export async function cacheGetRaw<T>(key: string): Promise<T | null> {
   return cacheGet<T>(key);
 }
 
+// ── Hash counters ────────────────────────────────────────────────────────────
+// A whole family of counters under ONE key, readable in ONE round trip. The
+// demand tracker (src/lib/demand.ts) needs to count thousands of
+// (place × category) buckets and then read them all back inside a cron slice
+// that is racing a 60-second cap — as separate keys that would be thousands of
+// GETs, or a SCAN. As a hash it is a single HGETALL.
+
+/** Increment one field of a hash, setting the hash's TTL on first write. */
+export async function cacheHashIncr(key: string, field: string, ttlSeconds: number): Promise<void> {
+  if (!redis) return;
+  try {
+    const n = await redis.hincrby(key, field, 1);
+    if (n === 1) await redis.expire(key, ttlSeconds);
+  } catch { /* counting must never break a request */ }
+}
+
+/** Read every field of a hash as numbers. Empty object when absent or on error. */
+export async function cacheHashGetAll(key: string): Promise<Record<string, number>> {
+  if (!redis) return {};
+  try {
+    const raw = await redis.hgetall<Record<string, string | number>>(key);
+    if (!raw) return {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      const n = typeof v === 'number' ? v : parseFloat(String(v));
+      if (Number.isFinite(n)) out[k] = n;
+    }
+    return out;
+  } catch { return {}; }
+}
+
 export async function cacheDelete(key: string): Promise<void> {
   if (!redis) return;
   try { await redis.del(key); } catch { /* ignore */ }

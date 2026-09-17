@@ -16,6 +16,7 @@ import { eventsCacheKey, cacheTtl, cacheGet, cacheSet } from '@/lib/serverCache'
 import { dbReadEnabled, queryEventsNear, queryEventsByCountry } from '@/lib/eventsDb';
 import { aiBudgetExceeded, noteAiCall } from '@/lib/aiBudget';
 import { logSourceError } from '@/lib/sourceBreaker';
+import { recordDemand } from '@/lib/demand';
 import { assessQuality, qualityFloorFor } from '@/lib/brain/quality';
 import { mergeDuplicates } from '@/lib/brain/curator';
 import { persistInBackground } from '@/lib/brain/persist';
@@ -353,6 +354,24 @@ async function resolveFeed(request: NextRequest, onPartial?: PartialSink) {
     radius: parseInt(searchParams.get('radius') || '25', 10),
     source: 'feed',
   });
+
+  // ── Demand ────────────────────────────────────────────────────────────────
+  // Recorded BEFORE the cache and DB checks, because demand is "a person asked
+  // for this", not "we had to compute it" — a city served instantly from cache
+  // is the most popular kind of city, not the least. Fire-and-forget: a counter
+  // must never be on the critical path of somebody's feed.
+  //
+  // Skipped for our own traffic. The ingest cron and the warm cron both DO their
+  // work by calling this route, so counting those would be a feedback loop —
+  // whatever the sweep refreshed would look popular and would then be refreshed
+  // first forever, whether or not a single person ever opened it.
+  if (request.headers.get('x-nova-internal') !== '1') {
+    void recordDemand(
+      parseFloat(searchParams.get('lat') || '0'),
+      parseFloat(searchParams.get('lng') || '0'),
+      VALID_CATEGORIES.has(rawCatKey) ? rawCatKey : 'events',
+    ).catch(() => { /* best effort */ });
+  }
 
   if (!noStore) {
     const cached = await cacheGet<{ posts: unknown[] }>(key);

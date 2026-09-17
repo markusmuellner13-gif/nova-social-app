@@ -400,6 +400,8 @@ async function fromFeed(origin: string, q: ActivityQuery, category: string, coun
     visiting: '1',
   });
   try {
+    // Deliberately NOT marked x-nova-internal — someone planning a trip to a
+    // place is real demand for that place. See the note in src/lib/demand.ts.
     const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(24_000) });
     if (!res.ok) return [];
     const data = await res.json() as { posts?: ApiPost[] };
