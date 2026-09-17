@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { demandCell, demandScore, interleaveByDemand, type DemandMap } from './demand';
+import { demandCell, demandScore, interleaveByDemand, partitionByDemand, buildSweepQueue, type DemandMap } from './demand';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The ingest sweep used to treat all 80 cities equally, which measured out at
@@ -123,5 +123,95 @@ describe('interleaveByDemand', () => {
     expect(interleaveByDemand(items, score)).toEqual(items);
     if (before === undefined) delete process.env.INGEST_HOT_PER_COLD;
     else process.env.INGEST_HOT_PER_COLD = before;
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildSweepQueue — the scheduled path.
+//
+// The obvious design (one cursor walking a demand-ordered array) quietly throws
+// the ranking away: a cursor at position 500 is not refreshing the wanted items
+// at position 0, so they come round once per full sweep exactly like everything
+// else. These tests pin the behaviour that makes two cursors worth the extra
+// moving part.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('buildSweepQueue', () => {
+  const hot  = Array.from({ length: 6 },  (_, i) => `H${i}`);
+  const cold = Array.from({ length: 40 }, (_, i) => `C${i}`);
+
+  it('spends most of a run on wanted work, but never all of it', () => {
+    const q = buildSweepQueue(hot, cold, 0, 0, 12);
+    const h = q.filter(x => x.from === 'hot').length;
+    expect(h).toBeGreaterThan(q.length / 2);       // majority wanted
+    expect(q.length - h).toBeGreaterThan(0);        // tail still gets a share
+  });
+
+  it('WRAPS the wanted list, so popular cities come round in minutes', () => {
+    // The whole point. Six wanted items and a 12-item run means each is
+    // refreshed roughly twice per invocation, not once per full catalogue pass.
+    const q = buildSweepQueue(hot, cold, 0, 0, 24);
+    const seen = q.filter(x => x.from === 'hot').map(x => x.item);
+    expect(new Set(seen).size).toBe(hot.length);   // every wanted item appears
+    expect(seen.length).toBeGreaterThan(hot.length); // and more than once
+  });
+
+  it('resumes each list where that list left off, independently', () => {
+    const first = buildSweepQueue(hot, cold, 0, 0, 12);
+    const hotUsed  = first.filter(x => x.from === 'hot').length;
+    const coldUsed = first.filter(x => x.from === 'cold').length;
+
+    const second = buildSweepQueue(hot, cold, hotUsed, coldUsed, 12);
+    // The cold list is long, so the next run must reach NEW long-tail items —
+    // this is what stops the tail being permanently stuck at C0.
+    const firstCold  = new Set(first.filter(x => x.from === 'cold').map(x => x.item));
+    const secondCold = second.filter(x => x.from === 'cold').map(x => x.item);
+    expect(secondCold.some(c => !firstCold.has(c))).toBe(true);
+  });
+
+  it('walks the whole cold list over enough runs, and comes back round', () => {
+    const seen = new Set<string>();
+    let c = 0;
+    for (let run = 0; run < 60; run++) {
+      const q = buildSweepQueue(hot, cold, 0, c, 12);
+      for (const x of q) if (x.from === 'cold') seen.add(x.item);
+      c += q.filter(x => x.from === 'cold').length;
+    }
+    expect(seen.size).toBe(cold.length);   // nothing abandoned
+  });
+
+  it('works before any demand exists — everything is cold', () => {
+    const q = buildSweepQueue([], cold, 0, 0, 10);
+    expect(q).toHaveLength(10);
+    expect(q.every(x => x.from === 'cold')).toBe(true);
+    expect(new Set(q.map(x => x.item)).size).toBe(10);   // no repeats yet
+  });
+
+  it('terminates on degenerate input instead of spinning', () => {
+    expect(buildSweepQueue([], [], 0, 0, 10)).toEqual([]);
+    expect(buildSweepQueue(hot, [], 0, 0, 8)).toHaveLength(8);
+    expect(buildSweepQueue([], [], 0, 0, 0)).toEqual([]);
+  });
+
+  it('never returns more than asked for', () => {
+    for (const take of [1, 2, 3, 7, 13]) {
+      expect(buildSweepQueue(hot, cold, 0, 0, take)).toHaveLength(take);
+    }
+  });
+});
+
+describe('partitionByDemand', () => {
+  it('splits and ranks, keeping every item', () => {
+    const items = [{ n: 'a', s: 0 }, { n: 'b', s: 5 }, { n: 'c', s: 0 }, { n: 'd', s: 9 }];
+    const { hot, cold } = partitionByDemand(items, i => i.s);
+    expect(hot.map(h => h.n)).toEqual(['d', 'b']);   // wanted most first
+    expect(cold.map(c => c.n)).toEqual(['a', 'c']);
+    expect(hot.length + cold.length).toBe(items.length);
+  });
+
+  it('is all-cold when nothing has been measured', () => {
+    const items = [{ n: 'a' }, { n: 'b' }];
+    const { hot, cold } = partitionByDemand(items, () => 0);
+    expect(hot).toEqual([]);
+    expect(cold).toHaveLength(2);
   });
 });

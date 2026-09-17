@@ -103,13 +103,36 @@ in the logs to confirm whether it started working or was denied again.
 Push to `master` auto-deploys on Vercel, or run `vercel --prod --yes` from this
 folder.
 
-**This project is on Vercel Pro**, so the old Hobby restriction — one cron run
-per day — no longer applies, and `vercel.json` can schedule crons as finely as
-needed. The GitHub Action in `.github/workflows/ingest.yml` exists only as a
-workaround for that Hobby limit and is now the *slower* of the two paths:
-GitHub throttles its `*/30` schedule down to roughly one run every 3.4 hours.
-Moving the ingest sweep onto a Vercel cron is the single cheapest freshness win
-available.
+### How ingestion is scheduled
+
+**Vercel crons, defined in `vercel.json`.** `/api/cron/ingest` has two entries on
+one path, because a Vercel cron can only call a plain path — no query string —
+so they identify themselves by the `x-vercel-cron-schedule` header
+(`src/app/api/cron/ingest/schedule.ts` maps schedule → tier, and a test keeps
+that map in step with `vercel.json`):
+
+| Schedule | Sweeps |
+| --- | --- |
+| `*/10 * * * *` | the **fast** tier — concerts, club nights, matches, exhibitions |
+| `35 */4 * * *` | the **full** catalogue, including slow-moving places |
+
+Each run picks up where the last stopped, from cursors in Redis
+(`src/lib/ingestCursor.ts`) — so nothing outside the app carries state between
+runs and there is no chain to break.
+
+**Two cursors, not one.** The work list is ranked by measured demand
+(`src/lib/demand.ts`), and a single cursor would throw that ranking away: one
+sitting at position 500 is not refreshing the popular items at position 0. So
+the wanted set and the long tail advance independently — roughly three quarters
+of each run goes to places people actually open, the rest keeps walking the
+tail so nothing is ever abandoned.
+
+`.github/workflows/ingest.yml` no longer runs on a schedule. It existed only to
+work around the Hobby one-cron-per-day limit and had become the *slower* path —
+GitHub throttled its `*/30` schedule to roughly one run every 3.4 hours
+(measured 2026-09-17). It is kept as a manual **Run workflow** button for
+forcing a complete `?offset` pass over the whole catalogue, e.g. after adding
+cities. Manual runs use their own offset and do not disturb the cron's cursors.
 
 ## Release checklist (before scaling)
 

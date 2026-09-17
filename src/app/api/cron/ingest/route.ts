@@ -6,9 +6,19 @@ import { recordSourceYield } from '@/lib/sourceStats';
 import { curate, recordCuration, prewarmImages, type CurationReport } from '@/lib/brain/curator';
 import type { ApiPost } from '@/lib/sources/shared';
 import { backfillVenueCoords } from '@/lib/sources/venueGeo';
-import { loadDemand, demandScore, interleaveByDemand } from '@/lib/demand';
+import {
+  loadDemand, demandScore, interleaveByDemand, partitionByDemand, buildSweepQueue,
+} from '@/lib/demand';
+import { readCursor, writeCursor, timeDerivedCursor } from '@/lib/ingestCursor';
+import { scheduleTier } from './schedule';
 
-export const maxDuration = 60; // Hobby plan cap; the route self-limits to ~45s and resumes via ?offset
+// 300s, not 60. The old value was the HOBBY plan's cap, and this project has
+// been on Pro for a long time — /api/cron/warm in this same folder has run at
+// 300 for months. At 60 the route stopped starting new work after 30 seconds,
+// so half of every invocation's potential was thrown away and the rest was
+// spent on per-invocation overhead. Every budget below is derived from this
+// number rather than hardcoded, so changing it here changes them all coherently.
+export const maxDuration = 300;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Ingestion worker — populates the app's OWN events DB so users are served from
@@ -152,6 +162,7 @@ function categoriesForTier(tier: string | null): string[] {
   return CATEGORIES;
 }
 
+
 function sourceOf(id: string): string {
   return (id.split('_')[0] || 'feed').slice(0, 12);
 }
@@ -169,7 +180,18 @@ export async function GET(request: NextRequest) {
   const sp = new URL(request.url).searchParams;
 
   // Which freshness tier to refresh this call (see FAST/SLOW_CATEGORIES above).
-  const tier = sp.get('tier');
+  //
+  // A Vercel cron can only call a plain path — the docs show no way to attach a
+  // query string, and guessing at undocumented behaviour in production config is
+  // how you get a schedule that silently does the wrong thing. So the two
+  // schedules share one path and identify themselves with the documented
+  // `x-vercel-cron-schedule` header, which carries the cron expression that
+  // fired.
+  //
+  // Unknown schedule → the FULL catalogue, which is the safe default: editing
+  // vercel.json without touching this map degrades to "sweeps everything, less
+  // often", never to "sweeps nothing".
+  const tier = sp.get('tier') ?? scheduleTier(request.headers.get('x-vercel-cron-schedule'));
   const cats = categoriesForTier(tier);
 
   // Flatten to (city × category) work items so we can resume across invocations —
@@ -209,34 +231,21 @@ export async function GET(request: NextRequest) {
   // Page 0 leads its city's other pages regardless of demand: a page-2 refresh
   // for a popular city is worth less than page 0 of a city nobody has swept yet.
   const demand = await loadDemand();
-  const work = interleaveByDemand(
-    built,
-    w => demandScore(demand, w.lat, w.lng, w.category) / (w.page + 1),
-    // Advances every 30 minutes so consecutive sweeps take DIFFERENT cold items;
-    // without this the same few long-tail entries would fill the cold quota
-    // every run and the actual tail would never move.
-    Math.floor(Date.now() / 1_800_000) * 7,
-  );
+  const scoreOf = (w: { lat: number; lng: number; category: string; page: number }) =>
+    demandScore(demand, w.lat, w.lng, w.category) / (w.page + 1);
 
-  // With the list ordered by demand, the cron (no ?offset) starts at 0 every
-  // time — that is the point, the wanted items are at the front. The old day
-  // rotation existed only because the order was arbitrary; the cold cursor above
-  // now does that job, on the part of the list that still needs it.
-  const offset = Math.max(0, parseInt(sp.get('offset') || '0', 10));
-  // Stay well under the 60s platform cap. The deadline is checked *between*
-  // items, and any single item can run up to its own fetch timeout past that
-  // check — so deadline + per-item timeout must stay < 60s. A cold city's live
-  // compute (Overpass + image enrichment across a dozen places) runs 16–22s, so
-  // the per-item timeout below is 24s; 30s + 24s = 54s, safely under the cap.
+  // ── Budgets, all derived from maxDuration ─────────────────────────────────
+  // The deadline is checked BETWEEN items and any single item can run up to its
+  // own fetch timeout past that check, so "stop starting work" must sit a full
+  // item's cost below the ceiling. A cold city's live compute (Overpass + image
+  // enrichment across a dozen places) runs 16–22s, hence the 24s item timeout.
   const startedAt = Date.now();
-  const deadline = startedAt + 30_000;
-  // The hard ceiling that whole-slice work must finish by. The geocode pass runs
-  // AFTER the 24s fetch inside the same item, so it cannot have a fixed budget of
-  // its own: 30s + 24s + 8s would be 62s and the platform would kill the function
-  // mid-item, losing the slice's upsert entirely. It gets whatever is left under
-  // this ceiling instead, which is the full 8s on a normal item and nothing at
-  // all on a pathological one.
-  const SLICE_CEILING_MS = 54_000;
+  const BUDGET_MS = maxDuration * 1_000;
+  // The hard ceiling all per-item work must finish by. The margin matters more
+  // than it looks: the cursor is written AFTER the sweep, so a run the platform
+  // kills never records its progress and the next run redoes all of it. 15s is
+  // room for the tail, the cursor write and the response.
+  const SLICE_CEILING_MS = BUDGET_MS - 15_000;
   const GEO_BUDGET_MS = 8_000;
   // The per-item feed fetch, and the floor below which starting one is pointless.
   const FETCH_TIMEOUT_MS = 24_000;
@@ -244,6 +253,43 @@ export async function GET(request: NextRequest) {
   // What the tail of an item needs after the fetch returns: the geocode pass, the
   // upsert and the image prewarm. Reserved so the fetch can never consume it.
   const TAIL_RESERVE_MS = 12_000;
+  // Stop STARTING items here, so the last one still has a full item's worth of
+  // ceiling left to finish in.
+  const deadline = startedAt + SLICE_CEILING_MS - FETCH_TIMEOUT_MS - TAIL_RESERVE_MS;
+
+  // ── Which items, in which order ───────────────────────────────────────────
+  // Two ways in, and they are genuinely different jobs:
+  //
+  //   ?offset=N  a bulk sweep driven from outside — a manual run, or the GitHub
+  //              workflow. Walks ONE demand-ordered array from N and reports
+  //              nextOffset, exactly as before.
+  //
+  //   no offset  the scheduled Vercel cron. Resumes from the stored cursors, so
+  //              nothing outside the app has to carry state between runs. The
+  //              wanted items and the long tail advance independently — see
+  //              buildSweepQueue in src/lib/demand.ts for why one cursor cannot
+  //              work here.
+  const explicitOffset = sp.has('offset');
+  const tierKey = tier ?? 'all';
+
+  // Roughly what one invocation gets through: the item-starting window divided
+  // by a measured item cost. Only used to size the queue and the no-Redis
+  // fallback, so an imprecise estimate costs nothing.
+  const EST_ITEM_MS = 12_000;
+  const perRun = Math.max(4, Math.floor((deadline - startedAt) / EST_ITEM_MS));
+
+  const { hot, cold } = partitionByDemand(built, scoreOf);
+  const stored = explicitOffset ? null : await readCursor(tierKey);
+  // No Redis and no memory: derive a position from the clock so consecutive
+  // runs still land on different work instead of redoing the same items.
+  const startHot  = stored?.hot  ?? timeDerivedCursor(300_000, perRun);
+  const startCold = stored?.cold ?? timeDerivedCursor(300_000, perRun);
+
+  // The flat list the ?offset path walks.
+  const work = interleaveByDemand(built, scoreOf, startCold);
+  // The queue the scheduled path walks — over-provisioned, because the loop
+  // stops on time rather than on length.
+  const queue = buildSweepQueue(hot, cold, startHot, startCold, perRun * 3);
 
   let ingested = 0;
   let rejected = 0;
@@ -261,12 +307,24 @@ export async function GET(request: NextRequest) {
   // sources actually deliver good data.
   const srcYield: Record<string, { a: number; r: number }> = {};
 
+  // The items this invocation will actually attempt, in order. One shape for
+  // both modes so the loop below, the watchdog and the resume arithmetic stay
+  // single-path.
+  const offset = explicitOffset ? Math.max(0, parseInt(sp.get('offset') || '0', 10)) : 0;
+  const plan = explicitOffset
+    ? work.slice(offset).map(item => ({ item, from: 'hot' as const }))
+    : queue;
+
   // `i` lives outside the sweep so the watchdog below can report the right
   // resume point even if it has to answer while an item is still in flight.
-  let i = offset;
+  // It counts items CONSUMED from `plan`, which is what both cursors and
+  // nextOffset are derived from.
+  let i = 0;
+  let hotDone = 0;
+  let coldDone = 0;
 
   const sweep = async () => {
-    for (; i < work.length; i++) {
+    for (; i < plan.length; i++) {
       if (Date.now() > deadline) break;
       // The fetch is not the last thing an item does — curation, the geocode pass,
       // the upsert and the image prewarm all run after it. Giving the fetch a flat
@@ -283,7 +341,8 @@ export async function GET(request: NextRequest) {
         startedAt + SLICE_CEILING_MS - TAIL_RESERVE_MS - Date.now(),
       );
       if (fetchBudget < MIN_FETCH_MS) break;
-      const { city, country, lat, lng, category, page } = work[i];
+      const { city, country, lat, lng, category, page } = plan[i].item;
+      if (plan[i].from === 'hot') hotDone++; else coldDone++;
       try {
         const params = new URLSearchParams({
           city, country, lat: String(lat), lng: String(lng),
@@ -394,13 +453,26 @@ export async function GET(request: NextRequest) {
   ]);
   clearTimeout(watchdog);
 
-  const done = !timedOut && i >= work.length;
+  // In ?offset mode the plan is the remainder of the work list, so finishing it
+  // means the sweep is finished. In cursor mode the queue is a slice of an
+  // endless rotation and there is nothing to be "done" with.
+  const done = explicitOffset && !timedOut && i >= plan.length;
+
+  // ── Remember where we stopped ─────────────────────────────────────────────
+  // Only the scheduled path owns the cursors. An ?offset run is somebody
+  // sweeping deliberately, and must not move the schedule's position from under
+  // it. Advancing by what was ACTUALLY consumed — not by what was queued — is
+  // what makes a short or watchdog-truncated run resume correctly rather than
+  // skipping the items it never reached.
+  if (!explicitOffset && (hotDone > 0 || coldDone > 0)) {
+    await writeCursor(tierKey, { hot: startHot + hotDone, cold: startCold + coldDone });
+  }
 
   // ── The tail ──────────────────────────────────────────────────────────────
   // Bounded as a whole. These are all best-effort bookkeeping: none of them is
   // worth losing the slice's nextOffset over, which is what happens if they run
   // past the platform cap.
-  const tailBudget = Math.max(0, startedAt + 57_000 - Date.now());
+  const tailBudget = Math.max(0, startedAt + BUDGET_MS - 8_000 - Date.now());
   let purged = 0;
   if (tailBudget > 500) {
     let tailTimer: ReturnType<typeof setTimeout> | undefined;
@@ -427,8 +499,16 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({
-    ok: true, tier: tier ?? 'all', ingested, rejected, curatedOut, prewarmed,
-    located, geoAttempted, processed, purged, offset, nextOffset: done ? null : i,
-    total: work.length, done, timedOut, errors: errors.slice(0, 8),
+    ok: true, tier: tierKey, ingested, rejected, curatedOut, prewarmed,
+    located, geoAttempted, processed, purged, timedOut,
+    // How the run was driven, and where it got to. `mode` matters when reading
+    // logs: the two paths advance completely different state.
+    mode: explicitOffset ? 'offset' : 'cursor',
+    offset,
+    nextOffset: explicitOffset ? (done ? null : offset + i) : null,
+    hotDone, coldDone,
+    hotPool: hot.length, coldPool: cold.length,
+    cursor: explicitOffset ? null : { hot: startHot + hotDone, cold: startCold + coldDone },
+    total: built.length, done, errors: errors.slice(0, 8),
   });
 }
