@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isCronRequest, cronSecret } from '@/lib/cronAuth';
 import { cacheEnabled } from '@/lib/serverCache';
+import { appOrigin } from '@/lib/appOrigin';
 
 export const maxDuration = 300; // warming many cities can take a while
 
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, warmed: 0, note: 'cache not configured (set UPSTASH_REDIS_REST_URL/TOKEN)' });
   }
 
-  const origin = new URL(request.url).origin;
+  const origin = appOrigin(request);
   let warmed = 0;
   const errors: string[] = [];
 

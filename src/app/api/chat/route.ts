@@ -3,6 +3,7 @@ import { answerLocally, parseIntent } from '@/lib/novaBrain';
 import { answerTrip, answerFromLive } from '@/lib/brain/assistant';
 import type { ApiPost } from '@/lib/sources/shared';
 import { resolveRequestGeo } from '@/lib/sources/geocode';
+import { appOrigin } from '@/lib/appOrigin';
 
 const SYSTEM_PROMPT = `You are Nova's AI assistant — a hyper-local event and activity discovery expert built into the Nova social discovery app.
 
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
     lat = geo.lat; lng = geo.lng; resolvedCity = geo.city || city;
   } catch { /* keep what we had */ }
 
-  const origin = new URL(request.url).origin;
+  const origin = appOrigin(request);
 
   // ── Trip planning ─────────────────────────────────────────────────────────
   // "I'm going to Rome in three weeks — what's worth seeing?" is a different
