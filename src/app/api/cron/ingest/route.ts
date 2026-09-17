@@ -6,6 +6,7 @@ import { recordSourceYield } from '@/lib/sourceStats';
 import { curate, recordCuration, prewarmImages, type CurationReport } from '@/lib/brain/curator';
 import type { ApiPost } from '@/lib/sources/shared';
 import { backfillVenueCoords } from '@/lib/sources/venueGeo';
+import { loadDemand, demandScore, interleaveByDemand } from '@/lib/demand';
 
 export const maxDuration = 60; // Hobby plan cap; the route self-limits to ~45s and resumes via ?offset
 
@@ -185,19 +186,43 @@ export async function GET(request: NextRequest) {
   // Only the fast tier gets extra pages. Slow categories are OSM/Wikipedia
   // places, where page>0 mostly returns nothing — spending slices on empty
   // pages would make coverage worse, not better.
-  const work: { city: string; country: string; lat: number; lng: number; category: string; page: number }[] = [];
+  const built: { city: string; country: string; lat: number; lng: number; category: string; page: number }[] = [];
   for (const [city, country, lat, lng] of CITIES) {
     for (const category of cats) {
       const pages = FAST_CATEGORIES.includes(category) ? EXTRA_PAGES : 1;
-      for (let page = 0; page < pages; page++) work.push({ city, country, lat, lng, category, page });
+      for (let page = 0; page < pages; page++) built.push({ city, country, lat, lng, category, page });
     }
   }
-  // When invoked by the daily cron (no offset), rotate the starting point each
-  // day so every city gets refreshed over a few days despite the 60s cap.
-  const dayRotation = (Math.floor(Date.now() / 86_400_000) * 21) % work.length;
-  const offset = sp.has('offset')
-    ? Math.max(0, parseInt(sp.get('offset') || '0', 10))
-    : dayRotation;
+
+  // ── Refresh what people actually open, first ──────────────────────────────
+  // Walking this list in a fixed order spread the budget evenly over all 80
+  // cities, which measured out at ONE FULL SWEEP EVERY ELEVEN DAYS — so
+  // Melbourne and Seoul, which essentially nobody opens, were refreshed exactly
+  // as often as Vienna and Baden. Ordering by measured demand buys hourly
+  // freshness where the users are for exactly the same number of slices.
+  //
+  // The long tail is not abandoned: one in every four items is still a cold one,
+  // rotating, so a city nobody has opened yet is still swept — just less often.
+  // See src/lib/demand.ts. Without Redis the score map is empty and this returns
+  // the list untouched, i.e. exactly today's behaviour.
+  //
+  // Page 0 leads its city's other pages regardless of demand: a page-2 refresh
+  // for a popular city is worth less than page 0 of a city nobody has swept yet.
+  const demand = await loadDemand();
+  const work = interleaveByDemand(
+    built,
+    w => demandScore(demand, w.lat, w.lng, w.category) / (w.page + 1),
+    // Advances every 30 minutes so consecutive sweeps take DIFFERENT cold items;
+    // without this the same few long-tail entries would fill the cold quota
+    // every run and the actual tail would never move.
+    Math.floor(Date.now() / 1_800_000) * 7,
+  );
+
+  // With the list ordered by demand, the cron (no ?offset) starts at 0 every
+  // time — that is the point, the wanted items are at the front. The old day
+  // rotation existed only because the order was arbitrary; the cold cursor above
+  // now does that job, on the part of the list that still needs it.
+  const offset = Math.max(0, parseInt(sp.get('offset') || '0', 10));
   // Stay well under the 60s platform cap. The deadline is checked *between*
   // items, and any single item can run up to its own fetch timeout past that
   // check — so deadline + per-item timeout must stay < 60s. A cold city's live
@@ -269,7 +294,13 @@ export async function GET(request: NextRequest) {
           // with a picture already on it.
           photoBudgetMs: '12000',
         });
-        const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(fetchBudget) });
+        // `x-nova-internal` keeps the sweep out of its own demand statistics —
+      // see the note in /api/feed. Without it the ranking would measure the
+      // cron's own activity instead of the users'.
+      const res = await fetch(`${origin}/api/feed?${params}`, {
+        headers: { 'x-nova-internal': '1' },
+        signal: AbortSignal.timeout(fetchBudget),
+      });
         if (!res.ok) { errors.push(`${city}/${category}#${page}:${res.status}`); processed++; continue; }
         const data = await res.json() as { posts?: ApiPost[] };
         const raw = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
