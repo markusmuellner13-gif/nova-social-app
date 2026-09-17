@@ -11,6 +11,15 @@
 
 import { ApiPost, makeUser, proxyImage } from './shared';
 import { findVenuePhoto, osmTagImage } from './venuePhoto';
+import { upstreamPaused, pauseUpstream, retryAfterSeconds } from '@/lib/sourceBreaker';
+
+/** Every Overpass mirror is currently standing down after a 429/504. */
+export class OverpassThrottledError extends Error {
+  constructor() {
+    super('Overpass mirrors throttled');
+    this.name = 'OverpassThrottledError';
+  }
+}
 
 export interface OverpassElement {
   type: 'node' | 'way' | 'relation';
@@ -156,6 +165,24 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
 ];
 
+// ── Throttling ───────────────────────────────────────────────────────────────
+// Overpass is a free, volunteer-run service and it rations accordingly: ~300
+// 429s, 504s and timeouts in the September logs. Both mirrors are tried on every
+// call, so a mirror that is currently refusing costs up to 13 seconds of a
+// 60-second cron slice before we even reach the one that works.
+//
+// Each mirror gets its own breaker, so "kumi is rate-limiting us" degrades to
+// "use overpass-api.de" instead of "wait 13 seconds, then use overpass-api.de".
+// 429 means our quota; 504 means their query timed out. Both want a pause, and
+// neither is worth an error log — the caller's fallbacks already handle an empty
+// result, and these are somebody else's capacity, not our bug.
+const OVERPASS_PAUSE_429_S = 3 * 60;
+const OVERPASS_PAUSE_5XX_S = 60;
+
+function overpassBreaker(endpoint: string): string {
+  return `overpass:${new URL(endpoint).host}`;
+}
+
 export async function fetchOverpassPlaces(lat: number, lng: number, category: string, radiusM: number): Promise<OverpassElement[]> {
   const cat = category === 'food' ? 'restaurants' : category;
   const query = (OVERPASS_QUERIES[cat] ?? OVERPASS_QUERIES.venues)
@@ -164,7 +191,9 @@ export async function fetchOverpassPlaces(lat: number, lng: number, category: st
     .replace(/RADIUS/g, String(Math.min(radiusM, 12000)));
 
   let lastErr: Error = new Error('Overpass unavailable');
+  let skipped = 0;
   for (const endpoint of OVERPASS_ENDPOINTS) {
+    if (await upstreamPaused(overpassBreaker(endpoint))) { skipped++; continue; }
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -175,13 +204,25 @@ export async function fetchOverpassPlaces(lat: number, lng: number, category: st
         body: `data=${encodeURIComponent(query)}`,
         signal: AbortSignal.timeout(13000),
       });
-      if (!res.ok) throw new Error(`Overpass ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 429 || res.status === 504 || res.status >= 500) {
+          await pauseUpstream(
+            overpassBreaker(endpoint),
+            res.status === 429 ? (retryAfterSeconds(res) ?? OVERPASS_PAUSE_429_S) : OVERPASS_PAUSE_5XX_S,
+            `HTTP ${res.status}`,
+          );
+        }
+        throw new Error(`Overpass ${res.status}`);
+      }
       const d = await res.json() as { elements?: OverpassElement[] };
       return (d.elements ?? []).filter(e => e.tags?.name);
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
     }
   }
+  // Every mirror was already standing down. Say so plainly, so the caller's log
+  // line reads as throttling rather than as an outage.
+  if (skipped === OVERPASS_ENDPOINTS.length) throw new OverpassThrottledError();
   throw lastErr;
 }
 

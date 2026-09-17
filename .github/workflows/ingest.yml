@@ -43,7 +43,11 @@ jobs:
     # by GitHub's own timeout mid-run (conclusion: cancelled) whenever slices
     # ran slow — that's what triggered the failure email. Give it real headroom
     # while still finishing before the next run fires 30 min later.
-    timeout-minutes: 25
+    #
+    # Each loop can now also burn one retry (~95s) before breaking out, so the
+    # ceiling moved by ~3 min. Still inside the 30-minute gap, and the
+    # concurrency group means an overrun queues rather than overlapping.
+    timeout-minutes: 28
     steps:
       - name: Refresh time-sensitive content (fast tier — every run)
         env:
@@ -64,6 +68,17 @@ jobs:
           for i in $(seq 1 8); do
             code=$(curl -s -m 90 -H "$auth" -o body.json -w '%{http_code}' \
               "$BASE_URL/api/cron/ingest?tier=fast&offset=$offset" || true)
+            # ONE retry at the same offset before giving up on the chain. A 5xx
+            # here is a single slow slice, not a broken app — but a slice that
+            # returns nothing returns no nextOffset either, so the old code
+            # ended the whole run on it and mailed about it. The slice is
+            # idempotent (upsert by id), so repeating it is free.
+            if [ "$code" != "200" ] && [ "$code" != "401" ] && [ "$code" != "403" ]; then
+              echo "::warning::fast slice $i: HTTP $code — retrying once at the same offset"
+              sleep 5
+              code=$(curl -s -m 90 -H "$auth" -o body.json -w '%{http_code}' \
+                "$BASE_URL/api/cron/ingest?tier=fast&offset=$offset" || true)
+            fi
             # 401/403 is a configuration fault — the secret here and the one in
             # Vercel have drifted. Retrying can never fix it, so stop loudly.
             if [ "$code" = "401" ] || [ "$code" = "403" ]; then
@@ -109,6 +124,12 @@ jobs:
             url="$BASE_URL/api/cron/ingest"
             if [ -n "$offset" ]; then url="$url?offset=$offset"; fi
             code=$(curl -s -m 90 -H "$auth" -o body.json -w '%{http_code}' "$url" || true)
+            # Same single retry as the fast tier above — see the note there.
+            if [ "$code" != "200" ] && [ "$code" != "401" ] && [ "$code" != "403" ]; then
+              echo "::warning::slice $i: HTTP $code — retrying once at the same offset"
+              sleep 5
+              code=$(curl -s -m 90 -H "$auth" -o body.json -w '%{http_code}' "$url" || true)
+            fi
             if [ "$code" = "401" ] || [ "$code" = "403" ]; then
               echo "::error::HTTP $code from /api/cron/ingest — the CRON_SECRET repo secret no longer matches the CRON_SECRET env var in Vercel. Reset both to the same value."
               exit 1

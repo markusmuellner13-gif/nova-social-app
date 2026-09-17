@@ -17,6 +17,7 @@ import type { ApiPost } from './shared';
 import { enforceRealImages } from './realImage';
 import { fetchCommonsImagesByWikidata } from './wikipedia';
 import { placesBudgetExceeded, notePlacesCall } from '@/lib/placesBudget';
+import { upstreamPaused, pauseUpstream } from '@/lib/sourceBreaker';
 import { dropIncompletePosts } from '@/lib/postQuality';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -184,11 +185,39 @@ const placePhotoCache = new Map<string, string | null>();
 // Failures are logged rather than swallowed: a silently dead Places is the
 // difference between "a picture on every post" and "a picture on 89% of posts",
 // and that must not be invisible.
-let placesWarned = false;
+//
+// Logged once per FAILURE KIND, not once per lambda. A single shared flag meant
+// the first warning silenced every other one, so a legacy REQUEST_DENIED could
+// hide the modern API failing too — the two have completely different fixes and
+// must never be mistaken for each other.
+const placesWarned = new Set<string>();
 function warnPlaces(where: string, detail: string) {
-  if (placesWarned) return;              // once per lambda — never a log flood
-  placesWarned = true;
+  if (placesWarned.has(where)) return;   // once per kind per lambda — no flood
+  placesWarned.add(where);
   console.error(`[places/${where}] ${detail} — venue photos are degraded`);
+}
+
+// The LEGACY Places endpoints are the fallback for keys issued before Google
+// locked them down. Production's key is NOT authorised for them, so every single
+// photo miss paid for a second round trip that could only ever come back
+// REQUEST_DENIED — 11 of them in the logs since Aug 5, and that is just the
+// once-per-lambda first one.
+//
+// REQUEST_DENIED is a project configuration answer, not a transient one: it
+// cannot change until someone edits the key's API restrictions in Google Cloud
+// Console. So the first one stands the fallback down for a good long while.
+// Setting GOOGLE_PLACES_LEGACY=off skips it from the start.
+const LEGACY_BREAKER = 'places-legacy';
+const LEGACY_DENIED_PAUSE_S = 6 * 60 * 60;   // re-test twice a day, not per request
+
+// The same guard for the modern API. It is working in production today; this is
+// here so that if the key's restrictions are ever tightened the wrong way, the
+// symptom is "no Places photos" rather than "every feed request 3.5s slower".
+const NEW_BREAKER = 'places-new';
+const NEW_DENIED_PAUSE_S = 30 * 60;
+
+function legacyDisabledByEnv(): boolean {
+  return (process.env.GOOGLE_PLACES_LEGACY ?? '').trim().toLowerCase() === 'off';
 }
 
 /** Resolve a Places (New) photo resource name to its final image URL. */
@@ -288,6 +317,15 @@ async function placesNewPhoto(name: string, lat: number, lng: number, key: strin
   });
   if (!searchRes.ok) {
     warnPlaces('searchText', `HTTP ${searchRes.status} ${(await searchRes.text().catch(() => '')).slice(0, 200)}`);
+    // 403 here is the same class of fault as the legacy REQUEST_DENIED: the key
+    // is not authorised for the Places API (New). Hammering it costs 3.5s per
+    // post and cannot succeed until the key is fixed.
+    if (searchRes.status === 403) {
+      await pauseUpstream(
+        NEW_BREAKER, NEW_DENIED_PAUSE_S,
+        'Places (New) HTTP 403 — enable "Places API (New)" for the key in Google Cloud Console',
+      );
+    }
     return null;
   }
   const data = await searchRes.json() as { places?: { photos?: { name?: string }[] }[] };
@@ -297,6 +335,9 @@ async function placesNewPhoto(name: string, lat: number, lng: number, key: strin
 }
 
 async function placesLegacyPhoto(name: string, lat: number, lng: number, key: string): Promise<string | null> {
+  if (legacyDisabledByEnv()) return null;
+  if (await upstreamPaused(LEGACY_BREAKER)) return null;
+
   const findUrl =
     `https://maps.googleapis.com/maps/api/place/findplacefromtext/json` +
     `?input=${encodeURIComponent(name)}&inputtype=textquery` +
@@ -309,6 +350,15 @@ async function placesLegacyPhoto(name: string, lat: number, lng: number, key: st
   };
   if (d.status && d.status !== 'OK' && d.status !== 'ZERO_RESULTS') {
     warnPlaces('legacy', `${d.status} ${d.error_message ?? ''}`);
+    // REQUEST_DENIED means the key is not authorised for the legacy Places API.
+    // Add "Places API" (the legacy one) to the key's API restrictions in Google
+    // Cloud Console, or set GOOGLE_PLACES_LEGACY=off to retire this path.
+    if (d.status === 'REQUEST_DENIED') {
+      await pauseUpstream(
+        LEGACY_BREAKER, LEGACY_DENIED_PAUSE_S,
+        'legacy Places REQUEST_DENIED — add "Places API" to the key\'s API restrictions in Google Cloud Console, or set GOOGLE_PLACES_LEGACY=off',
+      );
+    }
     return null;
   }
   const ref = d.candidates?.[0]?.photos?.[0]?.photo_reference;
@@ -328,7 +378,9 @@ export async function fetchGooglePlacePhoto(name: string, lat: number, lng: numb
   let result: string | null = null;
   try {
     await notePlacesCall();
-    result = await placesNewPhoto(name, lat, lng, key);
+    if (!(await upstreamPaused(NEW_BREAKER))) {
+      result = await placesNewPhoto(name, lat, lng, key);
+    }
     if (!result) result = await placesLegacyPhoto(name, lat, lng, key).catch(() => null);
   } catch (err) {
     warnPlaces('fetch', String(err).slice(0, 200));

@@ -6,6 +6,7 @@ import { fetchTicketmaster, tmEventToPost, TM_CATEGORY_MAP } from '@/lib/sources
 import { fetchEventbriteEvents } from '@/lib/sources/eventbrite';
 import { fetchOverpassPlaces, overpassToPost } from '@/lib/sources/osm';
 import { fetchWikipediaNearby, fetchWikipediaSummary, wikiToPost } from '@/lib/sources/wikipedia';
+import { logSourceError } from '@/lib/sourceBreaker';
 import {
   enrichEventDescriptions, enrichPlaceDescriptions, enrichSightseeingDescriptions,
   searchRealEventsWithClaude,
@@ -65,7 +66,7 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({ posts: await finalizePhotos(posts), city, country, source: 'tourism', hasMore: page < 4 }, { headers: NO_CACHE });
         }
       } catch (err) {
-        console.error('[events/tourism]', err);
+        logSourceError('[events/tourism]', err);
       }
     }
     // Free fallback — structured event data scraped from Eventbrite city pages
@@ -75,7 +76,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ posts: await finalizePhotos(posts), city, country, source: 'eventbrite', hasMore: false }, { headers: PLACE_CACHE });
       }
     } catch (err) {
-      console.error('[events/tourism/eventbrite]', err);
+      logSourceError('[events/tourism/eventbrite]', err);
     }
     return NextResponse.json({ posts: [], city, country, source: 'tourism', hasMore: false }, { headers: NO_CACHE });
   }
@@ -111,7 +112,7 @@ export async function GET(request: NextRequest) {
       const hasMore = (page + 1) * count < elements.length;
       return NextResponse.json({ posts: await finalizePhotos(posts), city, country, source: 'osm', hasMore }, { headers: PLACE_CACHE });
     } catch (err) {
-      console.error('[events/overpass]', err);
+      logSourceError('[events/overpass]', err);
       // Fall through to Claude web search as fallback
     }
   }
@@ -125,7 +126,7 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({ posts: await finalizePhotos(posts), city, country, source: 'web_search', hasMore: page < 8 }, { headers: NO_CACHE });
         }
       } catch (err) {
-        console.error('[events/community]', err);
+        logSourceError('[events/community]', err);
       }
     }
     try {
@@ -134,7 +135,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ posts: await finalizePhotos(ebPosts), city, country, source: 'eventbrite', hasMore: ebPosts.length >= count }, { headers: PLACE_CACHE });
       }
     } catch (err) {
-      console.error('[events/community/eventbrite]', err);
+      logSourceError('[events/community/eventbrite]', err);
     }
     return NextResponse.json({ posts: [], city, country, source: 'none', hasMore: false }, { headers: NO_CACHE });
   }
@@ -171,7 +172,7 @@ export async function GET(request: NextRequest) {
       const hasMore = (page + 1) * count < nearby.length;
       return NextResponse.json({ posts: await finalizePhotos(posts), city, country, source: 'wikipedia', hasMore }, { headers: WIKI_CACHE });
     } catch (err) {
-      console.error('[events/sightseeing/wikipedia]', err);
+      logSourceError('[events/sightseeing/wikipedia]', err);
       // Fall through to Claude for sightseeing
     }
   }
@@ -217,7 +218,7 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({ posts: await finalizePhotos(posts), city, country, source: 'ticketmaster', hasMore: page < totalPages - 1, totalPages }, { headers: EVENT_CACHE });
         }
       } catch (err) {
-        console.error('[events/ticketmaster]', err);
+        logSourceError('[events/ticketmaster]', err);
       }
     }
 
@@ -253,7 +254,7 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({ posts: await finalizePhotos(posts), city, country, source: 'osm', hasMore }, { headers: PLACE_CACHE });
         }
       } catch (err) {
-        console.error('[events/food/osm]', err);
+        logSourceError('[events/food/osm]', err);
       }
     }
   }
@@ -266,7 +267,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ posts: await finalizePhotos(posts), city, country, source: 'claude', hasMore: page < 10 }, { headers: NO_CACHE });
       }
     } catch (err) {
-      console.error('[events/sightseeing/claude]', err);
+      logSourceError('[events/sightseeing/claude]', err);
     }
   }
 
@@ -277,7 +278,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ posts: await finalizePhotos(ebPosts), city, country, source: 'eventbrite', hasMore: ebPosts.length >= count }, { headers: PLACE_CACHE });
     }
   } catch (err) {
-    console.error('[events/eventbrite]', err);
+    logSourceError('[events/eventbrite]', err);
   }
 
   // No invented events: when every real source is empty, say so honestly

@@ -64,6 +64,32 @@ The code logs failures with recognisable prefixes (`[places/*]`, `[feed/osm]`,
 A silent source is harder: it fails by returning *nothing*, not by throwing. The
 honest catch for that is a cron heartbeat (step 3), not an error rule.
 
+### 3b. `[breaker/*]` — the highest-signal prefix in the app
+**Alert on this one first.** When an upstream fails in a way that retrying cannot
+fix, `src/lib/sourceBreaker.ts` stands it down and logs exactly one line:
+
+```
+[breaker/anthropic]     paused 900s — out of Anthropic credit — top up at console.anthropic.com → Plans & Billing
+[breaker/places-legacy] paused 21600s — legacy Places REQUEST_DENIED — add "Places API" to the key's API restrictions…
+[breaker/eventbrite]    paused 300s — HTTP 429 from the public city pages
+[breaker/overpass:…]    paused 180s — HTTP 429
+```
+
+Each line already contains the diagnosis and the fix, so an issue alert on
+`message:"[breaker/"` — **any new issue, notify immediately** — is the cheapest
+useful rule here.
+
+Note the two tiers. `anthropic` and `places-*` mean *a human has to do
+something* (top up an account, edit a key's restrictions) and should page you.
+`eventbrite` and `overpass:*` are third parties rationing free access; they
+recover on their own and are only worth looking at if they never stop.
+
+This prefix exists because of September 2026: 721 Eventbrite 429s and ~300
+Overpass 429/504s — all handled correctly by fallbacks, none visible to a user —
+drowned out three days of `[feed/ai]` "credit balance is too low" that genuinely
+needed attention. Throttling is now reported once by the breaker instead of once
+per request, which is what makes a rule on it meaningful.
+
 ### 4. Cron failure — "content stopped refreshing"
 `/api/cron/ingest`, `/api/cron/warm`, `/api/cron/push` and
 `/api/cron/ingest-towns` run on a schedule (see `vercel.json`). In **Vercel →
