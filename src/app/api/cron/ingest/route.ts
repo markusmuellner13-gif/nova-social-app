@@ -236,109 +236,168 @@ export async function GET(request: NextRequest) {
   // sources actually deliver good data.
   const srcYield: Record<string, { a: number; r: number }> = {};
 
+  // `i` lives outside the sweep so the watchdog below can report the right
+  // resume point even if it has to answer while an item is still in flight.
   let i = offset;
-  for (; i < work.length; i++) {
-    if (Date.now() > deadline) break;
-    // The fetch is not the last thing an item does — curation, the geocode pass,
-    // the upsert and the image prewarm all run after it. Giving the fetch a flat
-    // 24s ignored that: an item starting at 29.9s spent 24s fetching and was
-    // still writing rows when the platform killed the function at 60s, losing
-    // the whole slice. MEASURED on the 13:09 run — two slices died this way, and
-    // a killed slice returns no nextOffset, so the workflow's chain stops early.
-    //
-    // So the fetch gets whatever is left under the ceiling, minus the reserve the
-    // tail needs. Below the floor there isn't time to do useful work, so stop and
-    // let the next invocation pick up from this offset with a full window.
-    const fetchBudget = Math.min(
-      FETCH_TIMEOUT_MS,
-      startedAt + SLICE_CEILING_MS - TAIL_RESERVE_MS - Date.now(),
-    );
-    if (fetchBudget < MIN_FETCH_MS) break;
-    const { city, country, lat, lng, category, page } = work[i];
-    try {
-      const params = new URLSearchParams({
-        city, country, lat: String(lat), lng: String(lng),
-        page: String(page), radius: '25', count: String(PER_PAGE), category, fresh: '1',
-        // Ingest has a 24s window per city and its result is STORED, so it can
-        // afford to chase down a real photo for every post. A visitor's request
-        // gets the short budget; this pass is what makes the stored row arrive
-        // with a picture already on it.
-        photoBudgetMs: '12000',
-      });
-      const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(fetchBudget) });
-      if (!res.ok) { errors.push(`${city}/${category}#${page}:${res.status}`); processed++; continue; }
-      const data = await res.json() as { posts?: ApiPost[] };
-      const raw = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
 
-      // GATE 1 — structural validity: real date, real coordinates, not spam.
-      const { valid, rejected: rej } = validateBatch(raw, { cityLat: lat, cityLng: lng, maxKm: 120 });
-      rejected += rej;
+  const sweep = async () => {
+    for (; i < work.length; i++) {
+      if (Date.now() > deadline) break;
+      // The fetch is not the last thing an item does — curation, the geocode pass,
+      // the upsert and the image prewarm all run after it. Giving the fetch a flat
+      // 24s ignored that: an item starting at 29.9s spent 24s fetching and was
+      // still writing rows when the platform killed the function at 60s, losing
+      // the whole slice. MEASURED on the 13:09 run — two slices died this way, and
+      // a killed slice returns no nextOffset, so the workflow's chain stops early.
+      //
+      // So the fetch gets whatever is left under the ceiling, minus the reserve the
+      // tail needs. Below the floor there isn't time to do useful work, so stop and
+      // let the next invocation pick up from this offset with a full window.
+      const fetchBudget = Math.min(
+        FETCH_TIMEOUT_MS,
+        startedAt + SLICE_CEILING_MS - TAIL_RESERVE_MS - Date.now(),
+      );
+      if (fetchBudget < MIN_FETCH_MS) break;
+      const { city, country, lat, lng, category, page } = work[i];
+      try {
+        const params = new URLSearchParams({
+          city, country, lat: String(lat), lng: String(lng),
+          page: String(page), radius: '25', count: String(PER_PAGE), category, fresh: '1',
+          // Ingest has a 24s window per city and its result is STORED, so it can
+          // afford to chase down a real photo for every post. A visitor's request
+          // gets the short budget; this pass is what makes the stored row arrive
+          // with a picture already on it.
+          photoBudgetMs: '12000',
+        });
+        const res = await fetch(`${origin}/api/feed?${params}`, { signal: AbortSignal.timeout(fetchBudget) });
+        if (!res.ok) { errors.push(`${city}/${category}#${page}:${res.status}`); processed++; continue; }
+        const data = await res.json() as { posts?: ApiPost[] };
+        const raw = (data.posts ?? []).filter(p => p && p.id && p.location?.lat);
 
-      // GATE 2 — Nova Brain's curator: merge listings that are the same
-      // real-world thing arriving from different sources, then drop the filler
-      // that is technically valid but not worth a user's screen. The bar adapts
-      // to how much this area actually has, so a small town is never emptied out.
-      const { kept: curated, report } = curate(valid);
-      curatedOut += report.mergedDuplicates + report.droppedLowQuality;
-      curationReports.push(report);
+        // GATE 1 — structural validity: real date, real coordinates, not spam.
+        const { valid, rejected: rej } = validateBatch(raw, { cityLat: lat, cityLng: lng, maxKm: 120 });
+        rejected += rej;
 
-      // Tally per-source accept/reject for the learning layer — measured against
-      // what SURVIVED curation, so a source that floods us with valid-but-thin
-      // listings is scored down, not rewarded for volume.
-      const bySource: Record<string, { raw: number; ok: number }> = {};
-      for (const p of raw)     (bySource[sourceOf(p.id)] ??= { raw: 0, ok: 0 }).raw++;
-      for (const p of curated) (bySource[sourceOf(p.id)] ??= { raw: 0, ok: 0 }).ok++;
-      for (const [s, v] of Object.entries(bySource)) {
-        (srcYield[s] ??= { a: 0, r: 0 });
-        srcYield[s].a += v.ok;
-        srcYield[s].r += v.raw - v.ok;
-      }
+        // GATE 2 — Nova Brain's curator: merge listings that are the same
+        // real-world thing arriving from different sources, then drop the filler
+        // that is technically valid but not worth a user's screen. The bar adapts
+        // to how much this area actually has, so a small town is never emptied out.
+        const { kept: curated, report } = curate(valid);
+        curatedOut += report.mergedDuplicates + report.droppedLowQuality;
+        curationReports.push(report);
 
-      if (curated.length) {
-        // GATE 3 — put each post where it actually IS. Crawled listings rarely
-        // publish geo, so they fall back to the CITY CENTRE: measured Vienna,
-        // 8 posts shared 2 coordinate pairs and every distanceKm was 0. That
-        // silently broke distance labels, stacked every map pin on one dot and
-        // fed the ranker's `proximity` feature a constant. Geocoding here means
-        // the stored row is correct forever and no user request ever pays for
-        // it. Time-boxed, and unresolved posts simply keep the centre.
-        const geoBudget = Math.min(GEO_BUDGET_MS, startedAt + SLICE_CEILING_MS - Date.now());
-        if (geoBudget > 0) {
-          const geo = await backfillVenueCoords(curated, {
-            city, cityLat: lat, cityLng: lng, budgetMs: geoBudget,
-          }).catch(() => ({ located: 0, attempted: 0 }));
-          located += geo.located;
-          geoAttempted += geo.attempted;
+        // Tally per-source accept/reject for the learning layer — measured against
+        // what SURVIVED curation, so a source that floods us with valid-but-thin
+        // listings is scored down, not rewarded for volume.
+        const bySource: Record<string, { raw: number; ok: number }> = {};
+        for (const p of raw)     (bySource[sourceOf(p.id)] ??= { raw: 0, ok: 0 }).raw++;
+        for (const p of curated) (bySource[sourceOf(p.id)] ??= { raw: 0, ok: 0 }).ok++;
+        for (const [s, v] of Object.entries(bySource)) {
+          (srcYield[s] ??= { a: 0, r: 0 });
+          srcYield[s].a += v.ok;
+          srcYield[s].r += v.raw - v.ok;
         }
 
-        const rows = curated.map(p => postToRow(p, sourceOf(p.id), country));
-        ingested += await upsertEvents(rows);
-        // Warm the image renders for what we just stored, so the first real
-        // visitor gets a cached photo rather than paying the cold resize.
-        prewarmed += await prewarmImages(curated, origin).catch(() => 0);
+        if (curated.length) {
+          // GATE 3 — put each post where it actually IS. Crawled listings rarely
+          // publish geo, so they fall back to the CITY CENTRE: measured Vienna,
+          // 8 posts shared 2 coordinate pairs and every distanceKm was 0. That
+          // silently broke distance labels, stacked every map pin on one dot and
+          // fed the ranker's `proximity` feature a constant. Geocoding here means
+          // the stored row is correct forever and no user request ever pays for
+          // it. Time-boxed, and unresolved posts simply keep the centre.
+          const geoBudget = Math.min(GEO_BUDGET_MS, startedAt + SLICE_CEILING_MS - Date.now());
+          if (geoBudget > 0) {
+            const geo = await backfillVenueCoords(curated, {
+              city, cityLat: lat, cityLng: lng, budgetMs: geoBudget,
+            }).catch(() => ({ located: 0, attempted: 0 }));
+            located += geo.located;
+            geoAttempted += geo.attempted;
+          }
+
+          const rows = curated.map(p => postToRow(p, sourceOf(p.id), country));
+          // The write gets an explicit slice of the remaining time. Without one it
+          // had no timeout at all, and a write stuck behind a lock held the
+          // function until the platform killed it — losing the slice AND its
+          // nextOffset. See the note in src/lib/eventsDb.ts.
+          ingested += await upsertEvents(rows, {
+            budgetMs: Math.max(2_000, startedAt + SLICE_CEILING_MS - Date.now() - 3_000),
+          });
+          // Warm the image renders for what we just stored, so the first real
+          // visitor gets a cached photo rather than paying the cold resize.
+          prewarmed += await prewarmImages(curated, origin).catch(() => 0);
+        }
+        processed++;
+      } catch (err) {
+        errors.push(`${city}/${category}#${page}:${err instanceof Error ? err.message : 'err'}`);
+        processed++;
       }
-      processed++;
-    } catch (err) {
-      errors.push(`${city}/${category}#${page}:${err instanceof Error ? err.message : 'err'}`);
-      processed++;
     }
+  };
+
+  // ── The watchdog ──────────────────────────────────────────────────────────
+  // Everything above is time-boxed, but "time-boxed" has failed before: an
+  // unbounded upsert, a fetch that ignores its signal, a slow tail. When it
+  // fails the platform kills the function at 60s, the response never arrives,
+  // and the GitHub workflow sees a 504 with no nextOffset — so the chain stops
+  // and the run goes red. THAT is the "workflow failed" mail.
+  //
+  // So the response no longer depends on the sweep finishing. At the ceiling we
+  // answer with whatever the counters hold and the offset of the item still in
+  // flight, which the next slice simply redoes. Work already upserted is
+  // committed; an unfinished item is idempotent (upsert by id). Answering late
+  // but honestly beats not answering at all.
+  //
+  // The timer is cleared on the normal path so a slice that finishes in 20s
+  // doesn't leave a 34-second timer pending behind its own response.
+  let timedOut = false;
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    sweep(),
+    new Promise<void>(resolve => {
+      watchdog = setTimeout(
+        () => { timedOut = true; resolve(); },
+        Math.max(0, startedAt + SLICE_CEILING_MS - Date.now()),
+      );
+    }),
+  ]);
+  clearTimeout(watchdog);
+
+  const done = !timedOut && i >= work.length;
+
+  // ── The tail ──────────────────────────────────────────────────────────────
+  // Bounded as a whole. These are all best-effort bookkeeping: none of them is
+  // worth losing the slice's nextOffset over, which is what happens if they run
+  // past the platform cap.
+  const tailBudget = Math.max(0, startedAt + 57_000 - Date.now());
+  let purged = 0;
+  if (tailBudget > 500) {
+    let tailTimer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      (async () => {
+        // At most one purge an hour app-wide now, not one per slice. The old
+        // per-slice DELETE ran 23,359 times and is a third of this app's write
+        // traffic — the queue the timing-out upserts were stuck behind. See the
+        // measurements in src/lib/eventsDb.ts.
+        purged = await purgeExpiredEvents().catch(() => 0);
+
+        // Feed curation outcomes into the source-reliability learner too, so the
+        // engine gradually favours the sources whose listings actually survive.
+        await Promise.all(curationReports.map(r => recordCuration(r).catch(() => {})));
+
+        // Persist what we learned about each source this run (gated/no-op w/o Redis).
+        await Promise.all(Object.entries(srcYield).map(([s, y]) =>
+          recordSourceYield(s, y.a, Math.max(0, y.r)).catch(() => {})
+        ));
+      })(),
+      new Promise<void>(resolve => { tailTimer = setTimeout(resolve, tailBudget); }),
+    ]);
+    clearTimeout(tailTimer);
   }
-
-  const done = i >= work.length;
-  await purgeExpiredEvents().catch(() => {}); // cheap single DELETE; run every time
-
-  // Feed curation outcomes into the source-reliability learner too, so the
-  // engine gradually favours the sources whose listings actually survive.
-  await Promise.all(curationReports.map(r => recordCuration(r).catch(() => {})));
-
-  // Persist what we learned about each source this run (gated/no-op w/o Redis).
-  await Promise.all(Object.entries(srcYield).map(([s, y]) =>
-    recordSourceYield(s, y.a, Math.max(0, y.r)).catch(() => {})
-  ));
 
   return NextResponse.json({
     ok: true, tier: tier ?? 'all', ingested, rejected, curatedOut, prewarmed,
-    located, geoAttempted, processed, offset, nextOffset: done ? null : i,
-    total: work.length, done, errors: errors.slice(0, 8),
+    located, geoAttempted, processed, purged, offset, nextOffset: done ? null : i,
+    total: work.length, done, timedOut, errors: errors.slice(0, 8),
   });
 }

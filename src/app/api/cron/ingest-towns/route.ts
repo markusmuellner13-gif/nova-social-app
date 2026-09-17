@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isCronRequest } from '@/lib/cronAuth';
 import { dbWriteEnabled, upsertEvents, postToRow } from '@/lib/eventsDb';
-import { searchRealEventsWithClaude } from '@/lib/sources/claudeAI';
+import {
+  searchRealEventsWithClaude, claudeAvailable, ClaudeUnavailableError,
+  AI_SEARCH_TIMEOUT_MS, AI_SEARCH_MIN_MS,
+} from '@/lib/sources/claudeAI';
 import { dropExpired, dedupePosts, todayStr } from '@/lib/sources/shared';
 
 export const maxDuration = 60;
@@ -53,30 +56,65 @@ export async function GET(request: NextRequest) {
   if (!apiKey) return NextResponse.json({ ok: false, note: 'no ANTHROPIC_API_KEY' });
   if (!dbWriteEnabled) return NextResponse.json({ ok: false, note: 'DB writes disabled' });
 
+  // Anthropic was out of credit for days in September; every call still cost a
+  // full 25-second round trip before failing. Check once, up front.
+  if (!(await claudeAvailable())) {
+    return NextResponse.json({
+      ok: true, ingested: 0, processed: 0, offset: 0, nextOffset: null,
+      total: TOWNS.length, done: true, skipped: 'anthropic_unavailable',
+    });
+  }
+
   const sp = new URL(request.url).searchParams;
   const offset = Math.max(0, parseInt(sp.get('offset') || '0', 10));
   const count = Math.max(4, Math.min(12, parseInt(sp.get('count') || '10', 10)));
   const today = todayStr();
-  const deadline = Date.now() + 45_000; // each town's AI search is ~15-25s
+
+  // ── Why this is a ceiling and not a deadline ──────────────────────────────
+  // This route logged "Vercel Runtime Timeout Error: Task timed out after 60
+  // seconds". The old code checked `Date.now() > deadline` with deadline at 45s
+  // and then started a town whose AI search is allowed to take 25 — so a town
+  // beginning at 44.9s ran to ~70s and the platform killed the function. The
+  // check was between items; the cost was inside one.
+  //
+  // So each town's search now gets what is actually LEFT under the ceiling, and
+  // when that is less than a search needs we stop and let the next invocation
+  // start it with a full window. Same fix the main ingest route already carries.
+  const startedAt = Date.now();
+  const SLICE_CEILING_MS = 54_000;   // platform kills at 60
+  const TAIL_RESERVE_MS = 6_000;     // the upsert after the search returns
 
   let ingested = 0, processed = 0;
   const errors: string[] = [];
   let i = offset;
   for (; i < TOWNS.length; i++) {
-    if (Date.now() > deadline) break;
+    const searchBudget = Math.min(
+      AI_SEARCH_TIMEOUT_MS,
+      startedAt + SLICE_CEILING_MS - TAIL_RESERVE_MS - Date.now(),
+    );
+    if (searchBudget < AI_SEARCH_MIN_MS) break;
+
     const [city, country, lat, lng] = TOWNS[i];
     try {
       const posts = await searchRealEventsWithClaude(
         city, country, today, count, 0, 'events', apiKey,
-        lat, lng, /* tourismFocus */ true,
+        lat, lng, /* tourismFocus */ true, searchBudget,
       );
       const clean = dropExpired(dedupePosts(posts)).filter(p => p && p.id && p.eventDateRaw);
       if (clean.length) {
         const rows = clean.map(p => postToRow(p, 'tour', country));
-        ingested += await upsertEvents(rows);
+        ingested += await upsertEvents(rows, {
+          budgetMs: Math.max(2_000, startedAt + SLICE_CEILING_MS - Date.now()),
+        });
       }
       processed++;
     } catch (err) {
+      // The account ran dry mid-run: every remaining town would fail the same
+      // way. Stop here and report an honest resume point.
+      if (err instanceof ClaudeUnavailableError) {
+        errors.push(`${city}:anthropic unavailable`);
+        break;
+      }
       errors.push(`${city}:${err instanceof Error ? err.message : 'err'}`);
       processed++;
     }

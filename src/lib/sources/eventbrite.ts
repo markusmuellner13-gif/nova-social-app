@@ -4,6 +4,29 @@
 // has a real, endless stream.
 
 import { ApiPost, makeUser, slugify, todayStr } from './shared';
+import { upstreamPaused, pauseUpstream, retryAfterSeconds } from '@/lib/sourceBreaker';
+
+// ── Throttling ───────────────────────────────────────────────────────────────
+// Eventbrite is a public page we read, not an API we have a contract with, and
+// it throttles hard: 721 HTTP 429s in the September logs — the single largest
+// source of error volume in the whole app. Every one of them was handled
+// correctly (the feed just uses its other sources), so nothing was ever broken
+// for a user; the cost was the noise, plus an 8-second timeout burned per call
+// inside cron slices that are racing a 60-second cap.
+//
+// Retrying a 429 immediately is how you earn the next one. Standing down for a
+// few minutes lets the quota recover, and turns hundreds of log lines into one.
+const BREAKER = 'eventbrite';
+const PAUSE_429_S = 5 * 60;   // no Retry-After → back off five minutes
+const PAUSE_5XX_S = 2 * 60;   // their side is unwell; check back sooner
+
+/** Eventbrite told us to go away and we haven't waited it out yet. */
+export class EventbriteThrottledError extends Error {
+  constructor(status: number) {
+    super(`Eventbrite throttled (${status})`);
+    this.name = 'EventbriteThrottledError';
+  }
+}
 
 // Eventbrite's JSON-LD has no geo coordinates, so every event would otherwise be
 // stamped with the SEARCH-CITY centroid. On a small town's page Eventbrite spills
@@ -97,6 +120,10 @@ export async function fetchEventbriteEvents(
   city: string, country: string, lat: number, lng: number, count: number,
   category = 'events', page = 0
 ): Promise<ApiPost[]> {
+  // Already throttled — skip the round trip entirely. An empty list is exactly
+  // what the caller would have got from the failed fetch, just 8 seconds sooner.
+  if (await upstreamPaused(BREAKER)) return [];
+
   const slug = EB_CATEGORY_SLUGS[category] ?? 'events';
   const pageParam = page > 0 ? `?page=${page + 1}` : '';
   const url = `https://www.eventbrite.com/d/${slugify(country)}--${slugify(city)}/${slug}/${pageParam}`;
@@ -107,6 +134,13 @@ export async function fetchEventbriteEvents(
     },
     signal: AbortSignal.timeout(8000),
   });
+  if (res.status === 429 || res.status >= 500) {
+    const seconds = res.status === 429
+      ? (retryAfterSeconds(res) ?? PAUSE_429_S)
+      : PAUSE_5XX_S;
+    await pauseUpstream(BREAKER, seconds, `HTTP ${res.status} from the public city pages`);
+    throw new EventbriteThrottledError(res.status);
+  }
   if (!res.ok) throw new Error(`Eventbrite ${res.status}`);
   const html = await res.text();
 

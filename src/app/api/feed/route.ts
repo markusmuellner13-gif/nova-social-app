@@ -9,12 +9,13 @@ import { fetchWikipediaNearby, fetchWikipediaSummary, wikiToPost, isWorthSightse
 import { fetchSeatGeekEvents } from '@/lib/sources/seatgeek';
 import {
   enrichEventDescriptions, enrichSightseeingDescriptions,
-  searchRealEventsWithClaude,
+  searchRealEventsWithClaude, claudeAvailable,
 } from '@/lib/sources/claudeAI';
 import { crawlCityEvents } from '@/lib/sources/webCrawler';
 import { eventsCacheKey, cacheTtl, cacheGet, cacheSet } from '@/lib/serverCache';
 import { dbReadEnabled, queryEventsNear, queryEventsByCountry } from '@/lib/eventsDb';
 import { aiBudgetExceeded, noteAiCall } from '@/lib/aiBudget';
+import { logSourceError } from '@/lib/sourceBreaker';
 import { assessQuality, qualityFloorFor } from '@/lib/brain/quality';
 import { mergeDuplicates } from '@/lib/brain/curator';
 import { persistInBackground } from '@/lib/brain/persist';
@@ -50,6 +51,7 @@ const EB_CATEGORIES = new Set([
 ]);
 
 const SG_CATEGORIES = new Set(['events','music','sports','art','discover']);
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-source fetchers, each returning a (possibly empty) list of posts
@@ -611,7 +613,7 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
         { headers: PLACE_CACHE }
       );
     } catch (err) {
-      console.error('[feed/osm]', err);
+      logSourceError('[feed/osm]', err);
       // Overpass unreachable and the DB had nothing for this area either, so we
       // report the outage rather than showing the wrong content. The client
       // offers a retry.
@@ -629,7 +631,7 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
     tasks.push(
       ticketmasterPosts(lat, lng, city, category, page, radius, count, days, tmKey, claudeKey)
         .then(r => ({ source: 'ticketmaster', ...r }))
-        .catch(err => { console.error('[feed/tm]', err); return { source: 'ticketmaster', posts: [], hasMore: false }; })
+        .catch(err => { logSourceError('[feed/tm]', err); return { source: 'ticketmaster', posts: [], hasMore: false }; })
     );
   }
 
@@ -637,7 +639,7 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
     tasks.push(
       fetchEventbriteEvents(city, country, lat, lng, count, category, page)
         .then(posts => ({ source: 'eventbrite', posts, hasMore: posts.length >= count }))
-        .catch(err => { console.error('[feed/eb]', err); return { source: 'eventbrite', posts: [], hasMore: false }; })
+        .catch(err => { logSourceError('[feed/eb]', err); return { source: 'eventbrite', posts: [], hasMore: false }; })
     );
   }
 
@@ -645,7 +647,7 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
     tasks.push(
       fetchSeatGeekEvents(lat, lng, category, page, radius, count, sgKey, city)
         .then(posts => ({ source: 'seatgeek', posts, hasMore: posts.length >= count }))
-        .catch(err => { console.error('[feed/sg]', err); return { source: 'seatgeek', posts: [], hasMore: false }; })
+        .catch(err => { logSourceError('[feed/sg]', err); return { source: 'seatgeek', posts: [], hasMore: false }; })
     );
   }
 
@@ -653,7 +655,7 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
     tasks.push(
       wikipediaPosts(lat, lng, city, page, radius, count, claudeKey)
         .then(r => ({ source: 'wikipedia', ...r }))
-        .catch(err => { console.error('[feed/wiki]', err); return { source: 'wikipedia', posts: [], hasMore: false }; })
+        .catch(err => { logSourceError('[feed/wiki]', err); return { source: 'wikipedia', posts: [], hasMore: false }; })
     );
   }
 
@@ -661,7 +663,7 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
     tasks.push(
       osmPosts(lat, lng, city, 'food', page, radius, count)
         .then(r => ({ source: 'osm', ...r }))
-        .catch(err => { console.error('[feed/food-osm]', err); return { source: 'osm', posts: [], hasMore: false }; })
+        .catch(err => { logSourceError('[feed/food-osm]', err); return { source: 'osm', posts: [], hasMore: false }; })
     );
   }
 
@@ -676,7 +678,7 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
     tasks.push(
       osmPosts(lat, lng, city, osmCatForDiscover, page, radius, count)
         .then(r => ({ source: 'osm', ...r }))
-        .catch(err => { console.error('[feed/osm-blend]', err); return { source: 'osm', posts: [], hasMore: false }; })
+        .catch(err => { logSourceError('[feed/osm-blend]', err); return { source: 'osm', posts: [], hasMore: false }; })
     );
   }
 
@@ -717,7 +719,11 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
   // (saves credits AND latency — it's the slowest source by far). Also gated by
   // a soft daily spend cap (AI_DAILY_BUDGET) so a traffic spike or a big
   // ingestion sweep can't run up an unbounded Anthropic bill.
-  if (pool.length < sparseThreshold && claudeKey && !(await aiBudgetExceeded())) {
+  // `claudeAvailable()` is checked FIRST and separately from the spend cap: when
+  // the account is out of credit every call fails, and pre-counting a call that
+  // can't happen would burn the daily budget on nothing — so that the moment the
+  // account was topped up, the cap would already be exhausted for the day.
+  if (pool.length < sparseThreshold && claudeKey && await claudeAvailable() && !(await aiBudgetExceeded())) {
     try {
       await noteAiCall();
       const aiPosts = await searchRealEventsWithClaude(
@@ -729,7 +735,10 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
         anyMore = anyMore || page < 8;
       }
     } catch (err) {
-      console.error('[feed/ai]', err);
+      // The breaker already logged why Anthropic is unavailable, once. Repeating
+      // it per request is what turned a single billing problem into pages of
+      // identical [feed/ai] errors in the Sept 11–13 logs.
+      logSourceError('[feed/ai]', err);
     }
   }
 

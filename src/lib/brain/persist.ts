@@ -58,7 +58,11 @@ export async function persistFeedResults(
 
     const ttl = opts.isPlaceCategory ? PLACE_TTL_DAYS : EVENT_TTL_DAYS;
     const rows = kept.map(p => postToRow(p, sourceOf(p.id), opts.country ?? null, ttl));
-    const written = await upsertEvents(rows);
+    // This runs behind a USER's request, so it gets a short leash. The write is
+    // an optimisation — the next request recomputes if it doesn't land — and a
+    // write stuck behind a lock must not keep the lambda alive to the platform
+    // cap on someone's feed scroll.
+    const written = await upsertEvents(rows, { budgetMs: 10_000 });
     return { written, skipped: posts.length - written };
   } catch {
     return { written: 0, skipped: posts.length };

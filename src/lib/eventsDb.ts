@@ -6,6 +6,7 @@
 // app keeps working exactly as before.
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { cacheIncr } from './serverCache';
 import { canonicalCity } from './cityName';
 import type { ApiPost } from '@/lib/sources/shared';
 import { enforceRealImages } from '@/lib/sources/realImage';
@@ -103,12 +104,112 @@ export function postToRow(post: ApiPost & { eventDateRaw?: string | null }, sour
   };
 }
 
-// Upsert a batch of events (ingestion). Returns how many were written.
-export async function upsertEvents(rows: EventRow[]): Promise<number> {
+// ── Writing, without betting the whole function on one request ───────────────
+//
+// Between Sept 8 and 14, ten ingest slices logged `[eventsDb/upsert] Gateway
+// Timeout`. It is worth being precise about what that was, because the obvious
+// reading is wrong.
+//
+// MEASURED, from pg_stat_statements (unreset since 2026-06-06, so it covers the
+// whole window): the upsert ran 60,334 times with a mean of 32ms and a MAXIMUM
+// of 583ms. Not one execution was slow, and a lock wait would have shown up here
+// as execution time. So the statement never struggled — the request never
+// reached Postgres. It queued in front of it, at PostgREST's connection pool
+// (max_connections is 60, and the pool is a slice of that), while dozens of
+// ingest slices, background persists and user requests all competed for it, and
+// the gateway gave up at 60 seconds.
+//
+// That is a load problem, and it was made much worse by sheer request volume:
+// `purgeExpiredEvents` alone accounts for 23,359 calls — see the note down
+// there. It is now ~1/hour rather than one per slice.
+//
+// The failure mode is what made it serious. The upsert had NO timeout of its
+// own, so a queued request held the Vercel function until the platform killed it
+// at 60s — and a killed slice returns no `nextOffset`, which stops the whole
+// chain and is what sends the "workflow failed" mail. So:
+//
+//   1. every request is time-boxed, so it can never outlive its caller;
+//   2. rows go in chunks, so a stall costs one chunk instead of the batch, and
+//      each request holds a pool connection for less time;
+//   3. a timed-out chunk is retried once — queueing is transient;
+//   4. failures return a count, never throw. Partial progress is real progress.
+//
+// supabase/migrations/008_events_write_timeouts.sql adds server-side timeouts as
+// a backstop. That is insurance, not the fix — the fix is fewer, smaller,
+// time-boxed requests.
+
+const UPSERT_CHUNK = 25;          // ~95 KB of JSONB per request at our row size
+const UPSERT_TIMEOUT_MS = 12_000; // one chunk, one attempt
+const UPSERT_RETRY_WAIT_MS = 400;
+export const UPSERT_DEFAULT_BUDGET_MS = 25_000;
+
+function isTransientDbError(message: string): boolean {
+  const m = message.toLowerCase();
+  return m.includes('timeout') || m.includes('timed out') || m.includes('gateway')
+      || m.includes('abort')   || m.includes('lock')      || m.includes('deadlock')
+      || m.includes('fetch failed') || m.includes('econnreset');
+}
+
+// One chunk, one attempt. Returns null on success, or the failure message.
+async function upsertChunk(rows: EventRow[], timeoutMs: number): Promise<string | null> {
+  try {
+    const { error } = await writeClient!
+      .from('events')
+      .upsert(rows, { onConflict: 'id' })
+      .abortSignal(AbortSignal.timeout(timeoutMs));
+    return error ? error.message : null;
+  } catch (err) {
+    // An aborted request rejects rather than returning an error object.
+    return err instanceof Error ? err.message : 'upsert failed';
+  }
+}
+
+/**
+ * Upsert a batch of events (ingestion). Returns how many rows were actually
+ * written — which may be fewer than `rows.length` if the budget ran out. Never
+ * throws and never runs longer than `budgetMs`.
+ */
+export async function upsertEvents(
+  rows: EventRow[],
+  opts: { budgetMs?: number } = {},
+): Promise<number> {
   if (!writeClient || rows.length === 0) return 0;
-  const { error } = await writeClient.from('events').upsert(rows, { onConflict: 'id' });
-  if (error) { console.error('[eventsDb/upsert]', error.message); return 0; }
-  return rows.length;
+
+  const deadline = Date.now() + Math.max(1_000, opts.budgetMs ?? UPSERT_DEFAULT_BUDGET_MS);
+  let written = 0;
+  let firstError: string | null = null;
+
+  for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
+    const remaining = deadline - Date.now();
+    // Stop cleanly rather than starting a request there is no time for. The bar
+    // is low on purpose: the request below is hard-bounded by `remaining`, so a
+    // short attempt either lands or aborts harmlessly — it can no longer run on
+    // past the caller. Refusing to try with a second left would just throw away
+    // rows we could have written.
+    if (remaining < 750) {
+      console.error(`[eventsDb/upsert] budget exhausted — wrote ${written}/${rows.length} rows`);
+      break;
+    }
+
+    const chunk = rows.slice(i, i + UPSERT_CHUNK);
+    let error = await upsertChunk(chunk, Math.min(UPSERT_TIMEOUT_MS, remaining));
+
+    // One retry, and only for the stalls this is here to survive. A constraint
+    // violation or a bad payload fails the same way twice.
+    if (error && isTransientDbError(error)) {
+      const left = deadline - Date.now();
+      if (left > UPSERT_RETRY_WAIT_MS + 2_000) {
+        await new Promise(r => setTimeout(r, UPSERT_RETRY_WAIT_MS));
+        error = await upsertChunk(chunk, Math.min(UPSERT_TIMEOUT_MS, deadline - Date.now()));
+      }
+    }
+
+    if (error) { firstError ??= error; continue; }
+    written += chunk.length;
+  }
+
+  if (firstError) console.error('[eventsDb/upsert]', firstError, `— wrote ${written}/${rows.length} rows`);
+  return written;
 }
 
 // Read feed-ready posts near a location, for one category, soonest first.
@@ -209,8 +310,71 @@ export async function sampleEventsWorldwide(limit = 1500): Promise<ApiPost[]> {
     .filter(p => p && p.location && Number.isFinite(p.location.lat) && Number.isFinite(p.location.lng));
 }
 
-// Housekeeping: delete long-expired rows (called by the ingest cron).
-export async function purgeExpiredEvents(): Promise<void> {
-  if (!writeClient) return;
-  await writeClient.from('events').delete().lt('expires_at', new Date().toISOString());
+// ── Housekeeping ─────────────────────────────────────────────────────────────
+//
+// This used to be `DELETE FROM events WHERE expires_at < now()` with no bound
+// and no timeout, run at the END OF EVERY SLICE — up to 18 times per workflow
+// run, every 30 minutes, forever. pg_stat_statements has it at 23,359 calls,
+// against 60,334 upserts: more than a third of all the write traffic this app
+// generates was this one statement, tidying up after itself.
+//
+// The DELETE is fast (mean 1.1ms), so it was never slow — it was just constant,
+// and every call occupies a PostgREST pool connection that an ingest upsert then
+// has to queue behind. That queueing is what the `Gateway Timeout` entries
+// actually were.
+//
+// And it bought nothing. Expired rows are already invisible to readers (every
+// query filters `expires_at > now()`), so deleting them is pure housekeeping and
+// can happen once an hour instead of eighteen times a run.
+//
+// Now: at most one purge an hour app-wide, a bounded number of rows, and a hard
+// timeout. Deleting by explicit id list keeps each statement small and known.
+
+const PURGE_LOCK_TTL_S = 60 * 60;
+const PURGE_MAX_ROWS = 500;
+const PURGE_TIMEOUT_MS = 8_000;
+// Expired rows are harmless, so let them settle before deleting. This keeps the
+// purge off rows an in-flight ingest may be re-upserting right now.
+const PURGE_GRACE_MS = 60 * 60 * 1000;
+
+/**
+ * Whether this invocation is the one that should purge. Backed by an atomic
+ * Redis counter so only the first caller in the hour does the work. Without
+ * Redis there is nothing to coordinate with, so fall back to a 1-in-12 chance —
+ * roughly once per workflow run, instead of once per slice.
+ */
+async function shouldPurgeNow(): Promise<boolean> {
+  const hour = new Date().toISOString().slice(0, 13); // YYYY-MM-DDTHH
+  const n = await cacheIncr(`nova:purge:${hour}`, PURGE_LOCK_TTL_S);
+  if (n === null) return Math.random() < 1 / 12;
+  return n === 1;
+}
+
+/** Delete a bounded slice of long-expired rows. Never throws, never blocks. */
+export async function purgeExpiredEvents(opts: { force?: boolean } = {}): Promise<number> {
+  if (!writeClient) return 0;
+  if (!opts.force && !(await shouldPurgeNow())) return 0;
+
+  const cutoff = new Date(Date.now() - PURGE_GRACE_MS).toISOString();
+  try {
+    const { data, error } = await writeClient
+      .from('events')
+      .select('id')
+      .lt('expires_at', cutoff)
+      .limit(PURGE_MAX_ROWS)
+      .abortSignal(AbortSignal.timeout(PURGE_TIMEOUT_MS));
+    if (error || !data?.length) return 0;
+
+    const ids = (data as { id: string }[]).map(r => r.id);
+    const { error: delError } = await writeClient
+      .from('events')
+      .delete()
+      .in('id', ids)
+      .abortSignal(AbortSignal.timeout(PURGE_TIMEOUT_MS));
+    if (delError) { console.error('[eventsDb/purge]', delError.message); return 0; }
+    return ids.length;
+  } catch (err) {
+    console.error('[eventsDb/purge]', err instanceof Error ? err.message : 'purge failed');
+    return 0;
+  }
 }

@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { looksLikeLogo, tooSmall, websiteFromTags, extractPageImages, osmTagImage, isDirectoryUrl } from './venuePhoto';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { looksLikeLogo, tooSmall, websiteFromTags, extractPageImages, osmTagImage, isDirectoryUrl, fetchGooglePlacePhoto } from './venuePhoto';
+import { resetBreaker } from '@/lib/sourceBreaker';
 
 describe('isDirectoryUrl', () => {
   // openstreetmap.org node pages really do serve the OSM logo as og:image, so
@@ -138,5 +139,88 @@ describe('osmTagImage', () => {
   });
   it('returns null when the place has no image tag', () => {
     expect(osmTagImage({ name: 'Bar' })).toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The LEGACY Places fallback has been answering REQUEST_DENIED since Aug 5 —
+// "This API key is not authorized to use this service". That is a setting on the
+// key in Google Cloud Console; no amount of calling changes it. Until this fix
+// the app asked again on every single photo miss, paying a full round trip for
+// an answer it had already been given eleven times.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('Google Places legacy fallback', () => {
+  const KEY_BEFORE = process.env.GOOGLE_PLACES_API_KEY;
+  const LEGACY_BEFORE = process.env.GOOGLE_PLACES_LEGACY;
+  let n = 0;
+  const venue = () => `Test Venue ${++n}`;   // the photo cache memoises by name
+
+  beforeEach(() => {
+    resetBreaker('places-legacy');
+    resetBreaker('places-new');
+    process.env.GOOGLE_PLACES_API_KEY = 'test-key';
+    delete process.env.GOOGLE_PLACES_LEGACY;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetBreaker('places-legacy');
+    if (KEY_BEFORE === undefined) delete process.env.GOOGLE_PLACES_API_KEY;
+    else process.env.GOOGLE_PLACES_API_KEY = KEY_BEFORE;
+    if (LEGACY_BEFORE === undefined) delete process.env.GOOGLE_PLACES_LEGACY;
+    else process.env.GOOGLE_PLACES_LEGACY = LEGACY_BEFORE;
+  });
+
+  // Modern API answers, finds nothing → the legacy fallback is tried.
+  function stubFetch(legacyStatus: string) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('places.googleapis.com')) {
+        return { ok: true, status: 200, json: async () => ({ places: [] }), text: async () => '{}' } as unknown as Response;
+      }
+      return {
+        ok: true, status: 200,
+        json: async () => ({ status: legacyStatus, error_message: 'This API key is not authorized to use this service.' }),
+        text: async () => '{}',
+      } as unknown as Response;
+    }) as typeof fetch);
+  }
+
+  it('asks legacy once, then never again — REQUEST_DENIED is a config answer', async () => {
+    const spy = stubFetch('REQUEST_DENIED');
+
+    // First lookup: modern API, then the legacy fallback. Two requests.
+    expect(await fetchGooglePlacePhoto(venue(), 48.2, 16.37)).toBeNull();
+    expect(spy).toHaveBeenCalledTimes(2);
+
+    // Every lookup after it skips legacy entirely — one request, not two.
+    spy.mockClear();
+    for (let i = 0; i < 5; i++) await fetchGooglePlacePhoto(venue(), 48.2, 16.37);
+    expect(spy).toHaveBeenCalledTimes(5);
+    expect(spy.mock.calls.every(c => String(c[0]).includes('places.googleapis.com'))).toBe(true);
+  });
+
+  it('keeps trying legacy after a ZERO_RESULTS — that is a normal answer', async () => {
+    const spy = stubFetch('ZERO_RESULTS');
+    await fetchGooglePlacePhoto(venue(), 48.2, 16.37);
+    spy.mockClear();
+    await fetchGooglePlacePhoto(venue(), 48.2, 16.37);
+    expect(spy).toHaveBeenCalledTimes(2);   // modern + legacy, still both
+  });
+
+  it('GOOGLE_PLACES_LEGACY=off retires the fallback without waiting for a denial', async () => {
+    process.env.GOOGLE_PLACES_LEGACY = 'off';
+    const spy = stubFetch('REQUEST_DENIED');
+    await fetchGooglePlacePhoto(venue(), 48.2, 16.37);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('names the actual fix in the log line', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    stubFetch('REQUEST_DENIED');
+    await fetchGooglePlacePhoto(venue(), 48.2, 16.37);
+    const lines = log.mock.calls.map(c => c.join(' ')).join('\n');
+    expect(lines).toContain('REQUEST_DENIED');
+    expect(lines).toContain('Google Cloud Console');
   });
 });
