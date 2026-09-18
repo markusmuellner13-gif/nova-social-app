@@ -365,7 +365,8 @@ async function resolveFeed(request: NextRequest, onPartial?: PartialSink) {
   // work by calling this route, so counting those would be a feedback loop —
   // whatever the sweep refreshed would look popular and would then be refreshed
   // first forever, whether or not a single person ever opened it.
-  if (request.headers.get('x-nova-internal') !== '1') {
+  const isInternal = request.headers.get('x-nova-internal') === '1';
+  if (!isInternal) {
     void recordDemand(
       parseFloat(searchParams.get('lat') || '0'),
       parseFloat(searchParams.get('lng') || '0'),
@@ -551,6 +552,11 @@ function streamFeed(request: NextRequest): Response {
 async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
   const { searchParams } = new URL(request.url);
 
+  // The ingest and warm crons fetch this route to do their work. They upsert
+  // what they get themselves, so the write-through persists below are skipped
+  // for them — see the notes at each call site.
+  const isInternal = request.headers.get('x-nova-internal') === '1';
+
   const cityParam    = (searchParams.get('city')    ?? '').slice(0, 100).replace(/[<>'"\\]/g, '');
   const countryParam = (searchParams.get('country') ?? '').slice(0, 100).replace(/[<>'"\\]/g, '');
   const page    = Math.max(0, Math.min(30, parseInt(searchParams.get('page')   || '0',  10)));
@@ -619,7 +625,13 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
         // Write-through: the first visitor to a city pays Overpass's 20 seconds
         // once; everyone after is served from Postgres in about a second, and
         // the tab keeps working even when Overpass is down.
-        persistInBackground(final, { city, country, lat, lng, isPlaceCategory: true });
+        //
+        // NOT for the ingest cron. It fetches this route to do its work and then
+        // upserts the results itself — with the country, the curation report and
+        // geocoded venue coordinates that this path does not have. Persisting
+        // here as well wrote every ingested row TWICE, and the two writes then
+        // queued against each other for the same PostgREST connection pool.
+        if (!isInternal) persistInBackground(final, { city, country, lat, lng, isPlaceCategory: true });
         return NextResponse.json(
           { posts: final, city, country, sources: ['osm'], hasMore },
           { headers: PLACE_CACHE }
@@ -818,7 +830,9 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
   // person asking about this city — through the feed, the chatbot or the trip
   // planner — is answered from Postgres instead of re-hitting every upstream.
   // This is how coverage grows: every visit to a new city seeds it.
-  persistInBackground(finalPosts, {
+  // Skipped for the ingest cron, which does its own, better-informed write —
+  // see the note on the other persist call above.
+  if (!isInternal) persistInBackground(finalPosts, {
     city, country, lat, lng,
     isPlaceCategory: OSM_CATEGORIES.has(category) || category === 'food' || category === 'sightseeing',
   });
