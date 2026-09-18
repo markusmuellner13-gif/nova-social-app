@@ -178,6 +178,7 @@ export async function upsertEvents(
   const deadline = Date.now() + Math.max(1_000, opts.budgetMs ?? UPSERT_DEFAULT_BUDGET_MS);
   let written = 0;
   let firstError: string | null = null;
+  let ranOutOfTime = false;
 
   for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
     const remaining = deadline - Date.now();
@@ -186,10 +187,7 @@ export async function upsertEvents(
     // short attempt either lands or aborts harmlessly — it can no longer run on
     // past the caller. Refusing to try with a second left would just throw away
     // rows we could have written.
-    if (remaining < 750) {
-      console.error(`[eventsDb/upsert] budget exhausted — wrote ${written}/${rows.length} rows`);
-      break;
-    }
+    if (remaining < 750) { ranOutOfTime = true; break; }
 
     const chunk = rows.slice(i, i + UPSERT_CHUNK);
     let error = await upsertChunk(chunk, Math.min(UPSERT_TIMEOUT_MS, remaining));
@@ -208,7 +206,13 @@ export async function upsertEvents(
     written += chunk.length;
   }
 
-  if (firstError) console.error('[eventsDb/upsert]', firstError, `— wrote ${written}/${rows.length} rows`);
+  // ONE line per failed batch, not one per cause. A batch that both hit an error
+  // and then ran out of budget used to log twice, which made a single incident
+  // look like two in the error dashboard and doubled the noise.
+  if (firstError || (ranOutOfTime && written < rows.length)) {
+    const why = firstError ?? 'ran out of budget';
+    console.error(`[eventsDb/upsert] ${why} — wrote ${written}/${rows.length} rows`);
+  }
   return written;
 }
 
