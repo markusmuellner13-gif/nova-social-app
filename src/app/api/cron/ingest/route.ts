@@ -11,6 +11,7 @@ import {
 } from '@/lib/demand';
 import { readCursor, writeCursor, timeDerivedCursor } from '@/lib/ingestCursor';
 import { scheduleTier } from './schedule';
+import { appOrigin } from '@/lib/appOrigin';
 
 // 300s, not 60. The old value was the HOBBY plan's cap, and this project has
 // been on Pro for a long time — /api/cron/warm in this same folder has run at
@@ -176,7 +177,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, ingested: 0, note: 'DB writes disabled (set SUPABASE_SERVICE_ROLE_KEY)' });
   }
 
-  const origin = new URL(request.url).origin;
+  const origin = appOrigin(request);
   const sp = new URL(request.url).searchParams;
 
   // Which freshness tier to refresh this call (see FAST/SLOW_CATEGORIES above).
@@ -496,6 +497,23 @@ export async function GET(request: NextRequest) {
       new Promise<void>(resolve => { tailTimer = setTimeout(resolve, tailBudget); }),
     ]);
     clearTimeout(tailTimer);
+  }
+
+  // A sweep that tried and wrote NOTHING is the shape of every silent failure
+  // this route has had: a dead API key, a feed that 401s, and most recently a
+  // cron fetching an SSO-protected origin and getting 302 on every item. All
+  // three returned a cheerful 200 with `ingested: 0`, which reads exactly like
+  // "there was nothing new to ingest" and so was never noticed.
+  //
+  // It is not proof of a fault — a re-sweep of unchanged cities legitimately
+  // writes little — but combined with zero curated posts across every item it
+  // means the sweep is not seeing data, and that is worth one loud line with the
+  // first few reasons attached. Picked up by the `[breaker/*]`-style Sentry rules
+  // in docs/ALERTING.md.
+  if (processed >= 3 && ingested === 0) {
+    console.error(
+      `[ingest/barren] ${processed} items processed, 0 rows written (origin=${origin}) — ${errors.slice(0, 3).join(' | ') || 'no per-item errors recorded'}`,
+    );
   }
 
   return NextResponse.json({
