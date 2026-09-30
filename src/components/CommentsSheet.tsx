@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useDragControls } from 'framer-motion';
 import { X, Heart, Send, Star, Loader2, LogIn, Trash2 } from 'lucide-react';
 import { Post } from '@/types';
 import { timeAgo } from '@/data/appDefaults';
@@ -18,6 +18,12 @@ interface Props {
   onClose: () => void;
 }
 
+// Swipe-down-to-dismiss thresholds, in px and px/s. Either one closes the
+// sheet: a deliberate pull far enough down, or a quick flick that is clearly a
+// dismiss even though it never travelled that far.
+const DISMISS_DISTANCE = 140;
+const DISMISS_VELOCITY = 600;
+
 // Real comments only: loaded from and written to the backend, signed with the
 // commenter's real profile. Nothing generated, nothing session-local.
 export default function CommentsSheet({ post, onClose }: Props) {
@@ -31,6 +37,46 @@ export default function CommentsSheet({ post, onClose }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const liked = isLiked(post.id);
   const saved = isSaved(post.id);
+
+  // Drag-to-dismiss. The listener is disabled on the sheet itself so that a
+  // drag only begins where we say it does — otherwise framer swallows every
+  // vertical gesture and the comment list stops scrolling.
+  const dragControls = useDragControls();
+  const listRef = useRef<HTMLDivElement>(null);
+  const panStart = useRef<{ x: number; y: number } | null>(null);
+  const dragging = useRef(false);
+
+  // The grab area at the top of the sheet (handle, title row, post header).
+  function startDrag(e: React.PointerEvent) {
+    dragging.current = false; // a fresh press is always a fresh gesture
+    // Let the X, the like/save buttons and any input keep their own taps.
+    if ((e.target as HTMLElement).closest('button, input, a')) return;
+    dragging.current = true;
+    dragControls.start(e);
+  }
+
+  // The comment list drags the sheet too, but only once it is scrolled to the
+  // very top and only downwards — so scrolling through comments is untouched.
+  function onListPointerDown(e: React.PointerEvent) {
+    dragging.current = false;
+    panStart.current = (listRef.current?.scrollTop ?? 0) <= 0
+      ? { x: e.clientX, y: e.clientY }
+      : null;
+  }
+
+  function onListPointerMove(e: React.PointerEvent) {
+    const start = panStart.current;
+    if (!start || dragging.current) return;
+    if ((listRef.current?.scrollTop ?? 0) > 0) { panStart.current = null; return; }
+    const dy = e.clientY - start.y;
+    // Downwards, and more vertical than horizontal, before we take the gesture.
+    if (dy > 12 && dy > Math.abs(e.clientX - start.x)) {
+      dragging.current = true;
+      dragControls.start(e);
+    }
+  }
+
+  function endPan() { panStart.current = null; }
 
   useEffect(() => {
     let active = true;
@@ -72,66 +118,97 @@ export default function CommentsSheet({ post, onClose }: Props) {
       animate={{ y: 0 }}
       exit={{ y: '100%' }}
       transition={{ type: 'spring', stiffness: 300, damping: 35 }}
+      drag="y"
+      dragControls={dragControls}
+      dragListener={false}
+      dragConstraints={{ top: 0, bottom: 0 }}
+      dragElastic={{ top: 0, bottom: 1 }}
+      dragMomentum={false}
+      onDragEnd={(_, info) => {
+        dragging.current = false;
+        panStart.current = null;
+        if (info.offset.y > DISMISS_DISTANCE || info.velocity.y > DISMISS_VELOCITY) onClose();
+      }}
       className="fixed inset-x-0 bottom-0 z-40 flex flex-col rounded-t-3xl overflow-hidden"
       style={{ height: '85dvh', background: '#0d0d16', borderTop: '1px solid #2a2a38' }}
     >
-      {/* Drag handle */}
-      <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
-        <div className="w-10 h-1 rounded-full" style={{ background: '#2a2a38' }} />
-      </div>
-
-      {/* Header with close */}
-      <div className="flex items-center justify-between px-4 py-2 flex-shrink-0" style={{ borderBottom: '1px solid #1e1e2a' }}>
-        <h3 className="text-base font-bold text-white">
-          Comments{comments.length > 0 ? ` · ${comments.length}` : ''}
-        </h3>
-        <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#1a1a24' }}>
-          <X size={16} style={{ color: '#888899' }} />
-        </button>
-      </div>
-
-      {/* Post mini-header */}
-      <div className="flex items-center gap-3 px-4 py-3 flex-shrink-0" style={{ borderBottom: '1px solid #1a1a24' }}>
-        <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0" style={{ background: coverBackground(post.id) }}>
-          {post.image && <img src={postImageUrl(post.image, 480)} alt="" className="w-full h-full object-cover" loading="lazy" />}
+      {/* Everything above the comment list is a grab area for the dismiss drag.
+          framer only sets touch-action/user-select itself when dragListener is
+          on, so this region declares both — the gesture is ours, not the
+          browser's, and dragging must not select the header text. */}
+      <div
+        className="flex-shrink-0"
+        onPointerDown={startDrag}
+        style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+      >
+        {/* Drag handle */}
+        <div className="flex justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing" aria-hidden="true">
+          <div className="w-10 h-1 rounded-full" style={{ background: '#2a2a38' }} />
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-white truncate">@{post.user.username}</p>
-          <p className="text-xs mt-0.5 line-clamp-2 leading-snug" style={{ color: '#888899' }}>{post.caption}</p>
-        </div>
-        {/* Quick actions */}
-        <div className="flex gap-3 flex-shrink-0">
-          <button
-            onClick={() => { likePost(post); }}
-            className="flex flex-col items-center gap-0.5"
-          >
-            <Star
-              size={22}
-              fill={liked ? '#f59e0b' : 'none'}
-              style={{ color: liked ? '#f59e0b' : '#888899' }}
-              className={liked ? 'heart-pop' : ''}
-            />
-            <span className="text-xs" style={{ color: liked ? '#f59e0b' : '#555566' }}>{liked ? 'Loved' : 'Like'}</span>
-          </button>
-          <button
-            onClick={() => {
-              savePost(post);
-              if (!saved) addToast('Saved to collection', 'success', '🔖');
-            }}
-            className="flex flex-col items-center gap-0.5"
-          >
-            <Heart
-              size={22}
-              fill={saved ? '#8b5cf6' : 'none'}
-              style={{ color: saved ? '#8b5cf6' : '#888899' }}
-            />
-            <span className="text-xs" style={{ color: saved ? '#8b5cf6' : '#555566' }}>{saved ? 'Saved' : 'Save'}</span>
+
+        {/* Header with close */}
+        <div className="flex items-center justify-between px-4 py-2" style={{ borderBottom: '1px solid #1e1e2a' }}>
+          <h3 className="text-base font-bold text-white">
+            Comments{comments.length > 0 ? ` · ${comments.length}` : ''}
+          </h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#1a1a24' }}>
+            <X size={16} style={{ color: '#888899' }} />
           </button>
         </div>
+
+        {/* Post mini-header */}
+        <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: '1px solid #1a1a24' }}>
+          <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0" style={{ background: coverBackground(post.id) }}>
+            {post.image && <img src={postImageUrl(post.image, 480)} alt="" className="w-full h-full object-cover" loading="lazy" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-white truncate">@{post.user.username}</p>
+            <p className="text-xs mt-0.5 line-clamp-2 leading-snug" style={{ color: '#888899' }}>{post.caption}</p>
+          </div>
+          {/* Quick actions */}
+          <div className="flex gap-3 flex-shrink-0">
+            <button
+              onClick={() => { likePost(post); }}
+              className="flex flex-col items-center gap-0.5"
+            >
+              <Star
+                size={22}
+                fill={liked ? '#f59e0b' : 'none'}
+                style={{ color: liked ? '#f59e0b' : '#888899' }}
+                className={liked ? 'heart-pop' : ''}
+              />
+              <span className="text-xs" style={{ color: liked ? '#f59e0b' : '#555566' }}>{liked ? 'Loved' : 'Like'}</span>
+            </button>
+            <button
+              onClick={() => {
+                savePost(post);
+                if (!saved) addToast('Saved to collection', 'success', '🔖');
+              }}
+              className="flex flex-col items-center gap-0.5"
+            >
+              <Heart
+                size={22}
+                fill={saved ? '#8b5cf6' : 'none'}
+                style={{ color: saved ? '#8b5cf6' : '#888899' }}
+              />
+              <span className="text-xs" style={{ color: saved ? '#8b5cf6' : '#555566' }}>{saved ? 'Saved' : 'Save'}</span>
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Comments list */}
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      {/* Comments list. overscrollBehavior is 'none' rather than 'contain'
+          because 'contain' still lets iOS rubber-band the list itself, which
+          would fight the sheet over the same downward pull. */}
+      <div
+        ref={listRef}
+        onPointerDown={onListPointerDown}
+        onPointerMove={onListPointerMove}
+        onPointerUp={endPan}
+        onPointerCancel={endPan}
+        className="flex-1 overflow-y-auto px-4 py-3"
+        style={{ overscrollBehavior: 'none' }}
+      >
         {loading && (
           <div className="flex items-center justify-center gap-2 py-8">
             <Loader2 size={16} className="animate-spin" style={{ color: '#8b5cf6' }} />
