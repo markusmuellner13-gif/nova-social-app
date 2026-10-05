@@ -18,6 +18,7 @@ import { enforceRealImages } from './realImage';
 import { fetchCommonsImagesByWikidata } from './wikipedia';
 import { placesBudgetExceeded, notePlacesCall } from '@/lib/placesBudget';
 import { upstreamPaused, pauseUpstream } from '@/lib/sourceBreaker';
+import { cacheGet, cacheSet } from '@/lib/serverCache';
 import { dropIncompletePosts } from '@/lib/postQuality';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,6 +176,14 @@ export async function fetchSitePhoto(website: string, timeoutMs = 3500): Promise
 
 const placePhotoCache = new Map<string, string | null>();
 
+// Shared (Redis) memory of Places answers. A found photo is kept 7 days —
+// Google's terms only allow caching Places content short-term, and a venue's
+// best photo does change. 'No photo' is kept 14 days: it is our own conclusion,
+// and venues without a Google photo rarely gain one quickly.
+const PLACE_PHOTO_PREFIX = 'nova:placephoto:v1:';
+const PLACE_PHOTO_HIT_TTL_S = 7 * 24 * 60 * 60;
+const PLACE_PHOTO_MISS_TTL_S = 14 * 24 * 60 * 60;
+
 // Google disabled the LEGACY Places endpoints for projects created after
 // March 2025, so a recently-issued key gets REQUEST_DENIED from
 // `findplacefromtext` while looking perfectly valid. Production has a key and
@@ -299,14 +308,33 @@ export async function lookupPlace(query: string): Promise<PlaceLookup | null> {
   }
 }
 
-async function placesNewPhoto(name: string, lat: number, lng: number, key: string): Promise<string | null> {
+// The cheap path to a venue's photo. Google bills Places (New) by the fields a
+// request asks for, and these three steps are priced very differently
+// (developers.google.com/maps/billing-and-pricing/pricing, checked 2026-10-05):
+//
+//   1. Text Search, field mask `places.id`      → "Essentials (IDs Only)": free, unlimited
+//   2. Place Details, field mask `photos`       → "Essentials (IDs Only)": free, unlimited
+//   3. Photo media (`/media?skipHttpRedirect`)  → "Place Details Photos": 1,000/month free, then $7/1,000
+//
+// This used to be ONE Text Search with mask `places.id,places.photos` — which
+// bills as Text Search *Pro* ($32/1,000 after 5,000/month) just for asking about
+// photos. Splitting it costs one extra fast round trip and makes every lookup
+// free except the photo itself — which is only fetched when there is one, and
+// is the only step the daily budget counts.
+type PlacesPhotoResult =
+  | { kind: 'photo'; uri: string }
+  | { kind: 'none' }        // Google answered: no such place, or no photos — safe to remember
+  | { kind: 'unknown' };    // error, timeout or budget — try again another time
+
+async function placesNewPhoto(name: string, lat: number, lng: number, key: string): Promise<PlacesPhotoResult> {
   const searchRes = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': key,
       // The New API returns NOTHING without a field mask — it is not optional.
-      'X-Goog-FieldMask': 'places.id,places.photos',
+      // `places.id` alone keeps this on the free IDs-only SKU.
+      'X-Goog-FieldMask': 'places.id',
     },
     body: JSON.stringify({
       textQuery: name,
@@ -318,20 +346,37 @@ async function placesNewPhoto(name: string, lat: number, lng: number, key: strin
   if (!searchRes.ok) {
     warnPlaces('searchText', `HTTP ${searchRes.status} ${(await searchRes.text().catch(() => '')).slice(0, 200)}`);
     // 403 here is the same class of fault as the legacy REQUEST_DENIED: the key
-    // is not authorised for the Places API (New). Hammering it costs 3.5s per
-    // post and cannot succeed until the key is fixed.
+    // is not authorised for the Places API (New) — or billing is off. Hammering
+    // it costs 3.5s per post and cannot succeed until someone fixes the account.
     if (searchRes.status === 403) {
       await pauseUpstream(
         NEW_BREAKER, NEW_DENIED_PAUSE_S,
-        'Places (New) HTTP 403 — enable "Places API (New)" for the key in Google Cloud Console',
+        'Places (New) HTTP 403 — enable "Places API (New)" for the key (and billing) in Google Cloud Console',
       );
     }
-    return null;
+    return { kind: 'unknown' };
   }
-  const data = await searchRes.json() as { places?: { photos?: { name?: string }[] }[] };
-  const photoName = data.places?.[0]?.photos?.[0]?.name;
-  if (!photoName) return null;
-  return placesNewPhotoUri(photoName, key);
+  const found = await searchRes.json() as { places?: { id?: string }[] };
+  const placeId = found.places?.[0]?.id;
+  if (!placeId) return { kind: 'none' };
+
+  const detailsRes = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
+    headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'photos' },
+    signal: AbortSignal.timeout(3500),
+  });
+  if (!detailsRes.ok) {
+    warnPlaces('details', `HTTP ${detailsRes.status} ${(await detailsRes.text().catch(() => '')).slice(0, 200)}`);
+    return { kind: 'unknown' };
+  }
+  const details = await detailsRes.json() as { photos?: { name?: string }[] };
+  const photoName = details.photos?.[0]?.name;
+  if (!photoName) return { kind: 'none' };
+
+  // Only now does anything cost money — so only now does the budget apply.
+  if (await placesBudgetExceeded()) return { kind: 'unknown' };
+  await notePlacesCall();
+  const uri = await placesNewPhotoUri(photoName, key);
+  return uri ? { kind: 'photo', uri } : { kind: 'unknown' };
 }
 
 async function placesLegacyPhoto(name: string, lat: number, lng: number, key: string): Promise<string | null> {
@@ -373,20 +418,40 @@ export async function fetchGooglePlacePhoto(name: string, lat: number, lng: numb
   if (!key) return null;
   const cacheKey = `${name}|${lat.toFixed(3)}|${lng.toFixed(3)}`;
   if (placePhotoCache.has(cacheKey)) return placePhotoCache.get(cacheKey) ?? null;
-  if (await placesBudgetExceeded()) return null;
 
-  let result: string | null = null;
+  // Remembered app-wide, not just inside one server instance. The in-memory
+  // map above dies with every cold start, so the same photoless venues used to
+  // be looked up again and again — that is how a 150/day budget was gone three
+  // hours into the day. A definite answer (photo, or 'Google has none') is now
+  // kept in Redis, so the budget goes to venues nobody has asked about yet.
+  const sharedKey = PLACE_PHOTO_PREFIX + cacheKey;
+  const remembered = await cacheGet<{ u: string }>(sharedKey);
+  if (remembered) {
+    const uri = remembered.u || null;
+    placePhotoCache.set(cacheKey, uri);
+    return uri;
+  }
+  if (await placesBudgetExceeded()) return null;   // not remembered: retry after the reset
+
+  let answer: PlacesPhotoResult = { kind: 'unknown' };
   try {
-    await notePlacesCall();
     if (!(await upstreamPaused(NEW_BREAKER))) {
-      result = await placesNewPhoto(name, lat, lng, key);
+      answer = await placesNewPhoto(name, lat, lng, key);
     }
-    if (!result) result = await placesLegacyPhoto(name, lat, lng, key).catch(() => null);
+    if (answer.kind === 'unknown' && !legacyDisabledByEnv() && !(await placesBudgetExceeded())) {
+      await notePlacesCall();   // the legacy path bills for its lookup either way
+      const legacy = await placesLegacyPhoto(name, lat, lng, key).catch(() => null);
+      if (legacy) answer = { kind: 'photo', uri: legacy };
+    }
   } catch (err) {
     warnPlaces('fetch', String(err).slice(0, 200));
   }
-  placePhotoCache.set(cacheKey, result);
-  return result;
+
+  if (answer.kind === 'unknown') return null;   // a failure says nothing about the venue
+  const uri = answer.kind === 'photo' ? answer.uri : null;
+  placePhotoCache.set(cacheKey, uri);
+  await cacheSet(sharedKey, { u: uri ?? '' }, uri ? PLACE_PHOTO_HIT_TTL_S : PLACE_PHOTO_MISS_TTL_S);
+  return uri;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

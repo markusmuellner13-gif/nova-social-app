@@ -1,19 +1,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Google Places spend guardrail (real venue photos).
 //
-// A Place Photo lookup costs money: a Find-Place call (~$0.017) + a Photo call
-// (~$0.007) ≈ $0.024 per UNIQUE venue (Google also grants ~$200/month free, so
-// the first ~8,000 lookups/month are free). Because the feed and DB cache their
-// results, the number of *unique* lookups is bounded — but a big ingestion sweep
-// or a traffic spike could still run it up. This is a soft daily cap: once
-// PLACES_DAILY_BUDGET photo lookups have been made in a UTC day, we stop calling
-// Places and fall back to the free photo sources (OSM image tags → og:image →
-// stock), so cost can never surprise you.
+// What a venue photo costs (Places API New, prices checked 2026-10-05):
+//   • finding the place (Text Search, IDs only)       — free, unlimited
+//   • asking for its photos (Place Details, IDs only) — free, unlimited
+//   • downloading the photo (Place Details Photos)    — 1,000/month free, then $7 per 1,000
+// So this caps the ONE billed step: photo downloads per UTC day. Lookups that
+// end in "no photo" cost nothing and aren't counted, and every answer is
+// remembered in Redis for days (venuePhoto.ts), so the budget goes to new
+// venues only. Once it's used up, Places is skipped until the reset and posts
+// fall back to the free photo sources (OSM tags, Wikidata, the venue's site).
 //
-// Backed by the atomic Redis counter (resets daily). FULLY GATED:
-//   • no PLACES_DAILY_BUDGET env → no cap (unchanged behaviour)
-//   • no Redis configured        → no cap (can't count, so never blocks)
-//   • no GOOGLE_PLACES_API_KEY   → Places is never called anyway
+// Backed by the atomic Redis counter (resets daily). Without Redis there is
+// nothing to count with, so it never blocks. No GOOGLE_PLACES_API_KEY → Places
+// is never called anyway.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { cacheGet, cacheIncr } from '@/lib/serverCache';
@@ -28,10 +28,11 @@ function todayKey(): string {
 // the one default a production app must never have. The cap applies by DEFAULT
 // and the env var only moves it.
 //
-// 150/day ≈ 4,500 lookups/month, which sits just inside Google's free Text
-// Search allowance. Raising it is a deliberate decision to spend money; setting
-// it to 0 disables the cap entirely.
-const DEFAULT_DAILY_BUDGET = 150;
+// 100 photos/day ≈ 3,000/month: ~1,000 inside Google's free allowance, at most
+// ~2,000 billed ≈ $14/month worst case — in practice far less, because each
+// venue's photo is fetched once and then remembered. Raising it is a
+// deliberate decision to spend money; 0 disables the cap entirely.
+const DEFAULT_DAILY_BUDGET = 100;
 
 function budget(): number {
   const raw = (process.env.PLACES_DAILY_BUDGET ?? '').trim();

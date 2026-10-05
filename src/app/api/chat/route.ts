@@ -4,6 +4,7 @@ import { answerTrip, answerFromLive } from '@/lib/brain/assistant';
 import type { ApiPost } from '@/lib/sources/shared';
 import { resolveRequestGeo } from '@/lib/sources/geocode';
 import { appOrigin } from '@/lib/appOrigin';
+import { aiSpendExceeded, recordAiSpend } from '@/lib/aiBudget';
 
 const SYSTEM_PROMPT = `You are Nova's AI assistant — a hyper-local event and activity discovery expert built into the Nova social discovery app.
 
@@ -124,8 +125,9 @@ export async function POST(request: NextRequest) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   const locationContext = resolvedCity ? `The user is currently in ${resolvedCity}, ${country || ''}.` : 'User location unknown.';
 
-  // No DB match and no LLM key → still give a useful, honest answer for free.
-  if (!apiKey) {
+  // No DB match and no LLM key — or today's AI spend cap (lib/aiBudget) is
+  // reached — → still give a useful, honest answer for free.
+  if (!apiKey || await aiSpendExceeded()) {
     const cityHint = resolvedCity ? ` in ${resolvedCity}` : '';
     return NextResponse.json({
       reply: `Our live listings${cityHint} are still growing — I don't have a match for that yet. Try browsing the **Events tab** for what's on nearby, or ask me something like:\n• "Best rooftop bars${cityHint}?"\n• "Any markets this weekend?"\n• "Live music spots${cityHint}?" 🎉`,
@@ -153,6 +155,7 @@ export async function POST(request: NextRequest) {
     if (!res.ok) throw new Error(`API ${res.status}`);
 
     const data = await res.json();
+    await recordAiSpend(data.usage);
     const reply: string = data.content?.[0]?.text ?? "I couldn't find anything right now. Try again shortly!";
 
     return NextResponse.json({ reply });
