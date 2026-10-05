@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseColor, tintColor, tintDeep, paletteColor } from './mapTheme';
+import { parseColor, tintColor, tintDeep, paletteColor, fanOutStacked } from './mapTheme';
 
 const NEUTRAL = { saturation: 0, contrast: 0, hueRotate: 0, brightness: 1 };
 
@@ -60,5 +60,22 @@ describe('paletteColor', () => {
   it('never repaints labels, and is off without a palette', () => {
     expect(paletteColor('minecraft', 'water_name', 'symbol')).toBeUndefined();
     expect(paletteColor(undefined, 'water', 'fill')).toBeUndefined();
+  });
+});
+
+describe('fanOutStacked', () => {
+  it('leaves lone pins exactly where they are', () => {
+    expect(fanOutStacked([{ lat: 48.2, lng: 16.37 }, { lat: 48.3, lng: 16.4 }]))
+      .toEqual([[16.37, 48.2], [16.4, 48.3]]);
+  });
+
+  it('spreads pins sharing one point into a ring a few dozen metres wide', () => {
+    const out = fanOutStacked(Array.from({ length: 6 }, () => ({ lat: 48.2, lng: 16.37 })));
+    expect(new Set(out.map(p => p.join())).size).toBe(6);
+    for (const [lng, lat] of out) {
+      const m = Math.hypot((lat - 48.2) * 111_320, (lng - 16.37) * 111_320 * Math.cos(48.2 * Math.PI / 180));
+      expect(m).toBeGreaterThan(40);
+      expect(m).toBeLessThan(170);
+    }
   });
 });
