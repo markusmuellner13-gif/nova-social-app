@@ -39,7 +39,7 @@ Der Nutzer ist Einsteiger. Erkläre jede Sicherheitsänderung in einem einfachen
 - **Das Middleware-Limit schützt NUR Novas eigene `/api/*`-Routen.** Die Supabase-
   REST-API ist mit dem öffentlichen Anon-Key direkt erreichbar. Grenzen, die
   immer gelten müssen, gehören in die Datenbank: RLS-Policies, Längen-CHECKs und
-  der Trigger `enforce_user_write_rate` (Migration `009_abuse_limits.sql`).
+  der Trigger `enforce_user_write_rate` (Migration `009_abuse_limits.sql`, in Produktion seit 2026-10-05).
   Jede neue Tabelle, in die Nutzer schreiben, bekommt RLS, Längen-CHECKs und
   diesen Trigger.
 - **Login-Versuche:** zusätzlich Sperre pro Konto mit wachsender Wartezeit
@@ -73,6 +73,6 @@ Der Nutzer ist Einsteiger. Erkläre jede Sicherheitsänderung in einem einfachen
 
 - `npx tsc --noEmit`, `npx vitest run`, `npx eslint .` (Basis: 0 Fehler, 41 Warnungen).
 - Nach Datenbank-Änderungen die Supabase-Advisors prüfen. Bekannt und unkritisch:
-  `handle_new_user` / `prevent_username_change` (Trigger-Funktionen, nicht direkt
+  `handle_new_user` / `prevent_username_change` / `enforce_user_write_rate` (Trigger-Funktionen, nicht direkt
   aufrufbar) und `username_available` (absichtlich öffentlich für die Registrierung).
 - Migrationen nie ungefragt auf die Produktionsdatenbank anwenden.
