@@ -69,18 +69,30 @@ export default function SearchTab() {
   // globe that genuinely has no pins can say WHY ("couldn't reach the live map")
   // instead of sitting there claiming "0 live events", which reads as broken.
   const [mapState, setMapState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  // This tab now stays mounted for the whole session, so one failed load would
+  // have meant no pins (globe AND Navigate map) until the app was reopened —
+  // a couple of spaced retries cover a database that was briefly busy.
   useEffect(() => {
     let cancelled = false;
-    fetch(apiUrl('/api/map'))
-      .then(res => (res.ok ? res.json() : null))
-      .then((data: { posts?: Post[] } | null) => {
-        if (cancelled) return;
-        const real = data?.posts ?? [];
-        if (real.length > 0) { setMapPosts(real); setMapState('ready'); }
-        else setMapState('unavailable');
-      })
-      .catch(() => { if (!cancelled) setMapState('unavailable'); });
-    return () => { cancelled = true; };
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const RETRY_DELAYS_MS = [4_000, 15_000];
+    const load = (attempt: number) => {
+      fetch(apiUrl('/api/map'))
+        .then(res => (res.ok ? res.json() : null))
+        .then((data: { posts?: Post[] } | null) => {
+          if (cancelled) return;
+          const real = data?.posts ?? [];
+          if (real.length > 0) { setMapPosts(real); setMapState('ready'); return; }
+          throw new Error('empty');
+        })
+        .catch(() => {
+          if (cancelled) return;
+          if (attempt < RETRY_DELAYS_MS.length) timer = setTimeout(() => load(attempt + 1), RETRY_DELAYS_MS[attempt]);
+          else setMapState('unavailable');
+        });
+    };
+    load(0);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, []);
 
   // Fetch location-specific "Hot Right Now" posts whenever the city changes
@@ -125,6 +137,26 @@ export default function SearchTab() {
   const globeFocus = useMemo(
     () => (focusLat !== null && focusLng !== null ? { lat: focusLat, lng: focusLng } : null),
     [focusLat, focusLng],
+  );
+
+  // The Navigate map: the user's own local posts first (Hot in <city>), then
+  // the worldwide sample. The sample is the 450 most popular events on Earth,
+  // so on its own a city-level map often had no pin in view at all.
+  const navPosts = useMemo(() => {
+    const seen = new Set<string>();
+    return [...localHotPosts, ...globePosts].filter(p => {
+      if (!p.location || seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    });
+  }, [localHotPosts, globePosts]);
+  // The map's blue dot and fallback route origin need the precise position,
+  // not the ~1 km-rounded one the globe spins to.
+  const exactLat = location?.lat;
+  const exactLng = location?.lng;
+  const navUserLocation = useMemo(
+    () => (typeof exactLat === 'number' && typeof exactLng === 'number' ? { lat: exactLat, lng: exactLng } : null),
+    [exactLat, exactLng],
   );
 
   // Search pool: only real posts for the user's area
@@ -369,8 +401,8 @@ export default function SearchTab() {
       {/* Full-screen map + in-app navigation */}
       {showNav && (
         <NavMap
-          posts={globePosts}
-          userLocation={globeFocus}
+          posts={navPosts}
+          userLocation={navUserLocation}
           initialTarget={navTarget}
           onClose={() => setShowNav(false)}
         />

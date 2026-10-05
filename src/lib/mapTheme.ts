@@ -129,3 +129,35 @@ export function paletteColor(palette: string | undefined, layerId: string, layer
   for (const [re, color] of rules) if (re.test(layerId)) return color;
   return undefined;
 }
+
+// ── Stacked pins ─────────────────────────────────────────────────────────────
+// Many crawled events only know their CITY, so they arrive carrying the city
+// centre's coordinates — a dozen pins on one exact point, of which only the top
+// one can ever be tapped. Pins that share a point are fanned out into a small
+// ring around it so each is reachable. Display only: routing still goes to the
+// post's own stored coordinates.
+
+/** [lng, lat] display positions, one per input point, same order. */
+export function fanOutStacked(points: { lat: number; lng: number }[]): [number, number][] {
+  const groups = new Map<string, number[]>();
+  points.forEach((p, i) => {
+    const key = `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`;
+    const g = groups.get(key);
+    if (g) g.push(i); else groups.set(key, [i]);
+  });
+  const out: [number, number][] = points.map(p => [p.lng, p.lat]);
+  for (const idxs of groups.values()) {
+    if (idxs.length < 2) continue;
+    const { lat, lng } = points[idxs[0]];
+    // Ring radius grows with the crowd so neighbours don't overlap, capped so
+    // a big stack never wanders off into another neighbourhood.
+    const radiusM = Math.min(160, 30 + idxs.length * 6);
+    const dLat = radiusM / 111_320;
+    const dLng = radiusM / (111_320 * Math.max(0.2, Math.cos((lat * Math.PI) / 180)));
+    idxs.forEach((idx, k) => {
+      const a = (2 * Math.PI * k) / idxs.length;
+      out[idx] = [lng + dLng * Math.cos(a), lat + dLat * Math.sin(a)];
+    });
+  }
+  return out;
+}

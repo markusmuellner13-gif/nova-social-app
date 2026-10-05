@@ -5,7 +5,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { X, Layers, Navigation, Volume2, VolumeX, LocateFixed, Car, Footprints, Flag, Palette } from 'lucide-react';
 import { Post, Category } from '@/types';
-import { tintDeep, paletteColor, COLOR_PAINT_PROPS } from '@/lib/mapTheme';
+import { tintDeep, paletteColor, fanOutStacked, COLOR_PAINT_PROPS } from '@/lib/mapTheme';
 import { getPosition, watchPosition, geolocationAvailable, type GeoWatch } from '@/lib/geolocate';
 
 // ── Navigation themes ─────────────────────────────────────────────────────────
@@ -267,6 +267,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
             .map(x => x.p);
 
       pinPostsRef.current = nearbyPosts;
+      const pinPositions = fanOutStacked(nearbyPosts.map(p => p.location!));
       map.addSource('pins', {
         type: 'geojson',
         data: {
@@ -274,7 +275,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
           features: nearbyPosts.map((p, i) => ({
             type: 'Feature' as const,
             id: i,
-            geometry: { type: 'Point' as const, coordinates: [p.location!.lng, p.location!.lat] },
+            geometry: { type: 'Point' as const, coordinates: pinPositions[i] },
             properties: {
               idx: i,
               color: CATEGORY_COLOR[p.category] ?? '#8b5cf6',
