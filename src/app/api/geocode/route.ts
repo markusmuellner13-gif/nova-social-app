@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cacheGet, cacheSet } from '@/lib/serverCache';
+import { cacheGet, cacheSet, cacheIncr } from '@/lib/serverCache';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // City autocomplete proxy.
@@ -44,6 +44,9 @@ export interface GeocodeCity {
 const METRO_LOCAL_KM = 22;
 const TOWN_LOCAL_KM  = 16;
 
+// Just under Nominatim's "max 1 request/second" policy, app-wide.
+const NOMINATIM_PER_MINUTE = 50;
+
 export async function GET(request: NextRequest) {
   const raw = (new URL(request.url).searchParams.get('q') || '').trim();
   const q = raw.slice(0, 80);
@@ -53,6 +56,18 @@ export async function GET(request: NextRequest) {
   const cached = await cacheGet<GeocodeCity[]>(cacheKey);
   if (cached) {
     return NextResponse.json({ results: cached }, { headers: { 'x-nova-cache': 'HIT' } });
+  }
+
+  // App-wide ceiling on calls to Nominatim. Its usage policy allows ~1 request
+  // a second for the WHOLE app, and every server instance shares the same few
+  // outbound addresses — so many visitors searching at once (or a botnet doing
+  // it on purpose) could get Nova banned from Nominatim, breaking city search
+  // for everyone. Over the ceiling, answer "nothing found right now" and do not
+  // cache that, so the search works again a moment later.
+  const minute = Math.floor(Date.now() / 60_000);
+  const callsThisMinute = await cacheIncr(`nova:geocode:upstream:${minute}`, 120);
+  if (callsThisMinute !== null && callsThisMinute > NOMINATIM_PER_MINUTE) {
+    return NextResponse.json({ results: [], busy: true }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
   let data: NominatimResult[] = [];

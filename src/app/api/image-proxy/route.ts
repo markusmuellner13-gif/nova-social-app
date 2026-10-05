@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { lookup } from 'node:dns/promises';
 import sharp from 'sharp';
 import { upgradeImageUrl, IMAGE_WIDTHS } from '@/lib/imageUrl';
+import { cacheIncr } from '@/lib/serverCache';
 
 // sharp is a native module — this route must run on Node, not the edge runtime.
 export const runtime = 'nodejs';
@@ -131,7 +132,81 @@ function upstreamFailure(status: number): NextResponse {
   return failure(502, `Upstream ${status}`, RETRY_TTL);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Abuse limits
+//
+// The edge cache absorbs normal traffic, so this function only runs on a cache
+// MISS — and a miss is the expensive case: download up to 20 MB, decode, resize.
+// The cache key is the full URL, so junk query parameters (or a junk suffix on
+// the image address) would make every request a miss and turn this into a
+// free-to-call, paid-for-by-Nova resizing service. Middleware's 600/min/IP asset
+// tier is sized for cached hits; these limits are sized for real renders:
+//
+//   • only `url` and `w` are accepted — nothing else can vary the cache key;
+//   • RENDERS_PER_IP_PER_MIN renders per address per minute;
+//   • RENDERS_PER_DAY renders app-wide per UTC day (a botnet-proof ceiling).
+//
+// Over a limit, the answer is an uncached 429 and the card shows its designed
+// cover — the app degrades, the bill doesn't grow.
+// ─────────────────────────────────────────────────────────────────────────────
+const ALLOWED_PARAMS = new Set(['url', 'w']);
+const RENDERS_PER_IP_PER_MIN = 240;
+const RENDERS_PER_DAY = 100_000;
+const MAX_REDIRECTS = 3;
+
+function busy(reason: string): NextResponse {
+  return new NextResponse(reason, {
+    status: 429,
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'X-Nova-Proxy-Reason': reason,
+      // Never cache a throttle at the edge: it would blank this photo for
+      // every other viewer too.
+      'Cache-Control': 'no-store',
+      'Retry-After': '60',
+    },
+  });
+}
+
+async function renderAllowed(req: NextRequest): Promise<string | null> {
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
+  const minute = Math.floor(Date.now() / 60_000);
+  const day = new Date().toISOString().slice(0, 10);
+  const [perIp, perDay] = await Promise.all([
+    cacheIncr(`nova:imgrender:ip:${ip}:${minute}`, 120),
+    cacheIncr(`nova:imgrender:day:${day}`, 60 * 60 * 26),
+  ]);
+  // No Redis → cannot count; the middleware tier still applies.
+  if (perIp !== null && perIp > RENDERS_PER_IP_PER_MIN) return 'Too many image renders from this address';
+  if (perDay !== null && perDay > RENDERS_PER_DAY) return 'Daily image render budget reached';
+  return null;
+}
+
+/**
+ * fetch() with redirects followed BY HAND, so every hop is held to the same
+ * rule as the first: https and a public address. With `redirect: 'follow'` a
+ * public URL could bounce the request to an internal one (SSRF) after the
+ * first check had already passed.
+ */
+async function fetchPublic(start: URL, init: RequestInit): Promise<Response | 'blocked'> {
+  let url = start;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const res = await fetch(url.toString(), { ...init, headers: upstreamHeaders(url), redirect: 'manual' });
+    if (res.status < 300 || res.status >= 400) return res;
+    const location = res.headers.get('location');
+    if (!location) return res;
+    let next: URL;
+    try { next = new URL(location, url); } catch { return 'blocked'; }
+    if (next.protocol !== 'https:' || !(await isPublicHost(next.hostname))) return 'blocked';
+    url = next;
+  }
+  return 'blocked';
+}
+
 export async function GET(req: NextRequest) {
+  for (const key of req.nextUrl.searchParams.keys()) {
+    if (!ALLOWED_PARAMS.has(key)) return failure(400, 'Unexpected parameter', GONE_TTL);
+  }
   const raw = req.nextUrl.searchParams.get('url');
   if (!raw) return failure(400, 'Missing url param', GONE_TTL);
 
@@ -154,14 +229,18 @@ export async function GET(req: NextRequest) {
     ? IMAGE_WIDTHS.reduce((best, w) => (Math.abs(w - wantedRaw) < Math.abs(best - wantedRaw) ? w : best), IMAGE_WIDTHS[0])
     : DEFAULT_WIDTH;
 
+  // Everything above is cheap validation; from here on it costs real work.
+  const throttled = await renderAllowed(req);
+  if (throttled) return busy(throttled);
+
   let upstream: Response;
   try {
-    upstream = await fetch(target.toString(), {
-      headers: upstreamHeaders(target),
-      redirect: 'follow',
+    const res = await fetchPublic(target, {
       signal: AbortSignal.timeout(12_000),
       next: { revalidate: 86400 },
     });
+    if (res === 'blocked') return failure(403, 'Redirect to a non-public address', GONE_TTL);
+    upstream = res;
   } catch {
     // Timeout, DNS failure, connection reset — we never heard back at all.
     return retryOriginal(raw, upgraded, width, null);
@@ -215,10 +294,10 @@ async function retryOriginal(
   if (target.protocol !== 'https:') return failure(400, 'HTTPS only', GONE_TTL);
   if (!(await isPublicHost(target.hostname))) return failure(403, 'Host not allowed', GONE_TTL);
   try {
-    const res = await fetch(target.toString(), {
-      headers: upstreamHeaders(target), redirect: 'follow',
+    const res = await fetchPublic(target, {
       signal: AbortSignal.timeout(12_000), next: { revalidate: 86400 },
     });
+    if (res === 'blocked') return failure(403, 'Redirect to a non-public address', GONE_TTL);
     if (!res.ok) return upstreamFailure(res.status);
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.byteLength > MAX_BYTES) return failure(413, 'Image too large', GONE_TTL);

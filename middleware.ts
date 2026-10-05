@@ -39,7 +39,7 @@ const TIER_LIMITS: Record<Tier, number> = {
   // route, which tracks the account being attacked rather than the IP doing it.
   login: 20,
   ai:    20,   // /api/chat, /api/feed, /api/events — paid upstreams
-  write: 15,   // /api/business/checkout, /api/account/*, /api/push/* — mutations
+  write: 15,   // /api/business/checkout, /api/account/*, /api/push/*, /api/brain/* — mutations
   read:  60,   // /api/geocode, /api/track, /api/sponsored — cheap
   // /api/image-proxy serves the photos themselves: one feed screen is dozens of
   // requests and a scroll session is hundreds, all idempotent and served from the
@@ -77,7 +77,11 @@ function tierFor(pathname: string): Tier {
   if (
     pathname.startsWith('/api/business') ||
     pathname.startsWith('/api/account') ||
-    pathname.startsWith('/api/push')
+    pathname.startsWith('/api/push') ||
+    // Trains the SHARED ranking model. The app batches feedback and sends it at
+    // most every ~15s, so the write tier costs real users nothing while cutting
+    // how fast anyone could feed it fake samples to skew everyone's feed.
+    pathname.startsWith('/api/brain')
   ) return 'write';
   return 'read';
 }

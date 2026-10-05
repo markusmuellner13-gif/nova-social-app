@@ -13,6 +13,25 @@ const admin: SupabaseClient | null = url && serviceKey
 
 export const socialServerEnabled = admin !== null;
 
+/**
+ * The signed-in user behind a request, verified with Supabase — never taken
+ * from the request body. Reads `Authorization: Bearer <access token>`; returns
+ * null when there is no token, it is invalid or expired, or the server has no
+ * service key. Anything that acts on a user's private data with the service
+ * role (which bypasses RLS) must get the user id from here.
+ */
+export async function verifiedUserId(authorization: string | null): Promise<string | null> {
+  if (!admin || !authorization) return null;
+  const token = authorization.replace(/^Bearer\s+/i, '').trim();
+  if (!token || token.length > 4096) return null;
+  try {
+    const { data, error } = await admin.auth.getUser(token);
+    return error || !data.user ? null : data.user.id;
+  } catch {
+    return null;
+  }
+}
+
 export interface FriendGoingEvent {
   friendName: string;
   title: string;
