@@ -4,6 +4,9 @@
 
 import { ApiPost, makeUser, fetchOgImage, proxyImage } from './shared';
 import { upstreamPaused, pauseUpstream, retryAfterSeconds } from '@/lib/sourceBreaker';
+import { aiSpendExceeded, recordAiSpend, type ClaudeUsage } from '@/lib/aiBudget';
+import { cacheGet, cacheSet } from '@/lib/serverCache';
+import { createHash } from 'node:crypto';
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -68,10 +71,32 @@ function pauseForResponse(status: number, body: string, res: Response): { second
   return null;
 }
 
-async function callClaude(prompt: string, apiKey: string, maxTokens: number, timeoutMs = 7000, tools?: unknown[]): Promise<string> {
+// How long an identical request is answered from Redis instead of Anthropic.
+// Rewrites of a fixed list of names are stable for a week; a web search for
+// "what's on" goes stale faster (its prompt also carries today's date, so it
+// changes daily anyway).
+const REWRITE_CACHE_TTL_S = 7 * 24 * 60 * 60;
+const SEARCH_CACHE_TTL_S = 12 * 60 * 60;
+const RESPONSE_CACHE_PREFIX = 'nova:ai:resp:v1:';
+
+async function callClaude(
+  prompt: string, apiKey: string, maxTokens: number, timeoutMs = 7000, tools?: unknown[],
+  cacheTtlS = REWRITE_CACHE_TTL_S,
+): Promise<string> {
+  // The same question costs once. Feed requests, the ingest cron and several
+  // server instances used to pay separately for identical prompts.
+  const cacheKey = RESPONSE_CACHE_PREFIX + createHash('sha256')
+    .update(JSON.stringify([MODEL, maxTokens, tools ?? null, prompt]))
+    .digest('hex');
+  const cached = await cacheGet<string>(cacheKey);
+  if (cached) return cached;
+
   // Fail fast rather than slowly. This is the single change that stops a dead
   // API key from eating the ingest cron's entire time budget.
   if (await upstreamPaused(BREAKER)) throw new ClaudeUnavailableError();
+  // The daily dollar cap (lib/aiBudget). Same exception as an open breaker,
+  // because callers already fall back to the free sources on it.
+  if (await aiSpendExceeded()) throw new ClaudeUnavailableError('daily AI spend cap reached');
 
   const res = await fetch(ANTHROPIC_URL, {
     method: 'POST',
@@ -90,8 +115,12 @@ async function callClaude(prompt: string, apiKey: string, maxTokens: number, tim
     if (pause) await pauseUpstream(BREAKER, pause.seconds, pause.reason);
     throw new Error(`Claude ${res.status}: ${body.slice(0, 400)}`);
   }
-  const d = await res.json() as { content?: { type: string; text?: string }[] };
-  return d.content?.filter(b => b.type === 'text').map(b => b.text ?? '').join('') ?? '';
+  const d = await res.json() as { content?: { type: string; text?: string }[]; usage?: ClaudeUsage };
+  await recordAiSpend(d.usage);
+  const text = d.content?.filter(b => b.type === 'text').map(b => b.text ?? '').join('') ?? '';
+  // Only a usable answer is worth keeping — every caller needs a JSON array.
+  if (/\[[\s\S]*\]/.test(text)) await cacheSet(cacheKey, text, cacheTtlS);
+  return text;
 }
 
 export async function enrichEventDescriptions(
@@ -233,7 +262,7 @@ IMPORTANT: Only include events you confirmed exist via web search. Do not invent
 Return only the raw JSON array, no markdown, no extra text.`;
 
   const text = await callClaude(prompt, apiKey, 8000, timeoutMs,
-    [{ type: 'web_search_20250305', name: 'web_search', max_uses: 4 }]);
+    [{ type: 'web_search_20250305', name: 'web_search', max_uses: 4 }], SEARCH_CACHE_TTL_S);
   const match = text.match(/\[[\s\S]*\]/);
   if (!match) return [];
 

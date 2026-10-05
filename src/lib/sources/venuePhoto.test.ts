@@ -171,12 +171,14 @@ describe('Google Places legacy fallback', () => {
     else process.env.GOOGLE_PLACES_LEGACY = LEGACY_BEFORE;
   });
 
-  // Modern API answers, finds nothing → the legacy fallback is tried.
+  // The modern API FAILS (a 500 — not a 403, which would pause it) → the
+  // legacy fallback is tried. When the modern API answers "no such place",
+  // legacy is not asked at all: both read the same Places database.
   function stubFetch(legacyStatus: string) {
     return vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('places.googleapis.com')) {
-        return { ok: true, status: 200, json: async () => ({ places: [] }), text: async () => '{}' } as unknown as Response;
+        return { ok: false, status: 500, json: async () => ({}), text: async () => 'backend error' } as unknown as Response;
       }
       return {
         ok: true, status: 200,
@@ -222,5 +224,69 @@ describe('Google Places legacy fallback', () => {
     const lines = log.mock.calls.map(c => c.join(' ')).join('\n');
     expect(lines).toContain('REQUEST_DENIED');
     expect(lines).toContain('Google Cloud Console');
+  });
+
+  it('does not ask legacy when the modern API says there is no such place', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation((async () =>
+      ({ ok: true, status: 200, json: async () => ({ places: [] }), text: async () => '{}' }) as unknown as Response) as typeof fetch);
+    expect(await fetchGooglePlacePhoto(venue(), 48.2, 16.37)).toBeNull();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Places pricing. Text Search with only `places.id`, and Place Details with only
+// `photos`, are Google's free IDs-only SKUs; the photo media call is the only
+// billed step. Asking Text Search for `places.photos` directly bills as Text
+// Search PRO ($32/1,000) — which is what this used to do.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('Google Places cost path', () => {
+  const KEY_BEFORE = process.env.GOOGLE_PLACES_API_KEY;
+  let n = 0;
+  const venue = () => `Cost Venue ${++n}`;
+
+  beforeEach(() => {
+    resetBreaker('places-new');
+    process.env.GOOGLE_PLACES_API_KEY = 'test-key';
+    process.env.GOOGLE_PLACES_LEGACY = 'off';
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (KEY_BEFORE === undefined) delete process.env.GOOGLE_PLACES_API_KEY;
+    else process.env.GOOGLE_PLACES_API_KEY = KEY_BEFORE;
+    delete process.env.GOOGLE_PLACES_LEGACY;
+  });
+
+  function stub(details: { photos?: { name: string }[] }) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const body = url.includes(':searchText') ? { places: [{ id: 'abc' }] }
+        : url.includes('/media') ? { photoUri: 'https://lh3.googleusercontent.com/p/real-photo' }
+        : details;
+      return { ok: true, status: 200, json: async () => body, text: async () => '{}' } as unknown as Response;
+    }) as typeof fetch);
+  }
+
+  it('asks only for free fields, then fetches the one billed photo', async () => {
+    const spy = stub({ photos: [{ name: 'places/abc/photos/1' }] });
+    expect(await fetchGooglePlacePhoto(venue(), 48.2, 16.37)).toBe('https://lh3.googleusercontent.com/p/real-photo');
+
+    const calls = spy.mock.calls.map(([url, init]) => ({
+      url: String(url),
+      mask: (init?.headers as Record<string, string> | undefined)?.['X-Goog-FieldMask'],
+    }));
+    expect(calls.map(c => c.url.replace(/\?.*$/, ''))).toEqual([
+      'https://places.googleapis.com/v1/places:searchText',
+      'https://places.googleapis.com/v1/places/abc',
+      'https://places.googleapis.com/v1/places/abc/photos/1/media',
+    ]);
+    expect(calls[0].mask).toBe('places.id');   // NOT places.photos — that is the Pro SKU
+    expect(calls[1].mask).toBe('photos');
+  });
+
+  it('never makes the billed call for a place without photos', async () => {
+    const spy = stub({});
+    expect(await fetchGooglePlacePhoto(venue(), 48.2, 16.37)).toBeNull();
+    expect(spy.mock.calls.some(([url]) => String(url).includes('/media'))).toBe(false);
   });
 });

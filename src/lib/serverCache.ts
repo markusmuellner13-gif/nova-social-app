@@ -88,6 +88,17 @@ export async function cacheIncr(key: string, ttlSeconds: number): Promise<number
   } catch { return null; }
 }
 
+// Atomic add — for counters that grow by more than one (e.g. micro-dollars of
+// AI spend). The TTL is set on the first write only, like cacheIncr.
+export async function cacheIncrBy(key: string, by: number, ttlSeconds: number): Promise<number | null> {
+  if (!redis) return null;
+  try {
+    const n = await redis.incrby(key, Math.round(by));
+    if (n === Math.round(by)) await redis.expire(key, ttlSeconds);
+    return n;
+  } catch { return null; }
+}
+
 export async function cacheGetRaw<T>(key: string): Promise<T | null> {
   return cacheGet<T>(key);
 }
