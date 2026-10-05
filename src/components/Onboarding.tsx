@@ -74,9 +74,19 @@ export default function Onboarding({ onRequestLocation, locationGranted = false 
   }
 
   return (
+    // Scrolls when a screen is taller than the phone (a 320×568 iPhone SE /
+    // small Android could not reach "Get Started" at all — the button sat
+    // below the fold of an unscrollable screen). "safe center" centres the
+    // content when it fits and top-aligns it when it doesn't, so nothing is
+    // ever clipped above the top edge.
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center"
-      style={{ background: 'linear-gradient(160deg, #0d0618 0%, #120824 40%, #0a0a0f 70%, #06060e 100%)' }}
+      className="fixed inset-0 z-50 flex flex-col items-center overflow-y-auto overflow-x-hidden"
+      style={{
+        background: 'linear-gradient(160deg, #0d0618 0%, #120824 40%, #0a0a0f 70%, #06060e 100%)',
+        justifyContent: 'safe center',
+        paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)',
+        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)',
+      }}
     >
       {/* Background orbs */}
       <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl pointer-events-none"
@@ -195,7 +205,7 @@ export default function Onboarding({ onRequestLocation, locationGranted = false 
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -30 }}
             transition={{ duration: 0.4 }}
-            className="flex flex-col w-full h-full px-5 pt-14 pb-6 overflow-y-auto"
+            className="flex flex-col w-full flex-1 min-h-0 px-5 pt-10 pb-2 overflow-y-auto"
           >
             <div className="mb-5 text-center">
               <Sparkles size={28} className="mx-auto mb-3" style={{ color: '#a78bfa' }} />
@@ -381,9 +391,11 @@ export default function Onboarding({ onRequestLocation, locationGranted = false 
 
       </AnimatePresence>
 
-      {/* Progress dots */}
+      {/* Progress dots — in the flow under the content, so on a short screen
+          they follow it instead of being painted over the consent text or the
+          interest grid. */}
       {screen < 3 && (
-        <div className="absolute bottom-10 flex gap-2">
+        <div className={screen === 1 ? 'flex gap-2 flex-shrink-0 mt-3 mb-4' : 'flex gap-2 flex-shrink-0 mt-8 mb-6'}>
           {[0, 1, 2].map(i => (
             <div
               key={i}

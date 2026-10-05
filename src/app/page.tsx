@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef, startTransition, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import SplashScreen from '@/components/SplashScreen';
 import BottomNav, { Tab } from '@/components/BottomNav';
@@ -27,6 +27,23 @@ import { useLocation } from '@/hooks/useLocation';
 import { initNotifications, subscribeToPush, setAppBadge, clearAppBadge, dismissActiveNotifications } from '@/lib/notifications';
 import { getTopCategories } from '@/lib/aiEngine';
 import { LocationState, Post } from '@/types';
+
+const ALL_TABS: Tab[] = ['feed', 'explore', 'faraway', 'groups', 'chat', 'profile'];
+// Tabs worth loading before they're asked for: both open on a network fetch
+// that takes seconds when cold. The rest are light and open instantly anyway.
+const PRELOAD_TABS: Tab[] = ['explore', 'faraway'];
+const PRELOAD_FIRST_MS = 2500;   // after the feed has had its head start
+const PRELOAD_GAP_MS = 2000;
+
+// Skip background preloading when the user has asked the browser to save data
+// or is on a very slow connection — there it would compete with the feed.
+function shouldPreload(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const conn = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  if (conn?.saveData) return false;
+  if (conn?.effectiveType && /(^|-)2g$/.test(conn.effectiveType)) return false;
+  return true;
+}
 
 function AppShell() {
   const { state, unreadCount, setLocation, markSeenLocationPrompt, syncInteractions } = useApp();
@@ -139,9 +156,67 @@ function AppShell() {
     setManualLocation(loc);
   }
 
-  const handleTabChange = useCallback((tab: Tab) => {
-    setActiveTab(tab);
+  // The notifications panel owns one history entry while it is open, so the
+  // phone's Back (Android button, iOS Safari edge swipe, browser back) closes
+  // the panel instead of leaving the app. Next's router copies its own state
+  // into a pushState made with the current URL, so this is invisible to it.
+  const panelEntryRef = useRef(false);
+  useEffect(() => {
+    if (!showNotifications || panelEntryRef.current) return;
+    try {
+      window.history.pushState({ ...(window.history.state ?? {}), novaPanel: 'notifications' }, '');
+      panelEntryRef.current = true;
+    } catch { /* history unavailable — the in-app close paths still work */ }
+  }, [showNotifications]);
+  useEffect(() => {
+    const onPop = () => {
+      if (!panelEntryRef.current) return;
+      panelEntryRef.current = false;
+      setShowNotifications(false);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
   }, []);
+  const closeNotifications = useCallback(() => {
+    setShowNotifications(false);
+    if (panelEntryRef.current) {
+      panelEntryRef.current = false;
+      try { window.history.back(); } catch { /* ignore */ }
+    }
+  }, []);
+
+  // Which tabs have been rendered at least once. A tab joins the moment it is
+  // opened, and Explore + Far Far Away also join in the background shortly
+  // after launch, so their data is already loaded by the time they're tapped.
+  const [mountedTabs, setMountedTabs] = useState<Set<Tab>>(() => new Set<Tab>(['feed']));
+  const openTab = useCallback((tab: Tab) => {
+    setActiveTab(tab);
+    setMountedTabs(prev => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  }, []);
+  const handleTabChange = openTab;
+
+  const appVisible = state.hasOnboarded;
+  useEffect(() => {
+    if (!appVisible || !shouldPreload()) return;
+    // One tab at a time, each in idle time and as a transition: React renders
+    // a transition in interruptible slices, so a scroll or tap on the feed
+    // always wins over the background work and nothing stutters.
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const idleIds: number[] = [];
+    PRELOAD_TABS.forEach((tab, i) => {
+      timers.push(setTimeout(() => {
+        const run = () => startTransition(() => {
+          setMountedTabs(prev => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+        });
+        if ('requestIdleCallback' in window) idleIds.push(window.requestIdleCallback(run, { timeout: 2000 }));
+        else run();
+      }, PRELOAD_FIRST_MS + i * PRELOAD_GAP_MS));
+    });
+    return () => {
+      timers.forEach(clearTimeout);
+      if ('cancelIdleCallback' in window) idleIds.forEach(id => window.cancelIdleCallback(id));
+    };
+  }, [appVisible]);
 
   // Where a deep link or a tapped notification lands. The bundled app has no
   // server and no router to hand a path to, so URLs are resolved to app state
@@ -156,19 +231,34 @@ function AppShell() {
 
     const wanted = new URLSearchParams(query).get('tab');
     if (wanted && (TABS as string[]).includes(wanted)) {
-      setShowNotifications(false);
-      setActiveTab(wanted as Tab);
+      closeNotifications();
+      openTab(wanted as Tab);
       return;
     }
     if (path.startsWith('/notifications')) { setShowNotifications(true); return; }
-    setShowNotifications(false);
-    setActiveTab('feed');
-  }, []);
+    closeNotifications();
+    openTab('feed');
+  }, [closeNotifications, openTab]);
 
-  if (!splashDone) return <SplashScreen onComplete={handleSplashComplete} />;
-  if (!state.hasOnboarded) return <Onboarding onRequestLocation={requestLocation} locationGranted={permission === 'granted'} />;
+  // The splash is an overlay ON TOP of the app rather than a screen in front of
+  // it: the feed starts fetching (and location resolving) the moment the page
+  // loads instead of after the intro finishes, so by the time the splash fades
+  // the first posts are usually already there.
+  const splash = !splashDone && <SplashScreen onComplete={handleSplashComplete} />;
+
+  if (!state.hasOnboarded) return <>{<Onboarding onRequestLocation={requestLocation} locationGranted={permission === 'granted'} />}{splash}</>;
+
+  const tabProps: Record<Tab, () => ReactNode> = {
+    feed:    () => <FeedTab onOpenLocationPrompt={() => setShowLocationPrompt(true)} onOpenCityExplorer={() => setShowCityExplorer(true)} onOpenNotifications={() => setShowNotifications(true)} locationLoading={permission === 'loading'} />,
+    explore: () => <SearchTab />,
+    faraway: () => <FarAwayTab />,
+    groups:  () => <GroupsTab onOpenAuth={() => setShowAuth(true)} />,
+    chat:    () => <ChatTab location={state.location} />,
+    profile: () => <ProfileTab onOpenAuth={() => setShowAuth(true)} />,
+  };
 
   return (
+    <>
     <div className="app-frame" style={{
       position: 'fixed', inset: 0, background: '#0a0a0f',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -178,21 +268,21 @@ function AppShell() {
       paddingTop: 'env(safe-area-inset-top, 0px)',
     }}>
       {/* Tab content */}
+      {/* Tabs stay mounted once opened (or pre-loaded), and are only hidden
+          when inactive — so switching back is instant, keeps its scroll
+          position and data, and the feed keeps refreshing in the background
+          instead of starting over every time. */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        <AnimatePresence mode="wait">
-          <motion.div key={activeTab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: 'easeInOut' }}
-            style={{ position: 'absolute', inset: 0 }}>
-            <ErrorBoundary>
-              {activeTab === 'feed'    && <FeedTab onOpenLocationPrompt={() => setShowLocationPrompt(true)} onOpenCityExplorer={() => setShowCityExplorer(true)} onOpenNotifications={() => setShowNotifications(true)} locationLoading={permission === 'loading'} />}
-              {activeTab === 'explore' && <SearchTab />}
-              {activeTab === 'faraway' && <FarAwayTab />}
-              {activeTab === 'groups'  && <GroupsTab onOpenAuth={() => setShowAuth(true)} />}
-              {activeTab === 'chat'    && <ChatTab location={state.location} />}
-              {activeTab === 'profile' && <ProfileTab onOpenAuth={() => setShowAuth(true)} />}
-            </ErrorBoundary>
-          </motion.div>
-        </AnimatePresence>
+        {ALL_TABS.filter(tab => tab === activeTab || mountedTabs.has(tab)).map(tab => (
+          <div
+            key={tab}
+            className={tab === activeTab ? 'tab-layer tab-layer-active' : 'tab-layer'}
+            style={{ position: 'absolute', inset: 0, display: tab === activeTab ? 'block' : 'none' }}
+            aria-hidden={tab !== activeTab}
+          >
+            <ErrorBoundary>{tabProps[tab]()}</ErrorBoundary>
+          </div>
+        ))}
       </div>
 
       <BottomNav active={activeTab} onChange={handleTabChange} />
@@ -204,15 +294,18 @@ function AppShell() {
       {/* Notifications — opened from the header bell (Instagram-style) */}
       <AnimatePresence>
         {showNotifications && (
+          // Slides in from the right edge and leaves the same way, whether it is
+          // closed by the back arrow, a swipe right, or the phone's own Back.
+          // Transparent on purpose: NotificationsTab paints the panel itself so
+          // the screen underneath can show through while it's being swiped.
           <motion.div
-            initial={{ opacity: 0, x: 24 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 24 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="fixed inset-0 z-40"
-            style={{ background: '#0a0a0f', paddingTop: 'env(safe-area-inset-top, 0px)' }}
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'tween', duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+            className="fixed inset-0 z-40 overflow-hidden"
           >
-            <NotificationsTab onClose={() => setShowNotifications(false)} />
+            <NotificationsTab onClose={closeNotifications} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -240,6 +333,8 @@ function AppShell() {
         )}
       </AnimatePresence>
     </div>
+    {splash}
+    </>
   );
 }
 

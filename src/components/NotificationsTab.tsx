@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useTransform } from 'framer-motion';
 import { Sparkles, Calendar, Bell, BellOff, MapPin, TrendingUp, Star, ChevronLeft } from 'lucide-react';
 import { NovaNotification } from '@/types';
 import { timeAgo } from '@/data/appDefaults';
@@ -9,6 +9,7 @@ import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
 import CommentsSheet from './CommentsSheet';
 import { pushCapability } from '@/lib/notifications';
+import { useSwipeDismiss } from '@/hooks/useSwipeDismiss';
 
 const TYPE_ICON = {
   ai_suggestion: Sparkles,
@@ -106,9 +107,36 @@ export default function NotificationsTab({ onClose }: { onClose?: () => void } =
   // changes when the user installs to the Home Screen without a reload).
   const pushBlockReason = pushCapability();
 
+  // Swipe right to leave, like going back in any other app. Off while a post
+  // sheet is open on top — that sheet has its own swipe-down. The panel follows
+  // the finger, and the screen underneath comes up from a dim as it goes.
+  const { attach: swipeAttach, offset: swipeOffset } = useSwipeDismiss({
+    axis: 'x',
+    onDismiss: () => onClose?.(),
+    enabled: Boolean(onClose) && !openPost,
+  });
+  const backdropOpacity = useTransform(swipeOffset, v => {
+    const w = typeof window !== 'undefined' ? window.innerWidth : 400;
+    return Math.max(0, 0.5 * (1 - v / w));
+  });
+
   return (
     <>
-      <div className="flex flex-col h-full">
+      {onClose && (
+        <motion.div aria-hidden className="absolute inset-0 pointer-events-none" style={{ background: '#000', opacity: backdropOpacity }} />
+      )}
+      <motion.div
+        ref={swipeAttach}
+        className="flex flex-col h-full relative"
+        style={{
+          x: swipeOffset,
+          background: '#0a0a0f',
+          paddingTop: onClose ? 'env(safe-area-inset-top, 0px)' : undefined,
+          // Vertical scrolling stays the browser's; horizontal moves come to us.
+          touchAction: onClose ? 'pan-y' : undefined,
+          boxShadow: onClose ? '-12px 0 32px rgba(0,0,0,0.45)' : undefined,
+        }}
+      >
         {/* Header */}
         <div className="glass flex items-center justify-between px-4 flex-shrink-0"
           style={{ height: 52, borderBottom: '1px solid #1e1e2a' }}>
@@ -245,13 +273,14 @@ export default function NotificationsTab({ onClose }: { onClose?: () => void } =
 
           <div style={{ height: 80 }} />
         </div>
-      </div>
+      </motion.div>
 
       {/* Post detail from notification */}
       <AnimatePresence>
         {openPost && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              data-swipe-layer
               className="fixed inset-0 z-30" style={{ background: 'rgba(0,0,0,0.5)' }}
               onClick={() => setOpenPostId(null)} />
             <CommentsSheet post={openPost} onClose={() => setOpenPostId(null)} />

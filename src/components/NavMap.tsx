@@ -5,6 +5,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { X, Layers, Navigation, Volume2, VolumeX, LocateFixed, Car, Footprints, Flag, Palette } from 'lucide-react';
 import { Post, Category } from '@/types';
+import { tintDeep, paletteColor, COLOR_PAINT_PROPS } from '@/lib/mapTheme';
 import { getPosition, watchPosition, geolocationAvailable, type GeoWatch } from '@/lib/geolocate';
 
 // ── Navigation themes ─────────────────────────────────────────────────────────
@@ -28,11 +29,13 @@ interface NavTheme {
   hueRotate: number;
   brightness: number;
   pixelated: boolean;
+  /** A whole-palette repaint of the ground layers (lib/mapTheme PALETTES). */
+  palette?: string;
 }
 
 const NAV_THEMES: NavTheme[] = [
   { id: 'nova',      label: 'Nova',      emoji: '🟣', accent: '#8b5cf6', gradient: 'linear-gradient(135deg,#8b5cf6,#ec4899)', route: '#8b5cf6', routeGlow: '#c4b5fd', routeWidth: 6, square: false, user: '#3b82f6', saturation: 0,    contrast: 0.1,  hueRotate: 0,   brightness: 0.92, pixelated: false },
-  { id: 'minecraft', label: 'Minecraft', emoji: '🟩', accent: '#5ab552', gradient: 'linear-gradient(135deg,#5ab552,#3b7a36)', route: '#7ed957', routeGlow: '#b6f09c', routeWidth: 8, square: true,  user: '#8b5a2b', saturation: 0.35, contrast: 0.15, hueRotate: 0,   brightness: 0.9,  pixelated: true },
+  { id: 'minecraft', label: 'Minecraft', emoji: '🟩', accent: '#5ab552', gradient: 'linear-gradient(135deg,#5ab552,#3b7a36)', route: '#e0261b', routeGlow: '#ff8a80', routeWidth: 8, square: true,  user: '#8b5a2b', saturation: 0.35, contrast: 0.15, hueRotate: 0,   brightness: 0.9,  pixelated: true, palette: 'minecraft' },
   { id: 'neon',      label: 'Cyberpunk', emoji: '🟦', accent: '#22d3ee', gradient: 'linear-gradient(135deg,#22d3ee,#d946ef)', route: '#22d3ee', routeGlow: '#f0abfc', routeWidth: 6, square: false, user: '#f0abfc', saturation: 0.7,  contrast: 0.1,  hueRotate: 150, brightness: 0.8,  pixelated: false },
   { id: 'candy',     label: 'Candy',     emoji: '🍬', accent: '#fb7185', gradient: 'linear-gradient(135deg,#fb7185,#f472b6)', route: '#fb7185', routeGlow: '#fbcfe8', routeWidth: 7, square: false, user: '#f472b6', saturation: 0.3,  contrast: 0,    hueRotate: -12, brightness: 0.94, pixelated: false },
 ];
@@ -56,24 +59,16 @@ const CATEGORY_EMOJI: Record<Category, string> = {
   outdoors: '🏞️',
 };
 
-// CartoDB Voyager raster tiles — inline style (no external JSON to fetch),
-// labels baked into tiles, very fast CDN, already in CSP. Loads near-instantly
-// on any connection, unlike vector styles that need a large JSON + fonts + sprites.
-const CARTO_TILES = [
-  'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-  'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-  'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-  'https://d.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-];
+// OpenFreeMap vector tiles: free, no API key, no registration, commercial use
+// allowed, and already allowed by the CSP. This used to be CARTO's raster
+// Voyager tiles, but CARTO now serves every keyless request the same 2 KB
+// "API KEY REQUIRED" placeholder image — the map would have shown that
+// watermark everywhere even once it rendered. Vector tiles also stay sharp at
+// every zoom and pixel density, and keep labels readable on rotation.
+const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
 
-const MAP_STYLE: maplibregl.StyleSpecification = {
-  version: 8,
-  sources: {
-    carto: { type: 'raster', tiles: CARTO_TILES, tileSize: 256, maxzoom: 19,
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © <a href="https://carto.com/attributions">CARTO</a>' },
-  },
-  layers: [{ id: 'carto-base', type: 'raster', source: 'carto' }],
-};
+// Layers this component adds itself — never re-coloured by the theme tint.
+const OWN_LAYERS = new Set(['pins-circle', 'pins-emoji', 'route-glow', 'route-line', 'satellite-layer']);
 
 // Esri satellite imagery overlaid on top of the street map (satellite mode).
 const SATELLITE_TILES = ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'];
@@ -136,6 +131,15 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const lastSpokenRef = useRef<string>('');
   const ttsVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const satelliteLayerAddedRef = useRef(false);
+  // The street style's own paint colours, captured once, so themes always
+  // tint the originals instead of stacking on the previous theme.
+  const basePaintRef = useRef<Map<string, Record<string, unknown>>>(new Map());
+  // Resolves once the style and our pin layers are in place.
+  const [ready] = useState(() => {
+    let resolve = () => {};
+    const promise = new Promise<void>(r => { resolve = r; });
+    return { promise, resolve };
+  });
 
   // Pre-fetch GPS immediately when the map mounts — runs in parallel with tile loading.
   const prefetchedGPSRef = useRef<Promise<{ lat: number; lng: number } | null> | null>(null);
@@ -229,13 +233,21 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     const map = new maplibregl.Map({
       container: containerRef.current,
       // Inline raster style: no external JSON to fetch — loads immediately.
-      style: MAP_STYLE,
+      style: MAP_STYLE_URL,
       center,
       zoom: 13,
       attributionControl: { compact: true },
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
     mapRef.current = map;
+
+    // Keep the canvas matched to its box: rotating the phone, the browser
+    // toolbar collapsing, or a split-screen resize all change it without a
+    // window resize event on every platform.
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(() => { if (mapRef.current === map) map.resize(); })
+      : null;
+    resizeObserver?.observe(containerRef.current);
 
     map.on('load', () => {
       // ── Pins as a GPU layer, not DOM markers ──────────────────────────────
@@ -329,11 +341,24 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
         map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
       }
 
+      // MapLibre opens the compact attribution expanded until the first pan,
+      // and on a small phone that box covers the bottom route card. Start it
+      // collapsed — the (i) button still shows the credits on tap.
+      // (Same as MapLibre's own minimise-on-drag. Repeated once the map is idle,
+      // because the credits — and with them the expanded box — can arrive late.)
+      const collapseAttribution = () => containerRef.current
+        ?.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact-show')
+        ?.classList.remove('maplibregl-compact-show');
+      collapseAttribution();
+      map.once('idle', collapseAttribution);
+
       setMapReady(true);
+      ready.resolve();
       if (initialTarget) setTarget(initialTarget);
     });
 
     return () => {
+      resizeObserver?.disconnect();
       watchIdRef.current?.clear();
       map.remove();
       mapRef.current = null;
@@ -343,12 +368,16 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Theme tint, done on the GPU ────────────────────────────────────────────
-  // This used to set a CSS `filter` on the WebGL canvas. A canvas-wide CSS
-  // filter forces the compositor to re-process the whole surface on EVERY
-  // frame, so simply having a theme selected (and the default one has a filter)
-  // made panning stutter. MapLibre's raster paint properties do the same job
-  // inside the shader, where it is free.
+  // ── Theme tint ─────────────────────────────────────────────────────────────
+  // Never a CSS `filter` on the WebGL canvas: a canvas-wide filter makes the
+  // compositor re-process the whole surface on EVERY frame, which is what made
+  // panning stutter. Instead the theme re-colours the style itself — every
+  // colour in the vector layers once per theme change (see lib/mapTheme), and
+  // raster layers (hillshade, satellite) through their GPU paint properties.
+  //
+  // Gated on `mapReady`, not isStyleLoaded(): with vector tiles isStyleLoaded()
+  // is also false whenever tiles are still streaming in, so a theme picked
+  // mid-pan would silently have been skipped.
   useEffect(() => {
     const canvas = containerRef.current?.querySelector('canvas');
     if (canvas) {
@@ -356,13 +385,39 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
       canvas.style.imageRendering = theme.pixelated ? 'pixelated' : 'auto';
     }
     const map = mapRef.current;
-    if (map?.isStyleLoaded()) {
-      for (const layer of ['carto-base', 'satellite-layer']) {
-        if (!map.getLayer(layer)) continue;
-        map.setPaintProperty(layer, 'raster-saturation', theme.saturation);
-        map.setPaintProperty(layer, 'raster-contrast', theme.contrast);
-        map.setPaintProperty(layer, 'raster-hue-rotate', theme.hueRotate);
-        map.setPaintProperty(layer, 'raster-brightness-max', theme.brightness);
+    if (map && mapReady) {
+      const layers = map.getStyle()?.layers ?? [];
+      // Snapshot the style's own colours the first time, so every theme is
+      // applied to the originals rather than compounding on the last theme.
+      if (basePaintRef.current.size === 0) {
+        for (const layer of layers) {
+          if (OWN_LAYERS.has(layer.id)) continue;
+          const props = COLOR_PAINT_PROPS[layer.type];
+          if (!props) continue;
+          const saved: Record<string, unknown> = {};
+          for (const prop of props) {
+            const value = map.getPaintProperty(layer.id, prop);
+            if (value !== undefined) saved[prop] = value;
+          }
+          if (Object.keys(saved).length) basePaintRef.current.set(layer.id, saved);
+        }
+      }
+      for (const [id, saved] of basePaintRef.current) {
+        const layer = map.getLayer(id);
+        if (!layer) continue;
+        const block = paletteColor(theme.palette, id, layer.type);
+        for (const [prop, value] of Object.entries(saved)) {
+          try {
+            map.setPaintProperty(id, prop, block ?? tintDeep(value, theme));
+          } catch { /* a colour this style expresses in a form we don't tint — leave it */ }
+        }
+      }
+      for (const layer of layers) {
+        if (layer.type !== 'raster') continue;
+        map.setPaintProperty(layer.id, 'raster-saturation', theme.saturation);
+        map.setPaintProperty(layer.id, 'raster-contrast', theme.contrast);
+        map.setPaintProperty(layer.id, 'raster-hue-rotate', theme.hueRotate);
+        map.setPaintProperty(layer.id, 'raster-brightness-max', layer.id === 'satellite-layer' ? 1 : theme.brightness);
       }
       if (map.getLayer('route-line')) {
         map.setPaintProperty('route-line', 'line-color', theme.route);
@@ -382,36 +437,36 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     // before the map finished loading still gets applied.
   }, [theme, mapReady, satellite]);
 
-  // Satellite toggle — overlay Esri imagery above the street raster.
-  // Route line layers are added later and will naturally sit on top.
+  // Satellite toggle — Esri imagery slotted in directly above the street
+  // style's LAST fill/line layer, so buildings, parks and roads don't paint
+  // over the photo, while street and place names, the pins and the route stay
+  // readable on top of it.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    const apply = () => {
-      if (satellite) {
-        if (!satelliteLayerAddedRef.current) {
-          if (!map.getSource('satellite')) {
-            map.addSource('satellite', { type: 'raster', tiles: SATELLITE_TILES, tileSize: 256 });
-          }
-          // Insert above the base street tiles but below any route layers
-          const firstRoute = map.getLayer('route-glow') ? 'route-glow' : undefined;
-          map.addLayer({ id: 'satellite-layer', type: 'raster', source: 'satellite',
-            paint: { 'raster-opacity': 0.88 } }, firstRoute);
-          satelliteLayerAddedRef.current = true;
-        } else {
-          map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
+    if (!map || !mapReady) return;
+    if (satellite) {
+      if (!satelliteLayerAddedRef.current) {
+        if (!map.getSource('satellite')) {
+          map.addSource('satellite', {
+            type: 'raster', tiles: SATELLITE_TILES, tileSize: 256, maxzoom: 19,
+            attribution: 'Imagery © Esri, Maxar, Earthstar Geographics',
+          });
         }
-        // Dim base map so satellite dominates but roads stay faintly visible
-        if (map.getLayer('carto-base')) map.setPaintProperty('carto-base', 'raster-opacity', 0.15);
+        const layers = (map.getStyle()?.layers ?? []).filter(l => !OWN_LAYERS.has(l.id));
+        let lastGround = -1;
+        layers.forEach((l, i) => { if (l.type !== 'symbol') lastGround = i; });
+        const above = layers[lastGround + 1]?.id
+          ?? (map.getLayer('pins-circle') ? 'pins-circle' : undefined);
+        map.addLayer({ id: 'satellite-layer', type: 'raster', source: 'satellite',
+          paint: { 'raster-opacity': 1 } }, above);
+        satelliteLayerAddedRef.current = true;
       } else {
-        if (satelliteLayerAddedRef.current && map.getLayer('satellite-layer')) {
-          map.setLayoutProperty('satellite-layer', 'visibility', 'none');
-        }
-        if (map.getLayer('carto-base')) map.setPaintProperty('carto-base', 'raster-opacity', 1);
+        map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
       }
-    };
-    if (map.isStyleLoaded()) apply(); else map.once('load', apply);
-  }, [satellite]);
+    } else if (satelliteLayerAddedRef.current && map.getLayer('satellite-layer')) {
+      map.setLayoutProperty('satellite-layer', 'visibility', 'none');
+    }
+  }, [satellite, mapReady]);
 
   // Show userLocation dot on initial render
   useEffect(() => {
@@ -422,7 +477,11 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
   const drawRoute = useCallback(async (origin: { lat: number; lng: number }, dest: Post): Promise<boolean> => {
     const map = mapRef.current;
     if (!map || !dest.location) return false;
-    if (!map.isStyleLoaded()) await new Promise<void>(resolve => map.once('idle', resolve));
+    // Wait for our own layers to exist (the 'load' handler), not for
+    // isStyleLoaded(): with vector tiles that stays false while tiles stream,
+    // which held a route back until the whole viewport had finished loading.
+    await ready.promise;
+    if (mapRef.current !== map) return false;   // closed while we waited
 
     const routeUrl = (base: string) =>
       `${base}/route/v1/${profile}/${origin.lng},${origin.lat};${dest.location!.lng},${dest.location!.lat}?overview=full&geometries=geojson&steps=true`;
@@ -501,7 +560,7 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
     const bounds = coords.reduce((bb, c) => bb.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
     map.fitBounds(bounds, { padding: { top: 80, bottom: 230, left: 40, right: 40 }, maxZoom: 16, duration: 800 });
     return true;
-  }, [profile, theme]);
+  }, [profile, theme, ready]);
 
   // Build a route — ALWAYS get fresh GPS first so directions are from where you actually are
   const buildRoute = useCallback(async (dest: Post) => {
@@ -601,7 +660,13 @@ export default function NavMap({ posts, userLocation, initialTarget, onClose }: 
 
   return (
     <div className="fixed inset-0 z-50" style={{ background: '#0a0a0f' }}>
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* Positioned with an INLINE style, never utility classes. MapLibre stamps
+          .maplibregl-map { position: relative } onto this element, and its
+          stylesheet is unlayered while Tailwind v4 utilities live in a cascade
+          layer — unlayered CSS always wins, so "absolute inset-0" was silently
+          overridden, the container collapsed to 0px tall and the whole map
+          rendered black. Inline styles beat both. */}
+      <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
 
       {/* Top bar */}
       <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-4 pt-12 pb-3 pointer-events-none">

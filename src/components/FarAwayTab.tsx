@@ -7,6 +7,7 @@ import {
   ChevronRight, RefreshCw, Plane, Bookmark,
 } from 'lucide-react';
 import { apiUrl } from '@/lib/apiBase';
+import { coarse } from '@/lib/liveLocation';
 import { postTitle } from '@/lib/postTitle';
 import { useApp } from '@/context/AppContext';
 import { useLanguage } from '@/context/LanguageContext';
@@ -155,8 +156,10 @@ export default function FarAwayTab() {
   // a new location object with identical contents.
   const cityName = city?.city ?? '';
   const cityCountry = city?.country ?? '';
-  const cityLat = city?.lat ?? 0;
-  const cityLng = city?.lng ?? 0;
+  // Rounded to ~1 km: the user's own position now updates live as they move,
+  // and a few hundred metres must not re-query a city-wide activity list.
+  const cityLat = coarse(city?.lat);
+  const cityLng = coarse(city?.lng);
   const failedCopy = copy.failed;
 
   const load = useCallback(async (opts: { silent?: boolean } = {}) => {

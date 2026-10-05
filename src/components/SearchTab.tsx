@@ -11,6 +11,7 @@ import { useApp } from '@/context/AppContext';
 import { apiUrl } from '@/lib/apiBase';
 import { postImageUrl } from '@/lib/imageUrl';
 import { coverBackground } from '@/components/PostImage';
+import { coarse } from '@/lib/liveLocation';
 
 type MapProvider = 'nova' | 'google';
 
@@ -117,9 +118,14 @@ export default function SearchTab() {
   // Real live events only — while the worldwide feed loads the globe just shows
   // the map itself, never placeholder pins.
   const globePosts = mapPosts;
-  const globeFocus = location
-    ? { lat: location.lat, lng: location.lng }
-    : null;
+  // Rounded (~1 km) and memoised: with live location the position updates as
+  // the user walks, and the globe shouldn't re-spin for every few hundred metres.
+  const focusLat = location ? coarse(location.lat) : null;
+  const focusLng = location ? coarse(location.lng) : null;
+  const globeFocus = useMemo(
+    () => (focusLat !== null && focusLng !== null ? { lat: focusLat, lng: focusLng } : null),
+    [focusLat, focusLng],
+  );
 
   // Search pool: only real posts for the user's area
   const searchPool = localHotPosts;
