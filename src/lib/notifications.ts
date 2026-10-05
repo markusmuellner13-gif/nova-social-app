@@ -166,7 +166,7 @@ export async function syncReminders(
   try {
     await fetch(apiUrl('/api/push/subscribe'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await pushHeaders(),
       body: JSON.stringify({ ...identity, reminders: payload }),
     });
     return true;
@@ -179,6 +179,19 @@ export async function syncReminders(
 // Pass the user's location (and learned top interests) so the daily digest cron
 // can send a personalised "events near you" for their actual city. Safe to call
 // repeatedly (re-registers location + interests).
+// The subscribe route only trusts a user id it can verify from the session
+// token (it powers "a friend you follow is going…" with server-side access),
+// so a signed-in user's subscription carries the token; a guest's carries none.
+async function pushHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const { getSession } = await import('@/lib/supabase');
+    const token = (await getSession())?.access_token;
+    if (token) headers.Authorization = `Bearer ${token}`;
+  } catch { /* signed out or Supabase not configured — subscribe as a guest */ }
+  return headers;
+}
+
 export async function subscribeToPush(loc?: PushLocation): Promise<boolean> {
   // Bail with a logged reason rather than a silent false — a push subscription
   // that never happens is invisible otherwise, and on iOS-in-Safari it never can.
@@ -197,7 +210,7 @@ export async function subscribeToPush(loc?: PushLocation): Promise<boolean> {
     try {
       const res = await fetch(apiUrl('/api/push/subscribe'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await pushHeaders(),
         body: JSON.stringify({ native, ...(loc ?? {}) }),
       });
       return res.ok;
@@ -220,7 +233,7 @@ export async function subscribeToPush(loc?: PushLocation): Promise<boolean> {
     }
     await fetch(apiUrl('/api/push/subscribe'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await pushHeaders(),
       body: JSON.stringify({ subscription: sub, ...(loc ?? {}) }),
     });
     return true;

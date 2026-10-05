@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cacheEnabled, cacheSet, cacheGet } from '@/lib/serverCache';
+import { verifiedUserId } from '@/lib/socialServer';
+import { sanitizeWebSubscription } from '@/lib/pushSubscription';
 
 // A reminder the user set on an event, in the form the cron needs: an absolute
 // moment to fire at. The client does the date arithmetic (it knows the user's
@@ -67,10 +69,18 @@ export async function POST(request: NextRequest) {
       reminders?: unknown;
     };
     const native = sanitizeNative(body.native);
-    const sub = native ? null : (body.subscription ?? (body.endpoint ? body : null));
-    if (!native && !sub?.endpoint) {
+    // A browser's PushSubscription serialises with endpoint/expirationTime/keys
+    // (toJSON), so both envelope shapes sanitise the same way.
+    const sub = native ? null : sanitizeWebSubscription(
+      body.subscription ?? (body.endpoint ? body : null),
+    );
+    if (!native && !sub) {
       return NextResponse.json({ ok: false, error: 'invalid subscription' }, { status: 400 });
     }
+    // Only a VERIFIED user id is stored: the digest reads that user's follows
+    // with the service role ("a friend is going…"), so a claimed id would let
+    // anyone receive someone else's friends' plans on their own device.
+    const userId = await verifiedUserId(request.headers.get('authorization'));
     if (cacheEnabled) {
       // Key by a hash of the destination so re-subscribing overwrites cleanly.
       // A device token is namespaced by platform so the two token spaces can
@@ -98,10 +108,12 @@ export async function POST(request: NextRequest) {
         // other — a device that somehow wrote both would get double-pushed.
         subscription: native ? null : sub,
         native,
-        city: typeof body.city === 'string' ? body.city.slice(0, 80) : null,
-        lat: Number.isFinite(body.lat) ? body.lat : null,
-        lng: Number.isFinite(body.lng) ? body.lng : null,
-        categories,
+        // Replaced only when sent. A reminders-only sync carries no location,
+        // and used to overwrite the stored city with null — dropping the user
+        // out of their city's daily digest until the app re-registered.
+        ...(typeof body.city === 'string' ? { city: body.city.slice(0, 80) } : {}),
+        ...(Number.isFinite(body.lat) && Number.isFinite(body.lng) ? { lat: body.lat, lng: body.lng } : {}),
+        ...(categories ? { categories } : {}),
         // The language the user picked in Profile → Settings. Notifications are
         // built ENTIRELY from it (src/lib/pushCopy.ts) — before this, an English
         // template wrapped a German or Japanese event title and shipped two
@@ -110,7 +122,7 @@ export async function POST(request: NextRequest) {
         ...(typeof body.locale === 'string' ? { locale: body.locale.slice(0, 10) } : {}),
         // The signed-in user's id, so the digest can surface "a friend you follow
         // is going to an event near you". Null for anonymous subscribers.
-        userId: typeof body.userId === 'string' ? body.userId.slice(0, 64) : null,
+        userId,
         // Only replace the reminder list when the client actually sent one, so a
         // plain location re-sync doesn't clear the user's reminders.
         ...(body.reminders !== undefined ? { reminders: sanitizeReminders(body.reminders) } : {}),

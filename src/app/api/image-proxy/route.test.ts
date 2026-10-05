@@ -115,3 +115,37 @@ describe('image-proxy failure classification', () => {
     expect(maxAge(res)).toBe(86_400);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Abuse limits. The edge cache keys on the full URL, so anything that varies it
+// turns every request into a paid download + resize.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('image-proxy abuse limits', () => {
+  it('refuses parameters the app never sends, before fetching anything', async () => {
+    const fetchMock = upstream();
+    const res = await GET(new NextRequest(
+      `https://nova.test/api/image-proxy?url=${encodeURIComponent(DIRECT)}&w=1080&bust=12345`,
+    ));
+    expect(res.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('will not follow a redirect to a private address (SSRF)', async () => {
+    const fetchMock = upstream(
+      new Response(null, { status: 302, headers: { location: 'https://10.0.0.5/internal.jpg' } }),
+    );
+    const res = await get(DIRECT);
+    expect(res.status).toBe(403);
+    expect(res.headers.get('X-Nova-Proxy-Reason')).toBe('Redirect to a non-public address');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('follows a redirect to another public https host', async () => {
+    upstream(
+      new Response(null, { status: 301, headers: { location: 'https://s4.ticketm.net/dam/a/001/photo.jpg' } }),
+      new Response('not really an image', { status: 200, headers: { 'Content-Type': 'text/html' } }),
+    );
+    // The second hop was fetched (it is the one that answered "not an image").
+    expect((await get(DIRECT)).headers.get('X-Nova-Proxy-Reason')).toBe('Not an image');
+  });
+});

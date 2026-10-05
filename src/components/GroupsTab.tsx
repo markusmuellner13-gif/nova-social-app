@@ -298,11 +298,14 @@ export default function GroupsTab({ onOpenAuth }: Props) {
             </button>
             <h3 className="text-base font-bold text-white mb-4">New Group</h3>
             <div className="flex flex-col gap-3">
+              {/* Limits match the database CHECKs in migration 009. */}
               <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
+                maxLength={80}
                 placeholder="Group name (e.g. Vienna Weekend Squad)"
                 className="w-full px-4 py-3.5 rounded-2xl text-sm text-white outline-none"
                 style={{ background: '#13131a', border: '1px solid #2a2a38' }} />
               <textarea value={newGroupDesc} onChange={e => setNewGroupDesc(e.target.value)}
+                maxLength={500}
                 placeholder="Description (optional)"
                 rows={3}
                 className="w-full px-4 py-3.5 rounded-2xl text-sm text-white outline-none resize-none"
