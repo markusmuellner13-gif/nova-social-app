@@ -102,8 +102,22 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate, state =
   // Gentle auto-rotation when the user isn't interacting and nothing is open.
   // Throttled to ~30fps: every rotation change reprojects the whole globe, so
   // updating once per frame (60fps) doubles the work for no visible benefit.
+  // Only spin while the globe is actually on screen. Tabs stay mounted in the
+  // background now (so switching back is instant), and a hidden or scrolled-away
+  // globe re-rendering 30 times a second would steal frames from whatever the
+  // user IS looking at.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [onScreen, setOnScreen] = useState(true);
   useEffect(() => {
-    if (!autoRotate || selected) return;
+    const el = rootRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(([entry]) => setOnScreen(entry.isIntersecting));
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!autoRotate || selected || !onScreen) return;
     let raf = 0;
     let last = 0;
     const tick = (now: number) => {
@@ -115,7 +129,7 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate, state =
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [autoRotate, selected]);
+  }, [autoRotate, selected, onScreen]);
 
   // Drag-to-spin
   const onPointerDown = useCallback((e: React.PointerEvent) => {
@@ -246,6 +260,7 @@ export default function WorldMap({ posts, onPostOpen, focus, onNavigate, state =
 
   return (
     <div
+      ref={rootRef}
       className="relative w-full rounded-2xl overflow-hidden select-none"
       style={{ height: HEIGHT, background: 'radial-gradient(ellipse at 50% 40%, #0c1b30 0%, #05080f 75%)', touchAction: 'none' }}
       onPointerDown={onPointerDown}

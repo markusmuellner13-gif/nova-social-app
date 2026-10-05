@@ -495,23 +495,34 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     <>
       <div className="flex flex-col h-full">
         {/* Top bar */}
-        <div className="glass flex items-center justify-between px-4 flex-shrink-0" style={{ height: 56, borderBottom: '1px solid #1e1e2a' }}>
-          <div className="flex items-center gap-2">
+        <div className="glass flex items-center justify-between gap-2 px-4 flex-shrink-0" style={{ height: 56, borderBottom: '1px solid #1e1e2a' }}>
+          <div className="flex items-center gap-2 flex-shrink-0">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #8b5cf6, #ec4899)' }}>
               <Compass size={15} color="white" strokeWidth={2.5} />
             </div>
-            <h1 className="text-xl font-bold" style={{ background: 'linear-gradient(135deg, #c4b5fd, #f0abfc)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
+            {/* The wordmark gives way on phones narrower than 360px, where the
+                live location label needs the room more than the name does. */}
+            <h1 className="text-xl font-bold hidden min-[360px]:block" style={{ background: 'linear-gradient(135deg, #c4b5fd, #f0abfc)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
               Nova
             </h1>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             {location?.city ? (
+              // Live: a pulsing dot and the neighbourhood the user is in right
+              // now, kept current by the GPS watch in useLocation. Truncates
+              // rather than wraps so the top bar holds on a 320px phone.
               <motion.button whileTap={{ scale: 0.92 }} onClick={onOpenCityExplorer}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium"
-                style={{ background: 'rgba(139,92,246,0.1)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.2)' }}>
-                <MapPin size={10} />
-                {location.city}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium min-w-0"
+                title={location.area ? `${location.area}, ${location.city}` : location.city}
+                aria-label={`${location.live ? 'Live location: ' : 'Location: '}${location.area ? `${location.area}, ` : ''}${location.city}`}
+                style={{ background: 'rgba(139,92,246,0.1)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.2)', maxWidth: 'min(46vw, 210px)' }}>
+                {location.live
+                  ? <span className="live-dot flex-shrink-0" aria-hidden="true" />
+                  : <MapPin size={10} className="flex-shrink-0" />}
+                <span className="truncate">
+                  {location.live && location.area ? `${location.area}, ${location.city}` : location.city}
+                </span>
               </motion.button>
             ) : (
               <motion.button whileTap={{ scale: 0.92 }} onClick={onOpenCityExplorer}
@@ -525,7 +536,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
               <motion.button
                 whileTap={{ scale: 0.92 }}
                 onClick={() => setSortMode(m => m === 'for_you' ? 'recent' : 'for_you')}
-                className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full"
+                className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full whitespace-nowrap flex-shrink-0"
                 style={{ background: 'rgba(139,92,246,0.12)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.2)' }}
               >
                 {sortMode === 'for_you' ? <><Sparkles size={10} /> {t.feed.forYou}</> : <><RefreshCw size={10} /> {t.feed.recent}</>}
@@ -538,7 +549,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
               whileTap={{ scale: 0.88 }}
               onClick={onOpenNotifications}
               aria-label="Notifications"
-              className="relative w-8 h-8 flex items-center justify-center rounded-full"
+              className="relative w-8 h-8 flex items-center justify-center rounded-full flex-shrink-0"
               style={{ background: '#1a1a24', border: '1px solid #2a2a38' }}
             >
               <Bell size={16} style={{ color: '#c4b5fd' }} />

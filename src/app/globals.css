@@ -277,3 +277,44 @@ input[type=range]::-moz-range-thumb {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+
+/* ── Tab switch ───────────────────────────────────────────────────────────────
+   Tabs stay mounted and are toggled with display (page.tsx). Going from
+   display:none to visible restarts a CSS animation, so the active layer fades
+   up every time it is shown — the same feel the old remount animation had,
+   without throwing the tab's state away. Transform-free once finished, so it
+   never becomes a containing block for the tab's fixed-position overlays. */
+.tab-layer-active {
+  animation: nova-tab-in 180ms ease-out;
+}
+@keyframes nova-tab-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tab-layer-active { animation: none; }
+}
+
+/* Live-location indicator in the feed's top bar (useLocation's GPS watch). */
+.live-dot {
+  position: relative;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: #22c55e;
+}
+.live-dot::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  border: 1.5px solid #22c55e;
+  animation: nova-live-ping 1.8s ease-out infinite;
+}
+@keyframes nova-live-ping {
+  from { transform: scale(0.6); opacity: 0.9; }
+  to   { transform: scale(1.8); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot::after { animation: none; opacity: 0.5; }
+}

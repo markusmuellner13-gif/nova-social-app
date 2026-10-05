@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence, useDragControls } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { X, Heart, Send, Star, Loader2, LogIn, Trash2 } from 'lucide-react';
 import { Post } from '@/types';
 import { timeAgo } from '@/data/appDefaults';
@@ -12,17 +12,12 @@ import AuthModal from './AuthModal';
 import Avatar from './Avatar';
 import { postImageUrl } from '@/lib/imageUrl';
 import { coverBackground } from '@/components/PostImage';
+import { useSwipeDismiss } from '@/hooks/useSwipeDismiss';
 
 interface Props {
   post: Post;
   onClose: () => void;
 }
-
-// Swipe-down-to-dismiss thresholds, in px and px/s. Either one closes the
-// sheet: a deliberate pull far enough down, or a quick flick that is clearly a
-// dismiss even though it never travelled that far.
-const DISMISS_DISTANCE = 140;
-const DISMISS_VELOCITY = 600;
 
 // Real comments only: loaded from and written to the backend, signed with the
 // commenter's real profile. Nothing generated, nothing session-local.
@@ -38,45 +33,11 @@ export default function CommentsSheet({ post, onClose }: Props) {
   const liked = isLiked(post.id);
   const saved = isSaved(post.id);
 
-  // Drag-to-dismiss. The listener is disabled on the sheet itself so that a
-  // drag only begins where we say it does — otherwise framer swallows every
-  // vertical gesture and the comment list stops scrolling.
-  const dragControls = useDragControls();
-  const listRef = useRef<HTMLDivElement>(null);
-  const panStart = useRef<{ x: number; y: number } | null>(null);
-  const dragging = useRef(false);
-
-  // The grab area at the top of the sheet (handle, title row, post header).
-  function startDrag(e: React.PointerEvent) {
-    dragging.current = false; // a fresh press is always a fresh gesture
-    // Let the X, the like/save buttons and any input keep their own taps.
-    if ((e.target as HTMLElement).closest('button, input, a')) return;
-    dragging.current = true;
-    dragControls.start(e);
-  }
-
-  // The comment list drags the sheet too, but only once it is scrolled to the
-  // very top and only downwards — so scrolling through comments is untouched.
-  function onListPointerDown(e: React.PointerEvent) {
-    dragging.current = false;
-    panStart.current = (listRef.current?.scrollTop ?? 0) <= 0
-      ? { x: e.clientX, y: e.clientY }
-      : null;
-  }
-
-  function onListPointerMove(e: React.PointerEvent) {
-    const start = panStart.current;
-    if (!start || dragging.current) return;
-    if ((listRef.current?.scrollTop ?? 0) > 0) { panStart.current = null; return; }
-    const dy = e.clientY - start.y;
-    // Downwards, and more vertical than horizontal, before we take the gesture.
-    if (dy > 12 && dy > Math.abs(e.clientX - start.x)) {
-      dragging.current = true;
-      dragControls.start(e);
-    }
-  }
-
-  function endPan() { panStart.current = null; }
+  // Swipe down to dismiss — from the header, or from the comment list once it
+  // is scrolled to the very top (scrolling through comments is untouched). The
+  // hook works from touch events, so the browser's own scroll handling can't
+  // cancel the gesture halfway the way it cancels a pointer-driven drag.
+  const { attach: swipeAttach, offset: swipeOffset } = useSwipeDismiss({ axis: 'y', onDismiss: onClose });
 
   useEffect(() => {
     let active = true;
@@ -118,28 +79,21 @@ export default function CommentsSheet({ post, onClose }: Props) {
       animate={{ y: 0 }}
       exit={{ y: '100%' }}
       transition={{ type: 'spring', stiffness: 300, damping: 35 }}
-      drag="y"
-      dragControls={dragControls}
-      dragListener={false}
-      dragConstraints={{ top: 0, bottom: 0 }}
-      dragElastic={{ top: 0, bottom: 1 }}
-      dragMomentum={false}
-      onDragEnd={(_, info) => {
-        dragging.current = false;
-        panStart.current = null;
-        if (info.offset.y > DISMISS_DISTANCE || info.velocity.y > DISMISS_VELOCITY) onClose();
-      }}
-      className="fixed inset-x-0 bottom-0 z-40 flex flex-col rounded-t-3xl overflow-hidden"
-      style={{ height: '85dvh', background: '#0d0d16', borderTop: '1px solid #2a2a38' }}
+      className="fixed inset-x-0 bottom-0 z-40"
+      style={{ height: '85dvh' }}
     >
-      {/* Everything above the comment list is a grab area for the dismiss drag.
-          framer only sets touch-action/user-select itself when dragListener is
-          on, so this region declares both — the gesture is ours, not the
-          browser's, and dragging must not select the header text. */}
+    {/* The outer layer slides the sheet in and out; this one follows the
+        finger. Separate transforms, so a swipe never fights the entry spring. */}
+    <motion.div
+      ref={swipeAttach}
+      className="h-full flex flex-col rounded-t-3xl overflow-hidden"
+      style={{ y: swipeOffset, background: '#0d0d16', borderTop: '1px solid #2a2a38' }}
+    >
+      {/* Everything above the comment list is a grab area. It must not select
+          the header text while it's being dragged. */}
       <div
         className="flex-shrink-0"
-        onPointerDown={startDrag}
-        style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+        style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
       >
         {/* Drag handle */}
         <div className="flex justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing" aria-hidden="true">
@@ -201,11 +155,6 @@ export default function CommentsSheet({ post, onClose }: Props) {
           because 'contain' still lets iOS rubber-band the list itself, which
           would fight the sheet over the same downward pull. */}
       <div
-        ref={listRef}
-        onPointerDown={onListPointerDown}
-        onPointerMove={onListPointerMove}
-        onPointerUp={endPan}
-        onPointerCancel={endPan}
         className="flex-1 overflow-y-auto px-4 py-3"
         style={{ overscrollBehavior: 'none' }}
       >
@@ -300,6 +249,7 @@ export default function CommentsSheet({ post, onClose }: Props) {
           </motion.button>
         )}
       </div>
+    </motion.div>
     </motion.div>
 
     {/* Sign-in modal for commenting */}

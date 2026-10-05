@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Post, LocationState } from '@/types';
 import { apiUrl } from '@/lib/apiBase';
+import { restampDistances, metresBetween, coarse, FEED_REFRESH_MOVE_M } from '@/lib/liveLocation';
 
 // Cache settings — localStorage so reopening the app shows content instantly
 const EVENTS_TTL_MS    = 5  * 60 * 1000; // 5 min for events (change often)
@@ -331,13 +332,20 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location?.city]);
 
+  // The latest location, for timers and callbacks that outlive a render — the
+  // 5-minute refresh below used to keep refreshing for wherever the user was
+  // when the city last changed, however far they had walked since.
+  const locationRef = useRef(location);
+  useEffect(() => { locationRef.current = location; }, [location]);
+
   // ── Background refresh every 5 minutes for fresh events ───────────────────
   useEffect(() => {
     if (refreshTimer.current) clearInterval(refreshTimer.current);
     refreshTimer.current = setInterval(() => {
-      const city = location?.city;
+      const loc = locationRef.current;
+      const city = loc?.city;
       if (!city || inFlightRef.current) return;
-      void silentRefresh(city, location, categoryRef.current);
+      void silentRefresh(city, loc, categoryRef.current);
     }, 5 * 60 * 1000);
     return () => { if (refreshTimer.current) clearInterval(refreshTimer.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -649,5 +657,35 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     sponsoredFetchedRef.current.clear();
   }, []);
 
-  return { posts, loading, hasMore, fetchMore, reset, nearbyStartIndex, emptyReason };
+  // ── Live location ──────────────────────────────────────────────────────────
+  // Moving within the same city doesn't reload the feed (a new CITY still does,
+  // above) — but after a real move the server is asked again for the user's
+  // new spot, and its fresh, re-ranked first page goes to the top.
+  const refreshAnchorRef = useRef<{ city: string; lat: number; lng: number } | null>(null);
+  const latKey = coarse(location?.lat, 3);
+  const lngKey = coarse(location?.lng, 3);
+  useEffect(() => {
+    const loc = locationRef.current;
+    if (!loc?.city || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return;
+    const anchor = refreshAnchorRef.current;
+    if (!anchor || anchor.city !== loc.city) {
+      refreshAnchorRef.current = { city: loc.city, lat: loc.lat, lng: loc.lng };
+      return;
+    }
+    if (metresBetween(anchor, loc) < FEED_REFRESH_MOVE_M) return;
+    refreshAnchorRef.current = { city: loc.city, lat: loc.lat, lng: loc.lng };
+    void silentRefresh(loc.city, loc, categoryRef.current);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latKey, lngKey, location?.city]);
+
+  // …and between those refreshes every card's distance is measured from where
+  // the user is standing now, so labels, the local/nearby split and the
+  // ranker's proximity signal all follow them as they move.
+  const livePosts = useMemo(
+    () => restampDistances(posts, location?.lat, location?.lng),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+    [posts, latKey, lngKey],
+  );
+
+  return { posts: livePosts, loading, hasMore, fetchMore, reset, nearbyStartIndex, emptyReason };
 }

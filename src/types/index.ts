@@ -151,6 +151,14 @@ export interface LocationState {
   // How far (km) counts as "local" for this place — adapts to whether the
   // resolved place is a metropolis or a small town/district. Worldwide-safe.
   localKm?: number;
+  // The neighbourhood / suburb the user is standing in right now ("Neubau",
+  // "Kreuzberg", "Shibuya"). Only set from a real reverse geocode of a GPS fix.
+  area?: string;
+  // Fix accuracy in metres, when the device reported one.
+  accuracy?: number;
+  // True while this position is being kept current by a live GPS watch (as
+  // opposed to a cached fix or a city picked by hand).
+  live?: boolean;
 }
 
 export interface Reminder {

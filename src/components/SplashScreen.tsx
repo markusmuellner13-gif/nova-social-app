@@ -154,9 +154,11 @@ export default function SplashScreen({ onComplete }: Props) {
   const [phrase] = useState(() => pickPhrase());
 
   useEffect(() => {
-    const t1 = setTimeout(() => setPhase('tagline'), 900);
-    const t2 = setTimeout(() => setPhase('exit'), 2200);
-    const t3 = setTimeout(() => onComplete(), 2800);
+    // Shorter than it used to be (2.8s): the app now loads underneath the
+    // splash, so the intro no longer has to cover for the feed starting late.
+    const t1 = setTimeout(() => setPhase('tagline'), 650);
+    const t2 = setTimeout(() => setPhase('exit'), 1500);
+    const t3 = setTimeout(() => onComplete(), 2100);
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, [onComplete]);
 
@@ -168,7 +170,7 @@ export default function SplashScreen({ onComplete }: Props) {
           initial={{ opacity: 1 }}
           exit={{ opacity: 0, scale: 1.05 }}
           transition={{ duration: 0.6, ease: 'easeInOut' }}
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+          className="fixed inset-0 z-[100] flex flex-col items-center justify-center"
           style={{
             background: 'linear-gradient(160deg, #0d0618 0%, #120824 30%, #0a0a0f 60%, #06060e 100%)',
           }}
@@ -232,7 +234,7 @@ export default function SplashScreen({ onComplete }: Props) {
           <motion.p
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.4 }}
-            transition={{ delay: 1.2, duration: 0.6 }}
+            transition={{ delay: 0.6, duration: 0.5 }}
             className="absolute bottom-12 text-xs font-medium"
             style={{ color: 'rgba(200,190,220,0.5)' }}
           >
@@ -249,7 +251,7 @@ export default function SplashScreen({ onComplete }: Props) {
               style={{ background: 'linear-gradient(90deg, #8b5cf6, #ec4899)' }}
               initial={{ width: '0%' }}
               animate={{ width: '100%' }}
-              transition={{ duration: 2, ease: 'easeInOut' }}
+              transition={{ duration: 1.4, ease: 'easeInOut' }}
             />
           </motion.div>
         </motion.div>
