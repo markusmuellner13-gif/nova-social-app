@@ -177,6 +177,33 @@ body {
   }
 }
 
+/* First cards of the feed fade up on arrival (FeedTab). A CSS animation, not a
+   different wrapper element, so a card's identity never depends on its position. */
+.feed-enter {
+  animation: nova-feed-in 200ms ease-out both;
+}
+@keyframes nova-feed-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .feed-enter { animation: none; }
+}
+
+/* Post slideshow arrows: shown on hover / keyboard focus for a mouse or
+   trackpad; never on touch screens, where you swipe. */
+.post-gallery .gallery-arrow {
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.post-gallery:hover .gallery-arrow,
+.post-gallery .gallery-arrow:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .post-gallery .gallery-arrow { display: none; }
+}
+
 /* Shimmer skeleton */
 @keyframes shimmer {
   0%   { background-position: -200% 0; }

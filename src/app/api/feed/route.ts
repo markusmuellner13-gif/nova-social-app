@@ -12,6 +12,8 @@ import {
   searchRealEventsWithClaude, claudeAvailable,
 } from '@/lib/sources/claudeAI';
 import { crawlCityEvents } from '@/lib/sources/webCrawler';
+import { fetchEventfrogEvents, inEventfrogArea } from '@/lib/sources/eventfrog';
+import { recordTownVisit } from '@/lib/brain/towns';
 import { eventsCacheKey, cacheTtl, cacheGet, cacheSet } from '@/lib/serverCache';
 import { dbReadEnabled, queryEventsNear, queryEventsByCountry } from '@/lib/eventsDb';
 import { aiBudgetExceeded, noteAiCall } from '@/lib/aiBudget';
@@ -52,6 +54,9 @@ const EB_CATEGORIES = new Set([
 ]);
 
 const SG_CATEGORIES = new Set(['events','music','sports','art','discover']);
+
+// Eventfrog's own categories map onto these (see EVENTFROG_CATEGORY).
+const EF_CATEGORIES = new Set(['events','music','sports','art','food','community','fitness','discover']);
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -372,6 +377,17 @@ async function resolveFeed(request: NextRequest, onPartial?: PartialSink) {
       parseFloat(searchParams.get('lng') || '0'),
       VALID_CATEGORIES.has(rawCatKey) ? rawCatKey : 'events',
     ).catch(() => { /* best effort */ });
+    // …and remember the TOWN, so the ingest sweep learns to fill places that
+    // aren't on its hard-coded list (src/lib/brain/towns.ts). First page only:
+    // one visit is one visit, not one per page scrolled.
+    if ((searchParams.get('page') ?? '0') === '0') {
+      void recordTownVisit(
+        (searchParams.get('city') || '').slice(0, 60),
+        (searchParams.get('country') || '').slice(0, 60),
+        parseFloat(searchParams.get('lat') || '0'),
+        parseFloat(searchParams.get('lng') || '0'),
+      ).catch(() => { /* best effort */ });
+    }
   }
 
   if (!noStore) {
@@ -683,6 +699,17 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
       fetchEventbriteEvents(city, country, lat, lng, count, category, page)
         .then(posts => ({ source: 'eventbrite', posts, hasMore: posts.length >= count }))
         .catch(err => { logSourceError('[feed/eb]', err); return { source: 'eventbrite', posts: [], hasMore: false }; })
+    );
+  }
+
+  // Eventfrog: free, searched by COORDINATES, every event read from its own page
+  // with the venue's exact pin. Covers AT/CH/DE/LI, including the small towns the
+  // other sources skip (Baden had zero events before it). See sources/eventfrog.
+  if (EF_CATEGORIES.has(category) && inEventfrogArea(lat, lng)) {
+    tasks.push(
+      fetchEventfrogEvents({ city, country, lat, lng, radiusKm: radius, category, count, page })
+        .then(r => ({ source: 'eventfrog', ...r }))
+        .catch(err => { logSourceError('[feed/eventfrog]', err); return { source: 'eventfrog', posts: [], hasMore: false }; })
     );
   }
 

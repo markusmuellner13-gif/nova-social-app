@@ -217,3 +217,39 @@ describe('dedupeRowsById', () => {
     expect(dedupeRowsById(rows)).toBe(rows);
   });
 });
+
+describe('strays pinned on another town\'s centre', () => {
+  const centres = [
+    { city: 'Mödling', lat: 48.0857, lng: 16.2897 },
+    { city: 'Naples', lat: 40.8518, lng: 14.2681 },
+  ];
+  const row = (id: string, city: string, lat: number, lng: number) => ({ id, city, lat, lng });
+
+  it('flags rows naming another town on a known centre — and only those', async () => {
+    const { strayOnKnownCentre } = await import('./eventsDb');
+    expect(strayOnKnownCentre([
+      row('a', 'Mödling', 48.0857, 16.2897),
+      row('b', 'Bratislava', 48.0857, 16.2897),
+      row('c', 'Steyr', 48.0857, 16.2897),
+      row('d', 'Naples', 40.8518, 14.2681),
+      row('e', 'Ashburn', 40.8518, 14.2681),
+    ], centres)).toEqual(['b', 'c', 'e']);
+  });
+
+  it('a majority of strays never outvotes the town the pin belongs to', async () => {
+    const { strayOnKnownCentre } = await import('./eventsDb');
+    const rows = [row('n', 'Naples', 40.8518, 14.2681),
+      ...Array.from({ length: 17 }, (_, i) => row(`x${i}`, 'Ashburn', 40.8518, 14.2681))];
+    const doomed = strayOnKnownCentre(rows, centres);
+    expect(doomed).not.toContain('n');
+    expect(doomed).toHaveLength(17);
+  });
+
+  it('leaves rows with their own real pin alone, and accepts the local name', async () => {
+    const { strayOnKnownCentre } = await import('./eventsDb');
+    expect(strayOnKnownCentre([
+      row('own-pin', 'Bratislava', 48.1486, 17.1077),
+      row('napoli', 'Napoli', 40.8518, 14.2681),
+    ], centres)).toEqual([]);
+  });
+});

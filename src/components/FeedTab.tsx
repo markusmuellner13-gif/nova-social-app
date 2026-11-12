@@ -14,6 +14,7 @@ import { initBrain, rankPosts, setBrainContext, flushBrain } from '@/lib/brain/c
 import { hasRealPhoto } from '@/lib/brain/features';
 import { chooseNudge, loadNudgeMemory, saveNudgeMemory, rememberNudge } from '@/lib/inAppNudge';
 import { postTitle } from '@/lib/postTitle';
+import { splitLocal } from '@/lib/localFirst';
 import { apiUrl } from '@/lib/apiBase';
 import PostComponent from './Post';
 import { useLanguage } from '@/context/LanguageContext';
@@ -59,11 +60,6 @@ const PARTNER_CHIP_CATS: { emoji: string; label: string; cat: Category | null }[
   { emoji: '🏨',  label: 'Stays',         cat: 'travel'      },
   { emoji: '🗺️', label: 'Experiences',   cat: 'sightseeing' },
 ];
-
-// A post farther than this from the user is treated as a "nearby town", not part
-// of the user's own city — keeps a small town's feed from being flooded by a
-// bigger neighbour while still showing it (clearly labelled) below a divider.
-const LOCAL_RADIUS_KM = 20;
 
 type DateFilter  = 'all' | 'today' | 'weekend' | 'week' | 'month';
 type PriceFilter = 'all' | 'free' | 'u20' | 'u50';
@@ -298,16 +294,32 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
 
   // Discover honours the chip filter and the For You / Recent toggle on the
   // live stream itself (the blend already rotates categories server-side).
+  // Where the user is, for the own-town / nearby-towns split (src/lib/localFirst).
+  const userPlace = useMemo(
+    () => (location?.city && Number.isFinite(location.lat) && Number.isFinite(location.lng)
+      ? { city: location.city, lat: location.lat, lng: location.lng, localKm: location.localKm }
+      : null),
+    [location?.city, location?.lat, location?.lng, location?.localKm],
+  );
+
+  // Own town first, then the towns around it — ranking only ever reorders
+  // WITHIN the own-town part, so the brain can't promote a neighbour's post
+  // above the user's own town. The neighbours keep the order they arrived in
+  // (each page nearest-first).
   const discoverPosts = useMemo(() => {
     let pool = aiPosts;
     if (activeChipCategory) pool = pool.filter(p => p.category === activeChipCategory);
-    if (sortMode === 'recent') return [...pool].sort((a, b) => b.timestamp - a.timestamp);
-    // "For You" is where Nova Brain's trained ranker takes over. It returns the
-    // pool untouched until the model has actually learned something, so a fresh
-    // install still gets the server's soonest-first ordering rather than the
-    // opinions of a model that has seen nothing.
-    return rankPosts(pool, location?.localKm ?? 20);
-  }, [aiPosts, activeChipCategory, sortMode, location?.localKm, brainTick]);
+    const [local, nearby] = splitLocal(pool, userPlace);
+    if (sortMode === 'recent') {
+      return { local: [...local].sort((a, b) => b.timestamp - a.timestamp), nearby };
+    }
+    // "For You" is where Nova Brain's trained ranker takes over. The endless
+    // Discover stream is ranked page by page as it arrives (useAIFeed), so it
+    // is shown in the order it came — re-ranking the whole list here on every
+    // new page moved the card the user was reading. A chip filter is a short,
+    // finite list, so that one is still ranked as a whole.
+    return { local: activeChipCategory ? rankPosts(local, location?.localKm ?? 20) : local, nearby };
+  }, [aiPosts, activeChipCategory, sortMode, location?.localKm, brainTick, userPlace]);
 
   // Build merged feed depending on active tab
   const mergedFeed = useMemo(() => {
@@ -331,10 +343,20 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     }
 
     if (activeMainTab === 'discover') {
-      discoverPosts.forEach((post, slot) => {
+      let slot = 0;
+      const push = (post: Post) => {
         if (adIndex(slot)) items.push({ type: 'ad', index: adIdx++ });
         items.push({ type: 'post', post });
-      });
+        slot++;
+      };
+      discoverPosts.local.forEach(push);
+      if (discoverPosts.nearby.length > 0) {
+        items.push({
+          type: 'divider', city: location?.city ?? '',
+          localEmpty: discoverPosts.local.length === 0, district: location?.district,
+        });
+        discoverPosts.nearby.forEach(push);
+      }
       return items;
     }
 
@@ -344,18 +366,20 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     // the DB, Ticketmaster's auto-expanded radius, or the live crawl). A small
     // town (Baden) leads with its own content; a bigger neighbour (Vienna, ~24km)
     // only appears below the "nearby towns" divider, clearly labelled.
-    const sortOne = (arr: Post[]) => activeMainTab === 'sightseeing'
-      ? [...arr].sort((a, b) => b.timestamp - a.timestamp)
-      : sortByEventDate(arr);
+    // Sights keep the server's order (notable / nearest), in the order pages
+    // arrive. They used to be sorted by `timestamp`, which for a landmark is a
+    // random moment in the last 24 hours — so the list reshuffled on every page
+    // and the card being read jumped away.
+    const sortOne = (arr: Post[]) => activeMainTab === 'sightseeing' ? arr : sortByEventDate(arr);
     const filterOne = (arr: Post[]) => (activeMainTab === 'events' || activeMainTab === 'sport')
       ? applyEventFilters(arr, dateFilter, priceFilter)
       : arr;
 
-    // Local ring adapts to the place (district for a town, metro for a city).
-    const localKm = location?.localKm ?? LOCAL_RADIUS_KM;
-    const isNearby = (p: Post) => typeof p.distanceKm === 'number' && p.distanceKm > localKm;
-    const localSorted  = filterOne(sortOne(hasCity ? aiPosts.filter(p => !isNearby(p)) : aiPosts));
-    const nearbySorted = filterOne(sortOne(hasCity ? aiPosts.filter(isNearby) : []));
+    // Same rule as Discover: the user's own town (by its own core radius AND the
+    // town each post names), then every other town under the divider.
+    const [ownTown, otherTowns] = splitLocal(aiPosts, hasCity ? userPlace : null);
+    const localSorted  = filterOne(sortOne(ownTown));
+    const nearbySorted = filterOne(sortOne(otherTowns));
 
     let slot = 0;
     const pushPosts = (arr: Post[]) => arr.forEach(post => {
@@ -378,7 +402,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
     }
 
     return items;
-  }, [activeMainTab, aiPosts, discoverPosts, sponsoredPosts, dateFilter, priceFilter, partnerCatFilter, hasCity, location?.city]);
+  }, [activeMainTab, aiPosts, discoverPosts, sponsoredPosts, dateFilter, priceFilter, partnerCatFilter, hasCity, location?.city, location?.district, userPlace]);
 
   // Infinite scroll + scroll-position tracking
   const handleScroll = useCallback(() => {
@@ -405,6 +429,26 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
       void fetchMore(aiCategory);
     }
   }, [aiHasMore, aiLoading, fetchMore, aiCategory, resetAI, activeMainTab, showScrollTop]);
+
+  // Keep filling while the runway below the fold is short. The scroll handler
+  // only runs when the user scrolls, so a feed whose first pages were thin (a
+  // small town where several categories are empty) used to sit there looking
+  // finished, with nothing to scroll and no way to ask for more. Bounded: after
+  // eight loads in a row that add nothing it waits for the user again.
+  const emptyFillsRef = useRef(0);
+  const lastFillLenRef = useRef(0);
+  useEffect(() => {
+    if (!initialFetchDone.current || activeMainTab === 'partners' || aiLoading || !aiHasMore) return;
+    const el = scrollRef.current;
+    // A hidden tab has no height — never load in the background for it.
+    if (!el || el.clientHeight === 0) return;
+    if (aiPosts.length !== lastFillLenRef.current) emptyFillsRef.current = 0;
+    else emptyFillsRef.current += 1;
+    lastFillLenRef.current = aiPosts.length;
+    if (emptyFillsRef.current > 8) return;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 2400) void fetchMore(aiCategory);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiLoading, aiHasMore, aiPosts.length, activeMainTab]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -984,18 +1028,21 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
                       <div className="w-9 h-9 rounded-full flex items-center justify-center mb-0.5" style={{ background: 'rgba(139,92,246,0.15)' }}>
                         <span style={{ fontSize: 18 }}>{item.localEmpty ? '📍' : '🎉'}</span>
                       </div>
+                      {/* The line is drawn at the town itself now (src/lib/
+                          localFirst.ts), not its district — so the copy names
+                          the town and nothing wider. */}
                       {item.localEmpty ? (
                         <>
-                          <p className="text-sm font-bold text-white">Nothing on in {item.city} right now</p>
+                          <p className="text-sm font-bold text-white">Nothing listed in {item.city} right now</p>
                           <p className="text-xs max-w-[260px]" style={{ color: '#888899' }}>
-                            {item.district ? `${item.city} and the ${item.district} district` : item.city} look quiet at the moment — here&apos;s what&apos;s happening in nearby towns 👇
+                            {item.city} looks quiet at the moment — here&apos;s what&apos;s on in the towns around it, closest first 👇
                           </p>
                         </>
                       ) : (
                         <>
-                          <p className="text-sm font-bold text-white">That&apos;s everything in {item.district ? `the ${item.district} district` : item.city}!</p>
+                          <p className="text-sm font-bold text-white">You&apos;ve seen everything in {item.city}!</p>
                           <p className="text-xs max-w-[260px]" style={{ color: '#888899' }}>
-                            You&apos;ve reached the end for {item.city}{item.district ? ` & its district` : ''}. Keep scrolling for nearby towns 👇
+                            Keep scrolling for the towns around {item.city}, closest first 👇
                           </p>
                         </>
                       )}
@@ -1013,19 +1060,19 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
                         </span>
                       </div>
                     )}
-                    {/* Only animate entry for the first 5 visible posts to
-                        avoid Framer Motion overhead on long feeds. */}
-                    {i < 5 ? (
-                      <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.2, delay: i * 0.04 }}
-                      >
-                        <PostComponent post={post} showHint={i === 0} />
-                      </motion.div>
-                    ) : (
-                      <PostComponent post={post} showHint={false} />
-                    )}
+                    {/* The first few cards fade in. The wrapper is the SAME
+                        element for every card: it used to be a motion.div for
+                        positions 0–4 and nothing after, so a card pushed past
+                        position 5 by newly loaded posts changed element type —
+                        and React threw the whole card away and rebuilt it,
+                        resetting its photo slideshow, expanded caption and any
+                        sheet the user had open on it. */}
+                    <div
+                      className={i < 5 ? 'feed-enter' : undefined}
+                      style={i < 5 ? { animationDelay: `${i * 40}ms` } : undefined}
+                    >
+                      <PostComponent post={post} showHint={i === 0} />
+                    </div>
                   </div>
                 );
               })}

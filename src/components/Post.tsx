@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Star, Bookmark, MessageCircle, Share2, BadgeCheck, MapPin,
@@ -22,6 +22,7 @@ import UserProfileCard from './UserProfileCard';
 import InviteSheet from './InviteSheet';
 import Avatar from './Avatar';
 import PostImage, { clampAspect } from './PostImage';
+import PostGallery from './PostGallery';
 import { recordInteraction } from '@/lib/brain/client';
 
 interface Props {
@@ -90,7 +91,6 @@ export default function Post({ post, showHint = false }: Props) {
   const [starKey,      setStarKey]      = useState(0);
   const [expanded,     setExpanded]     = useState(false);
   const [imgLoaded,    setImgLoaded]    = useState(false);
-  const [slide,        setSlide]        = useState(0);
   // The card frame takes the shape of its photo (clamped to the feed's range),
   // so posters are shown whole instead of being cropped into a fixed 4:5 box.
   const [aspect,       setAspect]       = useState<number | null>(null);
@@ -240,8 +240,17 @@ export default function Post({ post, showHint = false }: Props) {
     setShowReminderSheet(false);
   }, [post.id, removeReminder, addToast]);
 
-  const caption = post.caption;
-  const isLong  = caption.length > 90;
+  // The post's real name, and the caption as it should READ: without the raw
+  // "🔗 Tickets & info: https://…" line (the Tickets button below is that link)
+  // and without repeating the name the headline already shows.
+  const title = postTitle(post, '', 120);
+  const caption = useMemo(() => {
+    const lines = post.caption.split('\n').filter(l => !/^\s*🔗/u.test(l));
+    const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+    if (title && lines.length && norm(lines[0]) === norm(title)) lines.shift();
+    return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }, [post.caption, title]);
+  const isLong  = caption.length > 160;
   // Swipeable gallery when the post carries multiple real photos; otherwise just
   // the single image (most posts).
   const gallery = post.images && post.images.length > 1 ? post.images : [post.image];
@@ -346,25 +355,14 @@ export default function Post({ post, showHint = false }: Props) {
         >
           {!imgLoaded && <div className="absolute inset-0 shimmer" />}
           {gallery.length > 1 ? (
-            <div
-              className="flex w-full h-full overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              onScroll={(e) => setSlide(Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth))}
+            <PostGallery
+              images={gallery}
+              alt={title || post.caption}
+              onFirstLoaded={() => setImgLoaded(true)}
+              onAspect={setAspect}
               onDoubleClick={handleDoubleTap}
-              style={{ opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.3s' }}
-            >
-              {gallery.map((src, i) => (
-                <PostImage
-                  key={i}
-                  src={src}
-                  alt={post.caption}
-                  priority={i === 0}
-                  onLoaded={i === 0 ? () => setImgLoaded(true) : undefined}
-                  onAspect={i === 0 ? setAspect : undefined}
-                  className="flex-shrink-0 snap-center"
-                  style={{ minWidth: '100%' }}
-                />
-              ))}
-            </div>
+              visible={imgLoaded}
+            />
           ) : (
             <PostImage
               src={post.image}
@@ -375,23 +373,6 @@ export default function Post({ post, showHint = false }: Props) {
               onDoubleClick={handleDoubleTap}
               style={{ opacity: imgLoaded ? 1 : 0, transition: 'opacity 0.3s' }}
             />
-          )}
-
-          {/* Gallery indicators */}
-          {gallery.length > 1 && (
-            <>
-              <div className="absolute top-3 right-3 px-2 py-0.5 rounded-full text-xs font-semibold pointer-events-none"
-                style={{ background: 'rgba(0,0,0,0.6)', color: 'white', backdropFilter: 'blur(6px)' }}>
-                {slide + 1}/{gallery.length}
-              </div>
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 pointer-events-none">
-                {gallery.map((_, i) => (
-                  <div key={i} className="rounded-full transition-all"
-                    style={{ width: i === slide ? 7 : 5, height: i === slide ? 7 : 5,
-                      background: i === slide ? '#fff' : 'rgba(255,255,255,0.5)' }} />
-                ))}
-              </div>
-            </>
           )}
 
           <AnimatePresence>
@@ -514,16 +495,26 @@ export default function Post({ post, showHint = false }: Props) {
             </div>
           )}
 
-          {/* Caption */}
-          <p className="text-sm leading-relaxed" style={{ color: '#d0d0e8' }}>
-            <span className="font-semibold text-white mr-1">{post.user.username}</span>
-            {isLong && !expanded ? (
-              <>
-                {caption.slice(0, 110)}
-                <button onClick={() => setExpanded(true)} className="ml-1 font-semibold" style={{ color: '#a78bfa' }}>{t.common.more}</button>
-              </>
-            ) : caption}
-          </p>
+          {/* What it IS, first and boldest — the name of the event or place.
+              Before, a card opened with an @handle derived from the organiser
+              ("replugged.vienna.live.music.ga") and the name was buried
+              mid-sentence in the caption. */}
+          {title && (
+            <h3 className="text-base font-bold text-white leading-snug mb-1 line-clamp-2">{title}</h3>
+          )}
+
+          {/* Caption — keeps its own line breaks (date / venue / price each on
+              their line) instead of running them together into one paragraph. */}
+          {caption && (
+            <p className="text-sm leading-relaxed whitespace-pre-line" style={{ color: '#d0d0e8' }}>
+              {isLong && !expanded ? (
+                <>
+                  {caption.slice(0, 140).trimEnd()}…
+                  <button onClick={() => setExpanded(true)} className="ml-1 font-semibold" style={{ color: '#a78bfa' }}>{t.common.more}</button>
+                </>
+              ) : caption}
+            </p>
+          )}
 
           {/* Hashtags */}
           {post.hashtags.length > 0 && (

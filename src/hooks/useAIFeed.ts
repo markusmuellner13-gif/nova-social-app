@@ -5,6 +5,8 @@ import { Post, LocationState } from '@/types';
 import { apiUrl } from '@/lib/apiBase';
 import { restampDistances, metresBetween, coarse, FEED_REFRESH_MOVE_M } from '@/lib/liveLocation';
 import { withoutEndedEvents } from '@/lib/brain/expiry';
+import { splitLocal, byDistance, cityFetchRadiusKm, isMetro, type UserPlace } from '@/lib/localFirst';
+import { rankPosts } from '@/lib/brain/client';
 
 // Cache settings — localStorage so reopening the app shows content instantly
 const EVENTS_TTL_MS    = 5  * 60 * 1000; // 5 min for events (change often)
@@ -34,10 +36,13 @@ const BLEND_CATEGORIES = [
   'lifestyle', 'community', 'sightseeing', 'hotels', 'fitness', 'rentals',
   'shops', 'tech', 'fashion', 'travel', 'pets',
 ];
-// How many pages deep to go through every category before stopping (≈ endless).
-// 18 categories × 22 rounds × ~16 posts ≈ thousands of real posts before the
-// stream ever signals "the end".
-const BLEND_MAX_ROUNDS = 22;
+// Pages per category per phase before it steps aside for the others. Deep enough
+// for a big city's catalogue; it only bounds a source that never says "no more".
+const BLEND_MAX_PAGES = 12;
+// One fetchMore() keeps requesting until it has added this many posts…
+const BLEND_MIN_NEW = 6;
+// …or spent this many requests (most are answered from the prefetch buffer).
+const BLEND_MAX_REQUESTS = 4;
 
 // Posts requested per page. The feed route caps at 20; 16 gives big batches so
 // the user scrolls a long way between network round-trips.
@@ -287,7 +292,19 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
   const refreshTimer  = useRef<ReturnType<typeof setInterval> | null>(null);
   const tourismFetchedRef = useRef<Set<string>>(new Set());
   const sponsoredFetchedRef = useRef<Set<string>>(new Set());
-  const blendStepRef  = useRef(0); // rotation counter for discover blend mode
+  const blendStepRef  = useRef(0); // discover blend calls made since the last reset
+  // Local-first blend state (see fetchBlend).
+  const phaseRef      = useRef<'city' | 'nearby'>('city');
+  const ringRef       = useRef(0);
+  const catPageRef    = useRef<Map<string, number>>(new Map());
+  const catDoneRef    = useRef<Set<string>>(new Set());
+  const catFailRef    = useRef<Map<string, number>>(new Map());
+  const rotRef        = useRef(0);
+  // Neighbouring towns' posts met during the own-town phase, shown after it.
+  const heldRef       = useRef<Post[]>([]);
+  // What's on screen right now, readable synchronously inside fetchBlend.
+  const postsRef      = useRef<Post[]>([]);
+  useEffect(() => { postsRef.current = posts; }, [posts]);
   // Next-page prefetch buffer: params-string → parsed response promise
   const prefetchRef   = useRef<Map<string, Promise<FeedResponse | null>>>(new Map());
 
@@ -312,7 +329,13 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     const cached = readCache(city, cat);
 
     if (cached && cached.posts.length > 0) {
-      const fresh = filterExpired(cached.posts);
+      // Restore only the user's own town; neighbours wait in the held buffer
+      // and come back in order once the own-town stream is exhausted, exactly
+      // as they would on a fresh load.
+      const [fresh, away] = splitLocal(filterExpired(cached.posts), userPlace(location));
+      resetBlend();
+      heldRef.current = away;
+      postsRef.current = fresh;
       setPosts(fresh);
       pageRef.current       = cached.page;
       radiusTierRef.current = cached.radiusTier;
@@ -355,11 +378,18 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     try {
-      const params = buildParams(loc, category, 0, localTier(loc), DAYS_TIERS[0]);
+      // In Discover the refresh is the head of the OWN-TOWN stream, so it asks
+      // for the town's radius and keeps only the town's posts — anything else
+      // would land above the "nearby towns" divider.
+      const isBlend = category === 'discover';
+      const user = userPlace(loc);
+      const radius = isBlend && user ? cityFetchRadiusKm(user) : localTier(loc);
+      const params = buildParams(loc, category, 0, radius, DAYS_TIERS[0]);
       const res = await fetchWithTimeout(apiUrl(`/api/feed?${params}`));
       if (!res.ok) return;
       const data = await res.json() as FeedResponse;
-      const fresh = filterExpired(data.posts ?? []);
+      let fresh = filterExpired(data.posts ?? []);
+      if (isBlend) fresh = splitLocal(fresh, user)[0];
       if (!fresh.length) return;
       setPosts(prev => {
         // The refresh is the SERVER's current, correctly-ranked first page, so it
@@ -394,7 +424,10 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     fetchWithTimeout(apiUrl(`/api/events?${params}`))
       .then(res => (res.ok ? res.json() : null))
       .then((data: { posts?: Post[] } | null) => {
-        const tourismPosts = filterExpired(data?.posts ?? []);
+        // A tourism board promotes its whole region; only its own town's events
+        // join the stream now, the rest wait their turn with the other towns.
+        const [tourismPosts, away] = splitLocal(filterExpired(data?.posts ?? []), userPlace(loc));
+        heldRef.current.push(...away);
         if (!tourismPosts.length) return;
         setPosts(prev => {
           const merged = mergeUnique(prev, tourismPosts);
@@ -487,6 +520,158 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     );
   }
 
+  // ── Discover blend, local-first ────────────────────────────────────────────
+  // Phase "city": every category, page after page, at a radius that holds the
+  // user's own town — until each category says it has nothing more. Anything
+  // that comes back from a neighbouring town is set aside, not shown, so the
+  // user scrolls through ALL of their own town before a single neighbour.
+  //
+  // Phase "nearby": the set-aside posts first (nearest town first), then the
+  // same rotation over widening rings. Each page is sorted by distance before
+  // it is appended, so the closer towns come first without anything already on
+  // screen ever being reshuffled.
+  //
+  // One fetchMore() keeps going until it has added a handful of posts (or spent
+  // its request budget), so a run of empty categories can't leave the feed
+  // looking finished when it isn't.
+  function userPlace(loc: LocationState | null): UserPlace | null {
+    if (!loc?.city || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) return null;
+    return { city: loc.city, lat: loc.lat, lng: loc.lng, localKm: loc.localKm };
+  }
+
+  function nearbyRings(loc: LocationState | null): number[] {
+    // A metro's own ring (22 km) already IS its city phase; a town widens from
+    // its geocoder ring (16 km) — the band where its neighbours live.
+    return isMetro({ localKm: loc?.localKm }) ? [45, 100, 200] : [localTier(loc), 45, 100, 200];
+  }
+
+  function blendRadius(loc: LocationState | null): number {
+    if (phaseRef.current === 'city') {
+      const user = userPlace(loc);
+      return user ? cityFetchRadiusKm(user) : localTier(loc);
+    }
+    const rings = nearbyRings(loc);
+    return rings[Math.min(ringRef.current, rings.length - 1)];
+  }
+
+  function resetBlend() {
+    phaseRef.current = 'city';
+    ringRef.current = 0;
+    catPageRef.current = new Map();
+    catDoneRef.current = new Set();
+    catFailRef.current = new Map();
+    rotRef.current = 0;
+    heldRef.current = [];
+  }
+
+  /** The next category with something left in this phase, rotating. */
+  function nextBlendCategory(advance: boolean, skip = 0): string | null {
+    let seen = 0;
+    for (let k = 0; k < BLEND_CATEGORIES.length; k++) {
+      const i = (rotRef.current + k) % BLEND_CATEGORIES.length;
+      const c = BLEND_CATEGORIES[i];
+      if (catDoneRef.current.has(c)) continue;
+      if (seen++ < skip) continue;
+      if (advance) rotRef.current = (i + 1) % BLEND_CATEGORIES.length;
+      return c;
+    }
+    return null;
+  }
+
+  /** Append posts the user doesn't have yet; returns how many were new. */
+  function appendBlend(fresh: Post[], city: string): number {
+    if (fresh.length === 0) return 0;
+    const before = postsRef.current;
+    const merged = mergeUnique(before, fresh);
+    const added = merged.length - before.length;
+    if (added > 0) {
+      postsRef.current = merged;
+      setPosts(prev => {
+        const next = mergeUnique(prev, fresh);
+        writeCache(city, 'discover', next, 0, 0);
+        return next;
+      });
+    }
+    return added;
+  }
+
+  /** Move to the next phase/ring. Returns how many posts that released, or -1
+   *  when there is nowhere left to go. */
+  function advanceBlend(loc: LocationState | null, city: string): number {
+    if (phaseRef.current === 'city') {
+      phaseRef.current = 'nearby';
+      ringRef.current = 0;
+    } else if (ringRef.current < nearbyRings(loc).length - 1) {
+      ringRef.current += 1;
+    } else {
+      return -1;
+    }
+    catPageRef.current = new Map();
+    catDoneRef.current = new Set();
+    catFailRef.current = new Map();
+    rotRef.current = 0;
+    if (nearbyStartRef.current === null) {
+      nearbyStartRef.current = postsRef.current.length;
+      setNearbyStartIndex(postsRef.current.length);
+    }
+    const user = userPlace(loc);
+    const held = heldRef.current;
+    heldRef.current = [];
+    return appendBlend(user ? byDistance(held, user) : held, city);
+  }
+
+  async function fetchBlend(loc: LocationState | null, city: string) {
+    const user = userPlace(loc);
+    const days = DAYS_TIERS[DAYS_TIERS.length - 1];
+    let added = 0;
+    let requests = 0;
+    while (added < BLEND_MIN_NEW && requests < BLEND_MAX_REQUESTS) {
+      const cat = nextBlendCategory(true);
+      if (!cat) {
+        const released = advanceBlend(loc, city);
+        if (released < 0) { setHasMore(false); return; }
+        added += released;
+        continue;
+      }
+      const page = catPageRef.current.get(cat) ?? 0;
+      const radius = blendRadius(loc);
+      requests++;
+      const data = await fetchFeedPage(loc, cat, page, radius, days);
+      if (!data) {
+        // A failed request isn't "nothing here" — retry the category once, then
+        // move on so one broken source can't stall the stream.
+        const fails = (catFailRef.current.get(cat) ?? 0) + 1;
+        catFailRef.current.set(cat, fails);
+        if (fails >= 2) catDoneRef.current.add(cat);
+        continue;
+      }
+      catPageRef.current.set(cat, page + 1);
+      const got = filterExpired(data.posts ?? []);
+      if (got.length === 0 || data.hasMore === false || page + 1 >= BLEND_MAX_PAGES) catDoneRef.current.add(cat);
+
+      const [local, away] = splitLocal(got, user);
+      if (phaseRef.current === 'city') {
+        heldRef.current.push(...away);
+        // Nova Brain ranks each page ONCE, as it arrives, and it is appended
+        // in that order. Re-ranking the whole list on every new page (what the
+        // feed used to do) moved cards the user was already looking at.
+        added += appendBlend(rankPosts(local, loc?.localKm ?? 20), city);
+      } else {
+        // Own-town posts were already shown in the city phase; a ring page only
+        // contributes the towns around it.
+        added += appendBlend(user ? byDistance(away, user) : away, city);
+      }
+
+      // Warm the next two category pages of this phase, so the next call is
+      // usually answered from the buffer instead of the network.
+      for (const skip of [0, 1]) {
+        const nc = nextBlendCategory(false, skip);
+        if (nc) prefetchNextPage(loc, nc, catPageRef.current.get(nc) ?? 0, radius, days);
+      }
+    }
+    setHasMore(true);
+  }
+
   // ── fetchMore: paginate; expand radius, then date window, when exhausted ──
   const fetchMore = useCallback(async (category?: string) => {
     if (inFlightRef.current) return;
@@ -504,34 +689,15 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       : (RADIUS_TIERS[radiusTierRef.current] ?? RADIUS_TIERS[RADIUS_TIERS.length - 1]);
     const days   = DAYS_TIERS[daysTierRef.current] ?? DAYS_TIERS[DAYS_TIERS.length - 1];
 
-    // ── Discover BLEND: rotate through every category for an endless mixed feed ─
+    // ── Discover BLEND: own town first — all of it — then the towns around it ──
     if (cat === 'discover') {
-      const step  = blendStepRef.current;
-      const bcat  = BLEND_CATEGORIES[step % BLEND_CATEGORIES.length];
-      const bpage = Math.floor(step / BLEND_CATEGORIES.length);
-      if (step === 0 && location?.city) {
+      if (blendStepRef.current === 0 && location?.city) {
         fetchTourismEvents(location.city, location, 'events');
         fetchSponsored(location.city);
       }
+      blendStepRef.current += 1;
       try {
-        const data = await fetchFeedPage(location, bcat, bpage, localTier(location), DAYS_TIERS[daysTierRef.current] ?? DAYS_TIERS[0]);
-        const newPosts = filterExpired(data?.posts ?? []);
-        if (newPosts.length > 0) {
-          setPosts(prev => {
-            const merged = mergeUnique(prev, newPosts);
-            writeCache(city, 'discover', merged, 0, 0);
-            return merged;
-          });
-        }
-        blendStepRef.current = step + 1;
-        setHasMore(blendStepRef.current < BLEND_CATEGORIES.length * BLEND_MAX_ROUNDS);
-        // Warm the next TWO category pages so scrolling never shows a spinner
-        const dTier = DAYS_TIERS[daysTierRef.current] ?? DAYS_TIERS[0];
-        for (const ahead of [1, 2]) {
-          const next = step + ahead;
-          prefetchNextPage(location, BLEND_CATEGORIES[next % BLEND_CATEGORIES.length],
-            Math.floor(next / BLEND_CATEGORIES.length), localTier(location), dTier);
-        }
+        await fetchBlend(location, city);
       } catch (err) {
         console.error('[useAIFeed/blend]', err);
       } finally {
@@ -648,6 +814,8 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     inFlightRef.current   = false;
     prevCityRef.current   = null;
     blendStepRef.current  = 0;
+    resetBlend();
+    postsRef.current      = [];
     nearbyStartRef.current = null;
     setNearbyStartIndex(null);
     setEmptyReason(null);

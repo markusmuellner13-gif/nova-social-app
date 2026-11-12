@@ -8,6 +8,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { cacheIncr } from './serverCache';
 import { canonicalCity } from './cityName';
+import { sameCityish } from './cityMatch';
 import type { ApiPost } from '@/lib/sources/shared';
 import { enforceRealImages } from '@/lib/sources/realImage';
 import { cleanTitle, titleFromCaption } from './postTitle';
@@ -366,11 +367,84 @@ async function shouldPurgeNow(): Promise<boolean> {
 }
 
 /** Delete a bounded slice of long-expired rows. Never throws, never blocks. */
-export async function purgeExpiredEvents(opts: { force?: boolean } = {}): Promise<number> {
+export async function purgeExpiredEvents(opts: { force?: boolean; knownCentres?: KnownCentre[] } = {}): Promise<number> {
   if (!writeClient) return 0;
   if (!opts.force && !(await shouldPurgeNow())) return 0;
 
-  return await purgeExpiredSlice() + await dedupeLegacyCrawlerRows();
+  return await purgeExpiredSlice()
+    + await dedupeLegacyCrawlerRows()
+    + (opts.knownCentres?.length ? await purgeMislocatedEventbriteRows(opts.knownCentres) : 0);
+}
+
+// ── Eventbrite rows pinned on another town ───────────────────────────────────
+// Eventbrite listings carry no coordinates, so each one was pinned at the centre
+// of the town whose page it was read from — including listings for OTHER towns
+// that page happened to show. Measured 2026-11-12: Bratislava, Steyr, Freistadt
+// and Hollabrunn events all sat on Mödling's centre point, 10 km from Baden,
+// where they surfaced as "nearby" events. The source no longer keeps such
+// listings (fetchEventbriteEvents); this removes the ones already stored.
+//
+// The pin itself says which town it belongs to: these rows sit EXACTLY on the
+// centre point of a town the ingest sweeps (its CITIES list). A row on that
+// point naming a different town was put there by the old fallback.
+//
+// Deliberately NOT a "most rows on this point" vote — a dry run against the
+// production rows showed why: on Naples' centre, 17 rows from Ashburn
+// (Virginia) outnumber Naples' own, so a vote would have deleted Naples and
+// kept the strays; on Zürich's, the strays outnumbered Zürich so nothing was
+// judged at all.
+export interface KnownCentre { city: string; lat: number; lng: number }
+const MISLOCATED_SCAN_PAGES = 10;
+const MISLOCATED_MAX_DELETE = 1_000;
+const CENTRE_MATCH_DEG = 0.0001; // ~10 m: the pin IS the centre, not merely near it
+
+export function strayOnKnownCentre(
+  rows: { id: string; city: string | null; lat: number | null; lng: number | null }[],
+  centres: KnownCentre[],
+): string[] {
+  const doomed: string[] = [];
+  for (const r of rows) {
+    if (r.lat == null || r.lng == null || !r.city) continue;
+    const home = centres.find(c =>
+      Math.abs(c.lat - (r.lat as number)) < CENTRE_MATCH_DEG && Math.abs(c.lng - (r.lng as number)) < CENTRE_MATCH_DEG);
+    if (home && !sameCityish(r.city, home.city)) doomed.push(r.id);
+  }
+  return doomed;
+}
+
+async function purgeMislocatedEventbriteRows(centres: KnownCentre[]): Promise<number> {
+  if (!writeClient) return 0;
+  try {
+    const rows: { id: string; city: string | null; lat: number | null; lng: number | null }[] = [];
+    for (let page = 0; page < MISLOCATED_SCAN_PAGES; page++) {
+      const { data, error } = await writeClient
+        .from('events')
+        .select('id, city, lat, lng')
+        .eq('source', 'eb')
+        .order('id', { ascending: true })
+        .range(page * 1000, page * 1000 + 999)
+        .abortSignal(AbortSignal.timeout(PURGE_TIMEOUT_MS));
+      if (error || !data?.length) break;
+      rows.push(...(data as typeof rows));
+      if (data.length < 1000) break;
+    }
+    const doomed = strayOnKnownCentre(rows, centres).slice(0, MISLOCATED_MAX_DELETE);
+    let deleted = 0;
+    for (let i = 0; i < doomed.length; i += DEDUPE_DELETE_CHUNK) {
+      const chunk = doomed.slice(i, i + DEDUPE_DELETE_CHUNK);
+      const { error } = await writeClient
+        .from('events')
+        .delete()
+        .in('id', chunk)
+        .abortSignal(AbortSignal.timeout(PURGE_TIMEOUT_MS));
+      if (error) { console.error('[eventsDb/mislocated]', error.message); break; }
+      deleted += chunk.length;
+    }
+    return deleted;
+  } catch (err) {
+    console.error('[eventsDb/mislocated]', err instanceof Error ? err.message : 'mislocated purge failed');
+    return 0;
+  }
 }
 
 async function purgeExpiredSlice(): Promise<number> {

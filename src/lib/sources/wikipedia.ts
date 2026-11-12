@@ -172,7 +172,7 @@ export async function fetchWikipediaSummary(title: string): Promise<WikiSummary 
 // The REST media-list endpoint returns every image used on the article. We keep
 // the real photos (skip SVG logos/icons/maps), upscale the thumbnails, and proxy
 // them — giving a sightseeing post a genuine swipeable gallery instead of one shot.
-export async function fetchWikipediaImages(title: string, max = 6): Promise<string[]> {
+export async function fetchWikipediaImages(title: string, max = 8): Promise<string[]> {
   try {
     const encoded = encodeURIComponent(title.replace(/ /g, '_'));
     const res = await fetch(
@@ -216,7 +216,7 @@ export async function fetchWikipediaImages(title: string, max = 6): Promise<stri
 // designated image (P18) and, when it has an English Wikipedia article, pull
 // that article's full photo set too — giving outdoors & OSM places the same
 // swipeable Wikimedia gallery the sightseeing tab already enjoys. Free, no key.
-export async function fetchCommonsImagesByWikidata(qid: string, max = 6): Promise<string[]> {
+export async function fetchCommonsImagesByWikidata(qid: string, max = 8): Promise<string[]> {
   if (!/^Q\d+$/.test(qid)) return [];
   try {
     const res = await fetch(
