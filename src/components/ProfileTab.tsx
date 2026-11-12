@@ -25,6 +25,10 @@ import { apiUrl } from '@/lib/apiBase';
 import { postImageUrl } from '@/lib/imageUrl';
 import { coverBackground } from '@/components/PostImage';
 import { openHostedPage, canShowBusinessPortal } from '@/lib/openExternal';
+import { postTitle } from '@/lib/postTitle';
+import { isEventOver, localToday } from '@/lib/brain/expiry';
+import PostViewer from '@/components/PostViewer';
+import { NAV_CLEARANCE } from '@/components/BottomNav';
 
 const ALL_LOCALES = Object.keys(LOCALE_NAMES) as Locale[];
 
@@ -84,6 +88,10 @@ export default function ProfileTab({ onOpenAuth }: Props) {
   const [followingProfiles, setFollowingProfiles] = useState<SupabaseProfile[]>([]);
   const [followerProfiles, setFollowerProfiles]   = useState<SupabaseProfile[]>([]);
   const [showConnections, setShowConnections] = useState<'followers' | 'following' | null>(null);
+  // A kept post opened full-screen: the collection it came from (snapshotted at
+  // the tap), which one was tapped, and the collection's name for the header.
+  const [viewer, setViewer] = useState<{ posts: Post[]; startId: string; title: string } | null>(null);
+  const openViewer = (posts: Post[], startId: string, title: string) => setViewer({ posts, startId, title });
 
   // Load the user's real follower/following lists from Supabase
   useEffect(() => {
@@ -113,7 +121,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
   // Everything the user has RSVP'd "going" to — newest first, upcoming events
   // ahead of undated/past ones so the next thing they're attending leads.
   const goingPostsResolved = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localToday();
     const upcomingFirst = (p: Post) => (p.eventDateRaw && p.eventDateRaw >= today ? 0 : 1);
     return resolvePosts(state.goingPosts).sort((a, b) => {
       const ua = upcomingFirst(a), ub = upcomingFirst(b);
@@ -124,7 +132,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
   }, [state.goingPosts, interactionPool]);
 
   const upcomingEvents: Post[] = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localToday();
     return [...savedPosts, ...resolvePosts(state.goingPosts)]
       .filter((p, i, arr) => p.isEvent && p.eventDateRaw && p.eventDateRaw >= today && arr.findIndex(x => x.id === p.id) === i)
       .sort((a, b) => (a.eventDateRaw ?? '').localeCompare(b.eventDateRaw ?? ''));
@@ -859,15 +867,19 @@ export default function ProfileTab({ onOpenAuth }: Props) {
         {activeSection === 'liked' && (
           <div className="grid grid-cols-3 gap-0.5 mt-0.5">
             {likedPosts.map((post, i) => (
-              <motion.div key={post.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
-                className="relative overflow-hidden" style={{ aspectRatio: '1', background: coverBackground(post.id) }}>
+              <motion.button key={post.id} type="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={() => openViewer(likedPosts, post.id, t.profile.liked)}
+                aria-label={postTitle(post, 'Post', 80)}
+                className="relative overflow-hidden block w-full p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nova-violet" style={{ aspectRatio: '1', background: coverBackground(post.id) }}>
                 {post.image && <img src={postImageUrl(post.image, 480)} alt="" loading="lazy" className="w-full h-full object-cover object-center" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
+                {!post.image && <TileTitle post={post} />}
                 <div className="absolute top-1 right-1">
                   <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.55)' }}>
                     <Star size={10} fill="#f59e0b" style={{ color: '#f59e0b' }} />
                   </div>
                 </div>
-              </motion.div>
+              </motion.button>
             ))}
             {likedPosts.length === 0 && (
               <div className="col-span-3 flex flex-col items-center py-16">
@@ -883,16 +895,20 @@ export default function ProfileTab({ onOpenAuth }: Props) {
         {activeSection === 'saved' && (
           <div className="grid grid-cols-3 gap-0.5 mt-0.5">
             {savedPosts.map((post, i) => (
-              <motion.div key={post.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
-                className="relative overflow-hidden" style={{ aspectRatio: '1', background: coverBackground(post.id) }}>
+              <motion.button key={post.id} type="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={() => openViewer(savedPosts, post.id, t.profile.saved)}
+                aria-label={postTitle(post, 'Post', 80)}
+                className="relative overflow-hidden block w-full p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nova-violet" style={{ aspectRatio: '1', background: coverBackground(post.id) }}>
                 {post.image && <img src={postImageUrl(post.image, 480)} alt="" loading="lazy" className="w-full h-full object-cover object-center" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
+                {!post.image && <TileTitle post={post} />}
                 {post.isEvent && (
                   <div className="absolute bottom-0 left-0 right-0 py-0.5 text-center font-bold"
                     style={{ background: 'rgba(244,63,94,0.85)', color: 'white', fontSize: 9 }}>
                     {t.common.event}
                   </div>
                 )}
-              </motion.div>
+              </motion.button>
             ))}
             {savedPosts.length === 0 && (
               <div className="col-span-3 flex flex-col items-center py-16">
@@ -916,11 +932,8 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             ) : (
               <div className="flex flex-col gap-3 pb-8">
                 {goingPostsResolved.map((event, i) => {
-                  const today = new Date().toISOString().split('T')[0];
-                  const isPast = Boolean(event.eventDateRaw && event.eventDateRaw < today);
-                  const days = event.eventDateRaw
-                    ? Math.floor((new Date(event.eventDateRaw).getTime() - Date.now()) / 86_400_000)
-                    : null;
+                  const isPast = isEventOver(event);
+                  const days = daysUntilDate(event.eventDateRaw);
                   const daysLabel = days === null ? null
                     : days < 0 ? t.profile.going_label
                     : days === 0 ? t.profile.today
@@ -929,11 +942,13 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                   return (
                     <motion.div key={event.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
                       className="flex gap-3 p-3 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38', opacity: isPast ? 0.55 : 1 }}>
+                      <button type="button" onClick={() => openViewer(goingPostsResolved, event.id, t.profile.going)}
+                        className="flex gap-3 flex-1 min-w-0 text-left rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nova-violet">
                       <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0" style={{ background: coverBackground(event.id) }}>
                         {event.image && <img src={postImageUrl(event.image, 480)} alt="" loading="lazy" className="w-full h-full object-cover object-center" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-white truncate">{event.caption.split('\n')[0].slice(0, 50)}</p>
+                        <p className="text-sm font-bold text-white truncate">{postTitle(event, 'Event', 60)}</p>
                         {event.eventVenue && <p className="text-xs mt-0.5 truncate" style={{ color: '#888899' }}>📍 {event.eventVenue}</p>}
                         <div className="flex items-center gap-2 mt-2 flex-wrap">
                           <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
@@ -947,8 +962,10 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                           )}
                         </div>
                       </div>
+                      </button>
                       {event.eventUrl && (
-                        <a href={event.eventUrl} target="_blank" rel="noopener noreferrer" className="flex-shrink-0 self-center p-2 rounded-xl" style={{ background: 'rgba(139,92,246,0.12)' }}>
+                        <a href={event.eventUrl} target="_blank" rel="noopener noreferrer" aria-label="Open event website"
+                          className="flex-shrink-0 self-center min-h-11 min-w-11 flex items-center justify-center rounded-xl" style={{ background: 'rgba(139,92,246,0.12)' }}>
                           <ExternalLink size={14} style={{ color: '#a78bfa' }} />
                         </a>
                       )}
@@ -972,18 +989,18 @@ export default function ProfileTab({ onOpenAuth }: Props) {
             ) : (
               <div className="flex flex-col gap-4 pb-8">
                 {upcomingEvents.map(event => {
-                  const days = event.eventDateRaw
-                    ? Math.floor((new Date(event.eventDateRaw).getTime() - Date.now()) / 86_400_000)
-                    : null;
+                  const days = daysUntilDate(event.eventDateRaw);
                   const isGoing = goingPosts.includes(event.id);
                   const daysLabel = days === 0 ? t.profile.today : days === 1 ? t.profile.tomorrow : days !== null ? `${days}${t.profile.daysAway}` : null;
                   return (
-                    <div key={event.id} className="flex gap-3 p-4 rounded-2xl" style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
+                    <button type="button" key={event.id} onClick={() => openViewer(upcomingEvents, event.id, t.profile.calendar)}
+                      className="flex gap-3 p-4 rounded-2xl text-left w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nova-violet"
+                      style={{ background: '#13131a', border: '1px solid #2a2a38' }}>
                       <div className="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0" style={{ background: coverBackground(event.id) }}>
                         {event.image && <img src={postImageUrl(event.image, 480)} alt="" loading="lazy" className="w-full h-full object-cover object-center" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-white truncate">{event.caption.split('\n')[0].slice(0, 50)}</p>
+                        <p className="text-sm font-bold text-white truncate">{postTitle(event, 'Event', 60)}</p>
                         <p className="text-xs mt-0.5 truncate" style={{ color: '#888899' }}>{event.eventVenue}</p>
                         <div className="flex items-center gap-2 mt-2">
                           {daysLabel && (
@@ -999,7 +1016,7 @@ export default function ProfileTab({ onOpenAuth }: Props) {
                           )}
                         </div>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -1032,8 +1049,45 @@ export default function ProfileTab({ onOpenAuth }: Props) {
           </div>
         )}
 
-        <div style={{ height: 100 }} />
+        {/* Clears the bottom nav whatever its height on this device. */}
+        <div style={{ height: `calc(${NAV_CLEARANCE} + 24px)` }} />
       </div>
+
+      {/* A kept post, opened full-screen with every action the feed has. */}
+      <AnimatePresence>
+        {viewer && (
+          <PostViewer
+            key={viewer.startId}
+            posts={viewer.posts}
+            startId={viewer.startId}
+            title={viewer.title}
+            onClose={() => setViewer(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+// Days from today to an event date, both as LOCAL calendar days. Parsing
+// "2026-11-12" with `new Date()` gives UTC midnight, and flooring the gap to
+// `Date.now()` made an event happening today read "-1 days away".
+function daysUntilDate(eventDateRaw?: string | null): number | null {
+  if (!eventDateRaw || !/^\d{4}-\d{2}-\d{2}/.test(eventDateRaw)) return null;
+  const then = Date.parse(`${eventDateRaw.slice(0, 10)}T00:00:00`);
+  const now = Date.parse(`${localToday()}T00:00:00`);
+  if (!Number.isFinite(then)) return null;
+  return Math.round((then - now) / 86_400_000);
+}
+
+// A photo-less tile shows the post's name on its designed cover, so a grid of
+// saved places without pictures isn't a wall of anonymous gradients.
+function TileTitle({ post }: { post: Post }) {
+  return (
+    <span className="absolute inset-0 flex items-end p-1.5 text-left">
+      <span className="text-[11px] font-semibold leading-tight text-white line-clamp-3" style={{ textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}>
+        {postTitle(post, '', 60)}
+      </span>
+    </span>
   );
 }

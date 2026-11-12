@@ -177,3 +177,43 @@ describe('upsertEvents', () => {
     await expect(upsertEvents(rows(30))).resolves.toBeTypeOf('number');
   });
 });
+
+describe('legacy crawler copies', () => {
+  it('keeps one row per event and returns the rest for deletion', async () => {
+    const { legacyDuplicateIds } = await import('./eventsDb');
+    const ids = [
+      'nova_founders-fest-vienna-2026_2026-11-13_10',
+      'nova_founders-fest-vienna-2026_2026-11-13_5',
+      'nova_founders-fest-vienna-2026_2026-11-13_6',
+      'nova_jonny5-in-wien_2026-11-13_7',
+      'nova_morning-coffee-rave_2026-11-14_4',
+      'nova_morning-coffee-rave_2026-11-13_4',
+    ];
+    expect(legacyDuplicateIds(ids)).toEqual([
+      'nova_founders-fest-vienna-2026_2026-11-13_5',
+      'nova_founders-fest-vienna-2026_2026-11-13_6',
+    ]);
+  });
+
+  it('never touches other sources or the new content-derived ids', async () => {
+    const { legacyDuplicateIds } = await import('./eventsDb');
+    expect(legacyDuplicateIds([
+      'eb_1991287983964', 'eb_1991287983965',
+      'nova_jazz_2026-11-13_habc12', 'nova_jazz_2026-11-13_hxyz99',
+    ])).toEqual([]);
+  });
+});
+
+describe('dedupeRowsById', () => {
+  it('keeps the last copy of a repeated id so one upsert never hits a row twice', async () => {
+    const { dedupeRowsById } = await import('./eventsDb');
+    const out = dedupeRowsById([{ id: 'a', v: 1 }, { id: 'b', v: 1 }, { id: 'a', v: 2 }]);
+    expect(out).toEqual([{ id: 'a', v: 2 }, { id: 'b', v: 1 }]);
+  });
+
+  it('returns the same array when nothing repeats', async () => {
+    const { dedupeRowsById } = await import('./eventsDb');
+    const rows = [{ id: 'a' }, { id: 'b' }];
+    expect(dedupeRowsById(rows)).toBe(rows);
+  });
+});

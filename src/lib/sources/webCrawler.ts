@@ -463,10 +463,35 @@ async function fetchHtml(url: string, timeoutMs: number): Promise<string | null>
 
 // ── Map a crawled event → the app's ApiPost shape ─────────────────────────────
 
+// A crawled event's id must be the SAME every time the crawler sees it. It used
+// to end in the event's position in the listing (`…_2026-11-13_7`), and a
+// listing reorders between crawls — so every ingest run stored the same event
+// again under a new id. Measured in production (2026-11-12): 12,410 crawler rows
+// held only 3,745 distinct events, and Vienna's feed pages shrank to half their
+// size once the copies were merged on read.
+//
+// Now the id is derived from what the event IS: its name, date, venue and start
+// time. The `h` prefix on the hash keeps these ids distinguishable from the old
+// numeric-suffix ones, which `dedupeLegacyCrawlerRows` (eventsDb) cleans up.
+function fnv1a(input: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
+export function crawledEventId(name: string, rawDate: string, venue: string, time: string): string {
+  const norm = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const key = [norm(name), rawDate, norm(venue), time].join('|');
+  return `nova_${slugify(name).slice(0, 28)}_${rawDate}_h${fnv1a(key)}`;
+}
+
 // Exported for tests: the locality guard below is the one piece of this module
 // that decides whether a listing is allowed to claim it is in the user's city.
 export function toApiPost(
-  ev: CrawledEvent, idx: number, searchCity: string, searchCountry: string,
+  ev: CrawledEvent, _idx: number, searchCity: string, searchCountry: string,
   fallbackLat: number, fallbackLng: number, category: string,
 ): ApiPost | null {
   const rawDate = (ev.startDate || '').slice(0, 10);
@@ -518,7 +543,7 @@ export function toApiPost(
     : organizerRaw;
 
   return {
-    id: `nova_${slugify(ev.name).slice(0, 28)}_${rawDate}_${idx}`,
+    id: crawledEventId(ev.name, rawDate, venue, time),
     user: makeUser(organizer, host),
     // The listing's own name (JSON-LD `name`/`title`/`headline`). Crawled feeds
     // sometimes carry a URL here, so it still goes through `cleanTitle`.
@@ -613,9 +638,12 @@ export async function crawlCityEvents(opts: {
   }
 
   let posts: ApiPost[] = [];
+  const seenIds = new Set<string>();
   for (let i = 0; i < events.length && posts.length < count; i++) {
     const p = toApiPost(events[i], i, city, country, lat, lng, category);
-    if (p) posts.push(p);
+    // Ids are content-derived, so a listing repeated on two crawled pages maps
+    // to one id — keep the first, the copy would only be a duplicate card.
+    if (p && !seenIds.has(p.id)) { seenIds.add(p.id); posts.push(p); }
   }
 
   // Quality gate: drop anything corrupt / fake / past / mislocated before it can

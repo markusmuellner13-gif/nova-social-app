@@ -6,6 +6,7 @@ import { DEFAULT_PREFERENCES, welcomeNotification } from '@/data/appDefaults';
 import { learnFromInteraction, learnFromBrowse } from '@/lib/aiEngine';
 import { upsertInteraction, deleteInteraction } from '@/lib/supabase';
 import { syncReminders } from '@/lib/notifications';
+import { findEndedInteractions, localToday } from '@/lib/brain/expiry';
 
 // Module-level user ID for Supabase sync — set by AppShell when auth state changes
 let _supabaseUserId: string | null = null;
@@ -169,6 +170,7 @@ type Action =
   | { type: 'SET_LOCATION_ENABLED'; enabled: boolean }
   | { type: 'SET_SEEN_LOCATION_PROMPT' }
   | { type: 'SYNC_INTERACTIONS'; liked: string[]; saved: string[]; going: string[]; posts: Post[] }
+  | { type: 'PRUNE_ENDED'; ids: string[] }
   | { type: 'CLEAR_ALL_DATA' };
 
 function reducer(state: AppPersistedState, action: Action): AppPersistedState {
@@ -281,6 +283,21 @@ function reducer(state: AppPersistedState, action: Action): AppPersistedState {
       };
     }
 
+    case 'PRUNE_ENDED': {
+      // Finished events leave every list the user keeps — and their snapshot
+      // and any reminder go with them, since nothing can show them any more.
+      if (action.ids.length === 0) return state;
+      const gone = new Set(action.ids);
+      return {
+        ...state,
+        likedPosts: state.likedPosts.filter(id => !gone.has(id)),
+        savedPosts: state.savedPosts.filter(id => !gone.has(id)),
+        goingPosts: state.goingPosts.filter(id => !gone.has(id)),
+        interactionPosts: state.interactionPosts.filter(p => !gone.has(p.id)),
+        reminders: state.reminders.filter(r => !gone.has(r.postId)),
+      };
+    }
+
     case 'CLEAR_ALL_DATA':
       return { ...DEFAULT_STATE, hasOnboarded: false };
 
@@ -293,6 +310,10 @@ function reducer(state: AppPersistedState, action: Action): AppPersistedState {
 
 interface AppContextValue {
   state: AppPersistedState;
+  /** True once the saved state has been read from this device. Before that,
+   *  `state` is the blank default — rendering from it flashes onboarding at a
+   *  returning user. */
+  ready: boolean;
   isLiked: (id: string) => boolean;
   isSaved: (id: string) => boolean;
   isFollowed: (id: string) => boolean;
@@ -339,6 +360,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = React.useState<Toast[]>([]);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedRef = useRef(false);
+  const [ready, setReady] = React.useState(false);
 
   // Load persisted state on mount
   useEffect(() => {
@@ -347,8 +369,48 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: 'LOAD', payload: loaded });
       }
       loadedRef.current = true;
+      setReady(true);
     });
   }, []);
+
+  // ── Nova Brain JOB 7: finished events leave the user's lists ──────────────
+  // A saved / loved / "going" post is a snapshot on this device (and in the
+  // signed-in user's synced interactions). The server stops serving an event
+  // once its day has passed, but it cannot reach these copies — so a concert
+  // from weeks ago stayed under Saved. The day is re-read every 10 minutes and
+  // whenever the app comes back to the foreground, so an app left open over
+  // midnight tidies itself too.
+  const [today, setToday] = React.useState(() => localToday());
+  useEffect(() => {
+    const tick = () => setToday(localToday());
+    const timer = setInterval(tick, 10 * 60 * 1000);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    const ended = findEndedInteractions(
+      state.interactionPosts,
+      [...state.savedPosts, ...state.likedPosts, ...state.goingPosts],
+      today,
+    );
+    if (ended.size === 0) return;
+    const ids = [...ended];
+    // Delete the synced copies too, or the next sign-in would bring them back.
+    const uid = _supabaseUserId;
+    if (uid) {
+      for (const id of ids) {
+        if (state.savedPosts.includes(id)) deleteInteraction(uid, id, 'save').catch(() => {});
+        if (state.likedPosts.includes(id)) deleteInteraction(uid, id, 'like').catch(() => {});
+        if (state.goingPosts.includes(id)) deleteInteraction(uid, id, 'going').catch(() => {});
+      }
+    }
+    dispatch({ type: 'PRUNE_ENDED', ids });
+  }, [ready, today, state.interactionPosts, state.savedPosts, state.likedPosts, state.goingPosts]);
 
   // Save state to encrypted localStorage (debounced)
   useEffect(() => {
@@ -439,6 +501,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const value: AppContextValue = {
     state,
+    ready,
     isLiked: (id) => state.likedPosts.includes(id),
     isSaved: (id) => state.savedPosts.includes(id),
     isFollowed: (id) => state.followedUsers.includes(id),

@@ -391,10 +391,22 @@ async function resolveFeed(request: NextRequest, onPartial?: PartialSink) {
         const count  = Math.max(1, Math.min(20, parseInt(searchParams.get('count') || '8', 10)));
         const page   = Math.max(0, parseInt(searchParams.get('page') || '0', 10));
         if (lat || lng) {
-          let dbPosts = await queryEventsNear({
+          // Read a double-width window per page. The DB still holds the same
+          // event from several sources (and, until the legacy crawler copies are
+          // cleaned up, several times from one), and merging those on the way
+          // out used to leave Vienna with 5–11 cards on a 16-card page. Paging
+          // by the RAW window keeps pages contiguous and non-overlapping.
+          const rawWindow = count * 2;
+          const rawRows = await queryEventsNear({
             lat, lng, radiusKm: radius, category: cat,
-            afterIso: new Date().toISOString(), limit: count, offset: page * count,
+            afterIso: new Date().toISOString(), limit: rawWindow, offset: page * rawWindow,
           });
+          // "More" is a property of the database, not of what survived the
+          // filters below. Basing it on the filtered count told the client
+          // Vienna (1,700+ events) had run out after the first page, so the feed
+          // stopped scrolling or jumped to a wider radius far too early.
+          const rawHasMore = rawRows.length >= rawWindow;
+          let dbPosts = rawRows;
           // Sightseeing must be worth seeing — drop any train-station / infra
           // rows ingested by older sweeps so they never lead the feed again.
           if (cat === 'sightseeing') {
@@ -449,7 +461,7 @@ async function resolveFeed(request: NextRequest, onPartial?: PartialSink) {
               posts: await finalizePhotos(dbFinal, photoBudgetMs),
               city: searchParams.get('city') || '',
               country: searchParams.get('country') || '',
-              sources: ['db'], hasMore: dbPosts.length >= count,
+              sources: ['db'], hasMore: rawHasMore,
             };
             await cacheSet(key, payload, cacheTtl('feed', rawCatKey));
             return NextResponse.json(payload, { headers: { 'Cache-Control': 'no-store', 'x-nova-cache': 'DB' } });

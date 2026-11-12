@@ -169,11 +169,22 @@ async function upsertChunk(rows: EventRow[], timeoutMs: number): Promise<string 
  * written — which may be fewer than `rows.length` if the budget ran out. Never
  * throws and never runs longer than `budgetMs`.
  */
+export function dedupeRowsById<T extends { id: string }>(rows: T[]): T[] {
+  const byId = new Map<string, T>();
+  for (const r of rows) byId.set(r.id, r);
+  return byId.size === rows.length ? rows : [...byId.values()];
+}
+
 export async function upsertEvents(
   rows: EventRow[],
   opts: { budgetMs?: number } = {},
 ): Promise<number> {
   if (!writeClient || rows.length === 0) return 0;
+  // Postgres rejects an upsert that touches the same id twice in ONE statement
+  // ("ON CONFLICT DO UPDATE command cannot affect row a second time"), and that
+  // fails the whole chunk. Crawler ids are content-derived now, so the same
+  // event listed on two pages arrives twice — keep the last copy of each.
+  rows = dedupeRowsById(rows);
 
   const deadline = Date.now() + Math.max(1_000, opts.budgetMs ?? UPSERT_DEFAULT_BUDGET_MS);
   let written = 0;
@@ -359,6 +370,11 @@ export async function purgeExpiredEvents(opts: { force?: boolean } = {}): Promis
   if (!writeClient) return 0;
   if (!opts.force && !(await shouldPurgeNow())) return 0;
 
+  return await purgeExpiredSlice() + await dedupeLegacyCrawlerRows();
+}
+
+async function purgeExpiredSlice(): Promise<number> {
+  if (!writeClient) return 0;
   const cutoff = new Date(Date.now() - PURGE_GRACE_MS).toISOString();
   try {
     const { data, error } = await writeClient
@@ -379,6 +395,68 @@ export async function purgeExpiredEvents(opts: { force?: boolean } = {}): Promis
     return ids.length;
   } catch (err) {
     console.error('[eventsDb/purge]', err instanceof Error ? err.message : 'purge failed');
+    return 0;
+  }
+}
+
+// ── Legacy crawler copies ────────────────────────────────────────────────────
+// Until 2026-11-12 the web crawler's ids ended in the event's POSITION in the
+// listing (`nova_founders-fest-vienna-2026_2026-11-13_7`), so every crawl stored
+// the same event again under a new number: 12,410 rows for 3,745 events. The ids
+// are content-derived now (`…_h<hash>`, see crawledEventId), which stops new
+// copies; this removes the old ones a bounded slice at a time, keeping one row
+// per event. It rides on the hourly purge lock, so it costs nothing extra once
+// the backlog is gone — the query then simply matches no rows.
+const LEGACY_ID_RE = /_\d+$/;
+const DEDUPE_SCAN_PAGES = 5;      // × 1000 ids (PostgREST's default max rows)
+const DEDUPE_MAX_DELETE = 2_000;
+const DEDUPE_DELETE_CHUNK = 200;
+
+/** Group legacy crawler ids by event and return every id but one per group. */
+export function legacyDuplicateIds(ids: string[]): string[] {
+  const keep = new Set<string>();
+  const extra: string[] = [];
+  for (const id of ids) {
+    if (!id.startsWith('nova_') || !LEGACY_ID_RE.test(id)) continue;
+    const key = id.replace(LEGACY_ID_RE, '');
+    if (keep.has(key)) extra.push(id);
+    else keep.add(key);
+  }
+  return extra;
+}
+
+async function dedupeLegacyCrawlerRows(): Promise<number> {
+  if (!writeClient) return 0;
+  try {
+    const ids: string[] = [];
+    for (let page = 0; page < DEDUPE_SCAN_PAGES; page++) {
+      const { data, error } = await writeClient
+        .from('events')
+        .select('id')
+        .eq('source', 'nova')
+        .filter('id', 'match', '_[0-9]+$')
+        .order('id', { ascending: true })
+        .range(page * 1000, page * 1000 + 999)
+        .abortSignal(AbortSignal.timeout(PURGE_TIMEOUT_MS));
+      if (error || !data?.length) break;
+      ids.push(...(data as { id: string }[]).map(r => r.id));
+      if (data.length < 1000) break;
+    }
+    const doomed = legacyDuplicateIds(ids).slice(0, DEDUPE_MAX_DELETE);
+    let deleted = 0;
+    for (let i = 0; i < doomed.length; i += DEDUPE_DELETE_CHUNK) {
+      const chunk = doomed.slice(i, i + DEDUPE_DELETE_CHUNK);
+      const { error } = await writeClient
+        .from('events')
+        .delete()
+        .in('id', chunk)
+        .abortSignal(AbortSignal.timeout(PURGE_TIMEOUT_MS));
+      if (error) { console.error('[eventsDb/dedupe]', error.message); break; }
+      deleted += chunk.length;
+    }
+    return deleted;
+  } catch (err) {
+    console.error('[eventsDb/dedupe]', err instanceof Error ? err.message : 'dedupe failed');
     return 0;
   }
 }

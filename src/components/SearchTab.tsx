@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { NAV_CLEARANCE } from './BottomNav';
 import { Search, X, Hash, TrendingUp, Flame, MapPin, Loader2, Navigation2, ExternalLink } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { Post, Category } from '@/types';
@@ -394,7 +395,7 @@ export default function SearchTab() {
               </motion.div>
             )}
           </AnimatePresence>
-          <div style={{ height: 80 }} />
+          <div style={{ height: `calc(${NAV_CLEARANCE} + 24px)` }} />
         </div>
       </div>
 
