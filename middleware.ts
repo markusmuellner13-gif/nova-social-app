@@ -19,7 +19,7 @@ import { Redis } from '@upstash/redis';
 // hit from rotating provider IPs, so IP throttling would wrongly block them.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Tier = 'auth' | 'login' | 'ai' | 'write' | 'read' | 'asset';
+type Tier = 'auth' | 'login' | 'ai' | 'feed' | 'write' | 'read' | 'asset';
 
 // Requests allowed per minute, per IP, per tier.
 const TIER_LIMITS: Record<Tier, number> = {
@@ -38,7 +38,15 @@ const TIER_LIMITS: Record<Tier, number> = {
   // instrument; the sharp one is the per-ACCOUNT exponential backoff inside the
   // route, which tracks the account being attacked rather than the IP doing it.
   login: 20,
-  ai:    20,   // /api/chat, /api/feed, /api/events — paid upstreams
+  ai:    20,   // /api/chat, /api/events, /api/activities — paid upstreams
+  // /api/feed on its own. The local-first feed walks every category for the
+  // user's own town and then each ring of towns around it, so one scroll
+  // session is far more than 20 requests a minute — at 20 the feed was
+  // throttled into looking finished (measured 2026-11-12). Most answers are
+  // Redis/DB hits; the paid parts behind it carry their own daily caps
+  // (AI_DAILY_BUDGET_USD, PLACES_DAILY_BUDGET). Separate from `ai` so feed
+  // scrolling can no longer use up the same person's chat allowance.
+  feed:  60,
   write: 15,   // /api/business/checkout, /api/account/*, /api/push/*, /api/brain/* — mutations
   read:  60,   // /api/geocode, /api/track, /api/sponsored — cheap
   // /api/image-proxy serves the photos themselves: one feed screen is dozens of
@@ -66,9 +74,9 @@ function tierFor(pathname: string): Tier {
   // traffic, /api/account is an authenticated user acting on their own data.
   if (pathname.startsWith('/api/auth')) return 'login';
   if (pathname.startsWith('/api/image-proxy')) return 'asset';
+  if (pathname.startsWith('/api/feed')) return 'feed';
   if (
     pathname.startsWith('/api/chat') ||
-    pathname.startsWith('/api/feed') ||
     pathname.startsWith('/api/events') ||
     // Same shape as /api/feed: fans out to Overpass/Wikipedia and reads operator
     // pages, so it belongs with the expensive routes rather than the cheap ones.
@@ -97,6 +105,7 @@ try {
       auth:  new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.auth,  '1 m'), prefix: '@nova/rl/auth',  analytics: false }),
       login: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.login, '1 m'), prefix: '@nova/rl/login', analytics: false }),
       ai:    new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.ai,    '1 m'), prefix: '@nova/rl/ai',    analytics: false }),
+      feed:  new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.feed,  '1 m'), prefix: '@nova/rl/feed',  analytics: false }),
       write: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.write, '1 m'), prefix: '@nova/rl/write', analytics: false }),
       read:  new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.read,  '1 m'), prefix: '@nova/rl/read',  analytics: false }),
       asset: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(TIER_LIMITS.asset, '1 m'), prefix: '@nova/rl/asset', analytics: false }),
