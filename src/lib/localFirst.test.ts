@@ -58,9 +58,38 @@ describe('isInUserCity — Baden bei Wien, measured cases from production', () =
     expect(isInUserCity(at('Aupark Mall, Bratislava', 48.0857, 16.2897, 10), BADEN)).toBe(false);
   });
 
+  it('a map place labelled with the SEARCHED town is placed by its pin (production case)', () => {
+    // Mödling's 25 km OSM sweep labels Baden's own hotel "…, Mödling".
+    const hotel = { id: 'osm_123', ...at('Hotel Eden, Mödling', 48.0072, 16.2320, 0.1) };
+    expect(isInUserCity(hotel, BADEN)).toBe(true);
+    // …and a Wikipedia landmark really in Mödling is still a neighbour.
+    const burg = { id: 'wiki_9', ...at('Burgruine Mödling, Mödling', 48.08, 16.27, 8.5) };
+    expect(isInUserCity(burg, BADEN)).toBe(false);
+    // An event's label is its venue's own town, so it still wins over a pin.
+    const ev = { id: 'eb_1', ...at('Stalltheater, Königstetten', 48.0107, 16.2448, 1) };
+    expect(isInUserCity(ev, BADEN)).toBe(false);
+  });
+
   it('without a pin it trusts only a label naming the user\'s town', () => {
     expect(isInUserCity({ location: { name: 'Stadttheater, Baden', lat: 0, lng: 0 } }, BADEN)).toBe(true);
     expect(isInUserCity({ location: { name: 'Somewhere', lat: 0, lng: 0 } }, BADEN)).toBe(false);
+  });
+});
+
+describe('relabelInTown', () => {
+  it('shows the user\'s town on a map place pinned inside it', async () => {
+    const { relabelInTown } = await import('./localFirst');
+    const hotel = { id: 'osm_1', ...at('Hotel Eden, Mödling', 48.0072, 16.232, 0.1) };
+    expect(relabelInTown(hotel, BADEN).location.name).toBe('Hotel Eden, Baden');
+  });
+
+  it('never touches an event, a correct label, or a missing user', async () => {
+    const { relabelInTown } = await import('./localFirst');
+    const ev = { id: 'eb_1', ...at('Stalltheater, Königstetten', 48.01, 16.24, 1) };
+    expect(relabelInTown(ev, BADEN)).toBe(ev);
+    const ok = { id: 'osm_2', ...at('Casino, Baden', 48.0, 16.23, 0.3) };
+    expect(relabelInTown(ok, BADEN)).toBe(ok);
+    expect(relabelInTown(ok, null)).toBe(ok);
   });
 });
 

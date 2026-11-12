@@ -14,7 +14,7 @@ import { initBrain, rankPosts, setBrainContext, flushBrain } from '@/lib/brain/c
 import { hasRealPhoto } from '@/lib/brain/features';
 import { chooseNudge, loadNudgeMemory, saveNudgeMemory, rememberNudge } from '@/lib/inAppNudge';
 import { postTitle } from '@/lib/postTitle';
-import { splitLocal } from '@/lib/localFirst';
+import { splitLocal, relabelInTown } from '@/lib/localFirst';
 import { apiUrl } from '@/lib/apiBase';
 import PostComponent from './Post';
 import { useLanguage } from '@/context/LanguageContext';
@@ -309,7 +309,8 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   const discoverPosts = useMemo(() => {
     let pool = aiPosts;
     if (activeChipCategory) pool = pool.filter(p => p.category === activeChipCategory);
-    const [local, nearby] = splitLocal(pool, userPlace);
+    const [ownRaw, nearby] = splitLocal(pool, userPlace);
+    const local = ownRaw.map(p => relabelInTown(p, userPlace));
     if (sortMode === 'recent') {
       return { local: [...local].sort((a, b) => b.timestamp - a.timestamp), nearby };
     }
@@ -377,7 +378,8 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
 
     // Same rule as Discover: the user's own town (by its own core radius AND the
     // town each post names), then every other town under the divider.
-    const [ownTown, otherTowns] = splitLocal(aiPosts, hasCity ? userPlace : null);
+    const [ownRaw, otherTowns] = splitLocal(aiPosts, hasCity ? userPlace : null);
+    const ownTown = ownRaw.map(p => relabelInTown(p, userPlace));
     const localSorted  = filterOne(sortOne(ownTown));
     const nearbySorted = filterOne(sortOne(otherTowns));
 
