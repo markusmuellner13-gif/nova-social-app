@@ -22,6 +22,10 @@
 
 html {
   overscroll-behavior: none;
+  /* Same colour as the body and the bottom nav: whatever the browser shows
+     around the page (overscroll, a strip under the toolbar, the area behind
+     iOS's home indicator) matches the app instead of flashing white/black. */
+  background: #0f0d14;
 }
 
 body {

@@ -11,63 +11,106 @@ interface Props {
   onChange: (tab: Tab) => void;
 }
 
-function NavButton({ Icon, label, isActive, onClick, badge }: {
+// ── Geometry ─────────────────────────────────────────────────────────────────
+// Every number that decides where the bar sits lives here, so the bar and
+// everything that has to stay clear of it (NAV_CLEARANCE) can never disagree.
+//
+// The bottom inset, from the most to the least reliable source:
+//   1. `--safe-area-inset-bottom` — Capacitor 8 writes the real system-bar
+//      inset here on Android, where many WebViews report env() as 0 and the
+//      labels would otherwise sit under the gesture bar / 3-button nav.
+//   2. `env(safe-area-inset-bottom)` — iOS Safari, iOS home-screen apps,
+//      Chrome on Android with viewport-fit=cover.
+//   3. 0.
+const INSET = 'var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))';
+
+// Room left under the labels. The iPhone home indicator is a 5pt pill sitting
+// 8pt off the bottom edge — it needs ~13pt, not the 34pt the inset reports.
+// Applying the full inset left a dark band under the labels that read as "the
+// buttons are too high". Reclaiming 22px of it puts the labels just clear of
+// the pill:
+//   iPhone with home indicator (34px) → 12px
+//   Android 3-button nav (~48px)      → 26px  (still fully clear of the buttons)
+//   Android gesture nav (~24px)       →  4px
+//   no inset at all (0px)             →  4px
+// max() keeps it from ever going negative on a device with a small inset.
+export const SAFE_BOTTOM = `max(calc(${INSET} - 22px), 4px)`;
+
+// The bar's own content height: 28px icon pill + 2px gap + 14px label line,
+// centred with a few px either side. Fixed, so the bar is the same height on
+// every device and NAV_CLEARANCE below is exact rather than an estimate (the
+// old bar was ~8px taller than the clearance it advertised).
+const BAR_HEIGHT = 54;
+
+// Total space the fixed nav occupies. Anything that has to sit clear of the
+// nav MUST use this rather than re-deriving it from the raw inset.
+export const NAV_CLEARANCE = `calc(${BAR_HEIGHT}px + ${SAFE_BOTTOM})`;
+
+const ACTIVE = '#a78bfa';
+const IDLE = '#8a8a9e';
+
+function NavButton({ Icon, label, isActive, onClick, badge, center }: {
   Icon: React.ElementType; label: string;
-  isActive: boolean; onClick: () => void; badge?: number;
+  isActive: boolean; onClick: () => void; badge?: number; center?: boolean;
 }) {
+  // Six tabs share the bar, so a long label ("Far Far Away") gets a smaller
+  // type size rather than being truncated or wrapped — the name is the point
+  // of that tab and an ellipsis would defeat it.
+  const long = label.length > 9;
   return (
-    <button onClick={onClick} className="flex flex-col items-center justify-center gap-0.5 flex-1 py-1" style={{ minWidth: 0 }}>
-      <motion.div whileTap={{ scale: 0.8 }} className="relative flex items-center justify-center rounded-2xl transition-all"
-        style={{ width: 42, height: 30, background: isActive ? 'rgba(139,92,246,0.15)' : 'transparent' }}>
-        <Icon size={23} strokeWidth={isActive ? 2.2 : 1.7}
-          style={{ color: isActive ? '#a78bfa' : '#55556a', transition: 'color 0.2s' }} />
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-current={isActive ? 'page' : undefined}
+      className="relative flex flex-col items-center justify-center flex-1 h-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nova-violet rounded-xl"
+      style={{ minWidth: 0, gap: 2 }}
+    >
+      <motion.div
+        whileTap={{ scale: 0.82 }}
+        className="relative flex items-center justify-center rounded-full"
+        style={center ? {
+          width: 44, height: 28,
+          background: isActive ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : 'linear-gradient(135deg, rgba(139,92,246,0.55), rgba(236,72,153,0.55))',
+          boxShadow: isActive ? '0 2px 12px rgba(139,92,246,0.45)' : 'none',
+        } : {
+          width: 46, height: 28,
+          background: isActive ? 'rgba(139,92,246,0.16)' : 'transparent',
+          transition: 'background 0.2s',
+        }}
+      >
+        <Icon
+          size={center ? 20 : 22}
+          strokeWidth={isActive ? 2.3 : 1.8}
+          color={center ? 'white' : undefined}
+          style={center ? undefined : { color: isActive ? ACTIVE : IDLE, transition: 'color 0.2s' }}
+        />
         <AnimatePresence>
           {badge != null && badge > 0 && (
             <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}
-              className="absolute -top-0.5 -right-0.5 min-w-4 h-4 rounded-full flex items-center justify-center text-white font-bold"
+              className="absolute -top-1 right-0.5 min-w-4 h-4 rounded-full flex items-center justify-center text-white font-bold"
               style={{ background: 'linear-gradient(135deg, #ec4899, #8b5cf6)', fontSize: 9, padding: '0 3px' }}>
               {badge > 99 ? '99+' : badge}
             </motion.div>
           )}
         </AnimatePresence>
       </motion.div>
-      {/* Six tabs share the bar, so a long label ("Far Far Away") gets a smaller
-          type size rather than being truncated or wrapped — the name is the
-          point of that tab and an ellipsis would defeat it. */}
-      <span className="font-semibold" style={{
-        color: isActive ? '#a78bfa' : '#55556a',
-        transition: 'color 0.2s',
-        letterSpacing: label.length > 9 ? '-0.02em' : '0.01em',
-        fontSize: label.length > 9 ? 8.5 : 11,
-        whiteSpace: 'nowrap',
-      }}>
+      <span
+        className="font-semibold"
+        style={{
+          color: isActive ? ACTIVE : IDLE,
+          transition: 'color 0.2s',
+          letterSpacing: long ? '-0.02em' : '0.01em',
+          fontSize: long ? 8.5 : 11,
+          lineHeight: '14px',
+          whiteSpace: 'nowrap',
+        }}
+      >
         {label}
       </span>
     </button>
   );
 }
-
-// How much room to leave under the labels for the iOS home indicator.
-//
-// `env(safe-area-inset-bottom)` reports 34px on iPhones that have one, and we
-// used to apply all 34px as padding. Measured on an iPhone 14 Pro Max viewport,
-// that left a 38px band of empty nav background under the labels — which reads
-// as "the bar is floating too high", because the dead space is most of the bar.
-//
-// The indicator itself is a ~5px pill sitting ~8px off the bottom edge, so ~20px
-// of clearance is plenty to keep labels clear of it. We reclaim 14px of the
-// inset and floor the result at 6px, so:
-//   iPhone with home indicator (34px) → 20px  (was 34px)
-//   Android gesture nav (~24px)       → 10px
-//   no inset at all (0px)             →  6px  (was 0 — labels sat on the edge)
-// The max() also guarantees it can never go negative on a device reporting a
-// small inset, which a bare subtraction would.
-export const SAFE_BOTTOM = 'max(calc(env(safe-area-inset-bottom, 0px) - 14px), 6px)';
-
-// Total space the fixed nav occupies. Anything that has to sit clear of the nav
-// must use THIS rather than re-deriving it from the raw inset — ChatTab did that
-// and would silently over-reserve by 14px the moment the padding above changed.
-export const NAV_CLEARANCE = `calc(52px + ${SAFE_BOTTOM})`;
 
 export default function BottomNav({ active, onChange }: Props) {
   const { t } = useLanguage();
@@ -82,25 +125,44 @@ export default function BottomNav({ active, onChange }: Props) {
   ];
 
   return (
-    <nav className="glass-nav fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around"
+    <nav
+      aria-label="Main"
+      className="glass-nav fixed bottom-0 left-0 right-0 z-40"
       style={{
-        minHeight: `calc(48px + ${SAFE_BOTTOM})`,
+        // Exact height: bar + the trimmed inset. box-sizing is border-box, so
+        // the padding sits INSIDE this height and the bar's background runs
+        // all the way to the bottom edge of the screen.
+        height: NAV_CLEARANCE,
         paddingBottom: SAFE_BOTTOM,
-        paddingTop: 4,
-      }}>
-      {tabs.map(({ id, Icon, label, badge, center }) =>
-        center ? (
-          <button key={id} onClick={() => onChange(id)} className="flex flex-col items-center justify-center gap-0.5 flex-1 py-1" style={{ minWidth: 0 }}>
-            <motion.div whileTap={{ scale: 0.85 }} className="flex items-center justify-center rounded-2xl"
-              style={{ width: 44, height: 30, background: active === id ? 'linear-gradient(135deg, #8b5cf6, #ec4899)' : 'linear-gradient(135deg, rgba(139,92,246,0.55), rgba(236,72,153,0.55))', boxShadow: active === id ? '0 2px 10px rgba(139,92,246,0.4)' : 'none' }}>
-              <Icon size={21} color="white" strokeWidth={active === id ? 2.5 : 1.8} />
-            </motion.div>
-            <span className="font-semibold" style={{ color: active === id ? '#a78bfa' : '#55556a', letterSpacing: '0.01em', fontSize: 11, whiteSpace: 'nowrap' }}>{t.nav.groups}</span>
-          </button>
-        ) : (
-          <NavButton key={id} Icon={Icon} label={label} isActive={active === id} onClick={() => onChange(id)} badge={badge} />
-        )
-      )}
+        paddingLeft: 'env(safe-area-inset-left, 0px)',
+        paddingRight: 'env(safe-area-inset-right, 0px)',
+      }}
+    >
+      <div className="flex items-stretch justify-around" style={{ height: BAR_HEIGHT }}>
+        {tabs.map(({ id, Icon, label, badge, center }) => (
+          <NavButton
+            key={id}
+            Icon={Icon}
+            label={label}
+            isActive={active === id}
+            onClick={() => onChange(id)}
+            badge={badge}
+            center={center}
+          />
+        ))}
+      </div>
+      {/* Paint the bar's colour BELOW its own box too. Some browsers leave a
+          strip under a bottom:0 element — iOS Safari while its toolbar
+          collapses or after the keyboard closes, home-screen web apps on
+          launch, Android WebViews whose window is taller than the viewport.
+          Without this the bar visibly ended above the screen's edge there.
+          Off-screen (and invisible) everywhere else; clipped by the desktop
+          frame. */}
+      <div
+        aria-hidden
+        className="pointer-events-none"
+        style={{ position: 'absolute', left: 0, right: 0, top: '100%', height: 160, background: '#0f0d14' }}
+      />
     </nav>
   );
 }

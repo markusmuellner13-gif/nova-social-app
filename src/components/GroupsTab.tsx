@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { NAV_CLEARANCE } from './BottomNav';
 import { Users, Plus, Hash, X, Copy, Calendar, MapPin, ExternalLink, Loader2, LogIn, CheckCircle2, MessageCircle } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useApp } from '@/context/AppContext';
@@ -472,7 +473,7 @@ export default function GroupsTab({ onOpenAuth }: Props) {
           </div>
         )}
 
-        <div style={{ height: 100 }} />
+        <div style={{ height: `calc(${NAV_CLEARANCE} + 24px)` }} />
       </div>
       )}
 

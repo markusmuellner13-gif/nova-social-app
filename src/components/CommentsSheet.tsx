@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Heart, Send, Star, Loader2, LogIn, Trash2 } from 'lucide-react';
+import { X, Bookmark, Send, Star, Loader2, LogIn, Trash2 } from 'lucide-react';
 import { Post } from '@/types';
 import { timeAgo } from '@/data/appDefaults';
 import { useApp } from '@/context/AppContext';
@@ -140,7 +140,7 @@ export default function CommentsSheet({ post, onClose }: Props) {
               }}
               className="flex flex-col items-center gap-0.5"
             >
-              <Heart
+              <Bookmark
                 size={22}
                 fill={saved ? '#8b5cf6' : 'none'}
                 style={{ color: saved ? '#8b5cf6' : '#888899' }}

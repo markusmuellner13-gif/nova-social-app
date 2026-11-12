@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Compass, Sparkles, RefreshCw, ChevronDown, MapPin, Loader2, SlidersHorizontal, Bell, X, Store } from 'lucide-react';
 import { NOVA_AI_USER } from '@/data/appDefaults';
+import { NAV_CLEARANCE } from './BottomNav';
 import { Category, Post } from '@/types';
 import { getTopCategories } from '@/lib/aiEngine';
 import { parseMinPrice } from './Post';
@@ -1058,7 +1059,7 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
             </div>
           )}
 
-          <div style={{ height: 100 }} />
+          <div style={{ height: `calc(${NAV_CLEARANCE} + 24px)` }} />
         </div>
       </div>
 

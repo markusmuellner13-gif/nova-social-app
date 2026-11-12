@@ -52,7 +52,9 @@ export function eventsCacheKey(params: {
 }): string {
   const { category, city, lat, lng, page, radius, source } = params;
   const c = city.toLowerCase().replace(/\s+/g, '_').slice(0, 40);
-  return `nova:events:v1:${source || 'default'}:${category}:${c}:${gridCoord(lat)}:${gridCoord(lng)}:r${radius}:p${page}`;
+  // v2 (2026-11-12): DB pages became double-width raw windows — a v1 page N
+  // covers different rows, so the two must never be mixed in one scroll.
+  return `nova:events:v2:${source || 'default'}:${category}:${c}:${gridCoord(lat)}:${gridCoord(lng)}:r${radius}:p${page}`;
 }
 
 // TTL (seconds) by content type — live events stay fresh, static places last long.

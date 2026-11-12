@@ -2,12 +2,16 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { useApp } from '@/context/AppContext';
+import { NAV_CLEARANCE } from './BottomNav';
 
 export default function ToastContainer() {
   const { toasts, removeToast } = useApp();
 
   return (
-    <div className="fixed bottom-24 left-0 right-0 z-50 flex flex-col items-center gap-2 pointer-events-none px-4">
+    // Floats a fixed distance above the bottom nav on every device, rather than
+    // a guessed 96px that sat on top of the bar where the bar is taller.
+    <div className="fixed left-0 right-0 z-[60] flex flex-col items-center gap-2 pointer-events-none px-4"
+      style={{ bottom: `calc(${NAV_CLEARANCE} + 16px)` }}>
       <AnimatePresence mode="popLayout">
         {toasts.map((toast) => (
           <motion.div

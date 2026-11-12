@@ -58,10 +58,26 @@ export function useConsent(): ConsentValue | null {
   return useSyncExternalStore(subscribe, getConsent, () => null);
 }
 
-export default function CookieConsent() {
-  const consent = useConsent();
+// The banner must not be guessed into the page. The server cannot see
+// localStorage, so `useConsent`'s server snapshot is `null` ("no choice yet") —
+// and the document is server-rendered, so that guess put the banner straight
+// into the HTML. It sat there, z-index 9999 over the splash, until React
+// hydrated and read the real answer: the split-second banner people saw on
+// every launch after they had already accepted.
+//
+// So the banner reads with its own server snapshot, UNKNOWN, which renders
+// nothing. The real value is only consulted in the browser, after hydration —
+// a user who has chosen never sees the banner at all, and a first-time visitor
+// gets it a moment later, once we actually know it is needed.
+const UNKNOWN = 'unknown' as const;
+function useBannerConsent(): ConsentValue | null | typeof UNKNOWN {
+  return useSyncExternalStore(subscribe, getConsent, () => UNKNOWN);
+}
 
-  // Already chosen → nothing to show.
+export default function CookieConsent() {
+  const consent = useBannerConsent();
+
+  // Not known yet (server / before hydration), or already chosen → nothing.
   if (consent !== null) return null;
 
   function choose(value: ConsentValue) {
@@ -73,7 +89,9 @@ export default function CookieConsent() {
       role="dialog"
       aria-label="Cookie consent"
       style={{
-        position: 'fixed', left: 12, right: 12, bottom: 12, zIndex: 9999,
+        position: 'fixed', left: 12, right: 12, zIndex: 9999,
+        // Clear of the iPhone home indicator / Android gesture bar.
+        bottom: 'max(12px, calc(env(safe-area-inset-bottom, 0px) + 8px))',
         maxWidth: 560, margin: '0 auto',
         background: '#13131a', border: '1px solid #2a2a38', borderRadius: 18,
         padding: 18, boxShadow: '0 12px 40px rgba(0,0,0,0.6)',

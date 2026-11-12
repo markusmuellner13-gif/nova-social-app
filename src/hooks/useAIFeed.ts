@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Post, LocationState } from '@/types';
 import { apiUrl } from '@/lib/apiBase';
 import { restampDistances, metresBetween, coarse, FEED_REFRESH_MOVE_M } from '@/lib/liveLocation';
+import { withoutEndedEvents } from '@/lib/brain/expiry';
 
 // Cache settings — localStorage so reopening the app shows content instantly
 const EVENTS_TTL_MS    = 5  * 60 * 1000; // 5 min for events (change often)
@@ -167,13 +168,11 @@ export function mergeUpgrade(existing: Post[], incoming: Post[]): Post[] {
   return mergeUnique(upgraded, incoming.filter(p => !replaced.has(p.id)));
 }
 
-// Remove events whose date has already passed
+// Remove events whose date has already passed (in the user's own timezone —
+// the old UTC comparison kept yesterday's events alive past local midnight).
+// Sightseeing / places carry no date and are always kept.
 function filterExpired(posts: Post[]): Post[] {
-  const today = new Date().toISOString().split('T')[0];
-  return posts.filter(p => {
-    if (!p.eventDateRaw) return true;    // sightseeing / no date → keep
-    return p.eventDateRaw >= today;
-  });
+  return withoutEndedEvents(posts);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -151,3 +151,37 @@ describe('toApiPost locality handling', () => {
     expect(toApiPost(ev(), 0, 'Vienna', 'Austria', 48.2, 16.37, 'events')).not.toBeNull();
   });
 });
+
+describe('crawledEventId', () => {
+  it('is the same every crawl — it no longer depends on list position', async () => {
+    const { crawledEventId } = await import('./webCrawler');
+    const a = crawledEventId('Founders Fest Vienna 2026', '2026-11-13', 'MuseumsQuartier', '18:00');
+    const b = crawledEventId('Founders Fest Vienna 2026', '2026-11-13', 'MuseumsQuartier', '18:00');
+    expect(a).toBe(b);
+    expect(a.startsWith('nova_founders-fest-vienna-2026')).toBe(true);
+  });
+
+  it('tells different showings and venues apart', async () => {
+    const { crawledEventId } = await import('./webCrawler');
+    const base = crawledEventId('Jazz Night', '2026-11-13', 'Porgy & Bess', '19:00');
+    expect(crawledEventId('Jazz Night', '2026-11-13', 'Porgy & Bess', '21:30')).not.toBe(base);
+    expect(crawledEventId('Jazz Night', '2026-11-13', 'Blue Room', '19:00')).not.toBe(base);
+    expect(crawledEventId('Jazz Night', '2026-11-14', 'Porgy & Bess', '19:00')).not.toBe(base);
+  });
+
+  it('can never be mistaken for a legacy positional id', async () => {
+    const { crawledEventId } = await import('./webCrawler');
+    // The legacy clean-up matches ids ending in `_<digits>`; new ids end `_h<hash>`.
+    for (const name of ['A', 'Concert 2026', 'Ü30 Party', '12345']) {
+      expect(crawledEventId(name, '2026-11-13', 'Venue', '20:00')).not.toMatch(/_\d+$/);
+    }
+  });
+
+  it('two listings of one event in a crawl map to one id', () => {
+    const ev = (o = {}) => ({ name: 'Morning Coffee Rave', startDate: '2099-11-13T08:00', venue: 'Volksgarten', locality: 'Vienna', ...o });
+    const a = toApiPost(ev() as never, 3, 'Vienna', 'Austria', 48.2, 16.37, 'events');
+    const b = toApiPost(ev() as never, 11, 'Vienna', 'Austria', 48.2, 16.37, 'events');
+    expect(a?.id).toBeDefined();
+    expect(a?.id).toBe(b?.id);
+  });
+});

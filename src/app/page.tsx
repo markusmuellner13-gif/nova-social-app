@@ -46,7 +46,7 @@ function shouldPreload(): boolean {
 }
 
 function AppShell() {
-  const { state, unreadCount, setLocation, markSeenLocationPrompt, syncInteractions } = useApp();
+  const { state, ready, unreadCount, setLocation, markSeenLocationPrompt, syncInteractions } = useApp();
   const { user } = useAuth();
   const { locale } = useLanguage();
   const [splashDone,         setSplashDone]         = useState(false);
@@ -245,6 +245,12 @@ function AppShell() {
   // loads instead of after the intro finishes, so by the time the splash fades
   // the first posts are usually already there.
   const splash = !splashDone && <SplashScreen onComplete={handleSplashComplete} />;
+
+  // Until this device's saved state has been read, `state` is the blank default
+  // (hasOnboarded: false). Rendering from it would put the onboarding screen —
+  // the welcome + consent step — in front of a returning user for a frame. Show
+  // just the app background (under the splash) until we know who this is.
+  if (!ready) return <><div style={{ position: 'fixed', inset: 0, background: '#0a0a0f' }} />{splash}</>;
 
   if (!state.hasOnboarded) return <>{<Onboarding onRequestLocation={requestLocation} locationGranted={permission === 'granted'} />}{splash}</>;
 

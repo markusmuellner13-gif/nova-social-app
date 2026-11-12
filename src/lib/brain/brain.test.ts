@@ -11,6 +11,7 @@ import { curate, mergeDuplicates } from './curator';
 import type { ApiPost } from '@/lib/sources/shared';
 import { parseTripQuery } from './trip';
 import { learnSkill, harvestPayloads } from './extractor';
+import { findEndedInteractions } from './expiry';
 
 function post(o: Partial<ApiPost> = {}): ApiPost {
   return {
@@ -323,6 +324,16 @@ describe('Nova Brain still does every job', () => {
     expect(q.isTrip).toBe(true);
     // …and an ordinary local question still falls through to the normal path.
     expect(parseTripQuery("what's on tonight?").isTrip).toBe(false);
+  });
+
+  it('JOB 7 — clears finished events out of what the user keeps', () => {
+    const kept = [
+      { id: 'over', eventDateRaw: '2026-07-01' },
+      { id: 'tonight', eventDateRaw: '2026-07-31' },
+      { id: 'landmark' },
+    ];
+    const ended = findEndedInteractions(kept, ['over', 'tonight', 'landmark'], '2026-07-31');
+    expect([...ended]).toEqual(['over']);
   });
 
   it('JOB 6 (new) — learns to read a site whose format it has never seen', () => {
