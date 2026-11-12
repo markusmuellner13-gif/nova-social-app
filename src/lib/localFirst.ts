@@ -101,9 +101,20 @@ export function distanceFrom(post: Pick<Post, 'distanceKm' | 'location'>, user: 
   return haversineKm(user.lat, user.lng, lat as number, lng as number);
 }
 
+// Map places (OpenStreetMap) and landmarks (Wikipedia) carry the exact pin of
+// the place itself, but their label ends with the town that was SEARCHED, not
+// the town they are in: Mödling's 25 km sweep labels Baden's own hotels
+// "Hotel Eden, Mödling" (measured in production, 0.1 km from a Baden user).
+// For them the pin is the truth and the label is ignored. Event sources label
+// with the venue's own town, so for those the label stays a strong signal.
+const PIN_IS_TRUTH = /^(osm|wiki)_/;
+
+type Placeable = Pick<Post, 'distanceKm' | 'location'> & { id?: string };
+
 /** Is this post in the user's own town? */
-export function isInUserCity(post: Pick<Post, 'distanceKm' | 'location'>, user: UserPlace): boolean {
-  const town = townOfLabel(post.location?.name);
+export function isInUserCity(post: Placeable, user: UserPlace): boolean {
+  const pinOnly = PIN_IS_TRUTH.test(post.id ?? '');
+  const town = pinOnly ? null : townOfLabel(post.location?.name);
   // The post names another town → it's that town's, whatever its pin says.
   if (town && user.city && !sameCityish(town, user.city)) return false;
   const d = distanceFrom(post, user);
@@ -113,8 +124,24 @@ export function isInUserCity(post: Pick<Post, 'distanceKm' | 'location'>, user: 
   return Boolean(town && user.city && sameCityish(town, user.city));
 }
 
+/**
+ * A map place or landmark whose pin is in the user's town, but whose stored
+ * label still names the town that was searched ("Hotel Eden, Mödling" in Baden),
+ * is shown with the user's town instead. New rows get the place's own address
+ * town at the source (osm.ts); this covers the ones already stored.
+ */
+export function relabelInTown<T extends Placeable>(post: T, user: UserPlace | null): T {
+  if (!user?.city || !PIN_IS_TRUTH.test(post.id ?? '')) return post;
+  const name = post.location?.name;
+  const town = townOfLabel(name);
+  if (!name || !town || sameCityish(town, user.city)) return post;
+  const i = name.lastIndexOf(town);
+  if (i < 0) return post;
+  return { ...post, location: { ...post.location, name: name.slice(0, i) + user.city + name.slice(i + town.length) } };
+}
+
 /** Split a list into [own town, everywhere else], keeping each side's order. */
-export function splitLocal<T extends Pick<Post, 'distanceKm' | 'location'>>(posts: T[], user: UserPlace | null): [T[], T[]] {
+export function splitLocal<T extends Placeable>(posts: T[], user: UserPlace | null): [T[], T[]] {
   if (!user || !user.city) return [posts, []];
   const local: T[] = [], away: T[] = [];
   for (const p of posts) (isInUserCity(p, user) ? local : away).push(p);

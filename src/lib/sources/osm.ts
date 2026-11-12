@@ -486,6 +486,11 @@ export async function overpassToPost(
   const tags  = el.tags ?? {};
   const name  = tags.name ?? 'Unknown';
   const addr  = [tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join(' ');
+  // The town the place is IN, from its own address — not the town that was
+  // searched. A 25 km sweep around Mödling reaches Baden, and labelled Baden's
+  // own hotels "…, Mödling" (seen in production, 2026-11-12). Falls back to the
+  // searched town only when the place carries no address town.
+  const town  = (tags['addr:city'] ?? '').trim().slice(0, 60) || city;
   const website = tags.website ?? tags['contact:website'] ?? tags['contact:url'] ?? '';
   const hours   = tags.opening_hours ?? '';
   const domain  = website ? (() => { try { return new URL(website).hostname; } catch { return ''; } })() : '';
@@ -537,13 +542,13 @@ export async function overpassToPost(
     title: name,
     image: image ?? '',
     images,
-    caption: `${desc}\n\n${kind.emoji} ${name}${addr ? `\n📍 ${addr}, ${city}` : `\n📍 ${city}`}${extras}${website ? `\n🔗 ${website}` : `\n🗺️ ${osmUrl}`}`,
+    caption: `${desc}\n\n${kind.emoji} ${name}${addr ? `\n📍 ${addr}, ${town}` : `\n📍 ${town}`}${extras}${website ? `\n🔗 ${website}` : `\n🗺️ ${osmUrl}`}`,
     likes: 0,
     comments: 0,
     category,
     hashtags: [`#${city.replace(/\s/g, '')}`, `#${category}`, '#nova', '#local', '#discover'],
     timestamp: Date.now() - Math.random() * 86_400_000,
-    location: { name: `${name}, ${city}`, lat: elLat, lng: elLng },
+    location: { name: `${name}, ${town}`, lat: elLat, lng: elLng },
     saved: false, liked: false,
     isEvent: false, isAIGenerated: false,
     eventUrl: website || osmUrl,
