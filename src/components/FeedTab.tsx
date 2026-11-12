@@ -435,20 +435,41 @@ export default function FeedTab({ onOpenLocationPrompt, onOpenCityExplorer, onOp
   // small town where several categories are empty) used to sit there looking
   // finished, with nothing to scroll and no way to ask for more. Bounded: after
   // eight loads in a row that add nothing it waits for the user again.
+  // A steady, cheap check rather than an effect on "loading finished": that
+  // transition does not always happen (a superseded load hands over without
+  // one), and when it didn't the feed silently stopped. The latest values are
+  // read through a ref, so the interval itself never has to restart.
   const emptyFillsRef = useRef(0);
-  const lastFillLenRef = useRef(0);
+  const lastFillLenRef = useRef(-1);
+  const fillStateRef = useRef({ aiLoading, aiHasMore, len: aiPosts.length, fetchMore, aiCategory });
   useEffect(() => {
-    if (!initialFetchDone.current || activeMainTab === 'partners' || aiLoading || !aiHasMore) return;
-    const el = scrollRef.current;
-    // A hidden tab has no height — never load in the background for it.
-    if (!el || el.clientHeight === 0) return;
-    if (aiPosts.length !== lastFillLenRef.current) emptyFillsRef.current = 0;
-    else emptyFillsRef.current += 1;
-    lastFillLenRef.current = aiPosts.length;
-    if (emptyFillsRef.current > 8) return;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 2400) void fetchMore(aiCategory);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiLoading, aiHasMore, aiPosts.length, activeMainTab]);
+    fillStateRef.current = { aiLoading, aiHasMore, len: aiPosts.length, fetchMore, aiCategory };
+  });
+  useEffect(() => {
+    // A new place or tab starts with a fresh allowance.
+    emptyFillsRef.current = 0;
+    lastFillLenRef.current = -1;
+  }, [location?.city, aiCategory]);
+  useEffect(() => {
+    if (activeMainTab === 'partners') return;
+    const timer = setInterval(() => {
+      const st = fillStateRef.current;
+      if (!initialFetchDone.current || st.aiLoading || !st.aiHasMore) return;
+      const el = scrollRef.current;
+      // A hidden tab has no height — never load in the background for it.
+      if (!el || el.clientHeight === 0) return;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight >= 2400) return;
+      if (st.len !== lastFillLenRef.current) {
+        lastFillLenRef.current = st.len;
+        emptyFillsRef.current = 0;
+      } else if (emptyFillsRef.current >= 20) {
+        return; // twenty loads in a row added nothing — wait for the user
+      }
+      emptyFillsRef.current += 1;
+      void st.fetchMore(st.aiCategory);
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [activeMainTab]);
 
   useEffect(() => {
     const el = scrollRef.current;

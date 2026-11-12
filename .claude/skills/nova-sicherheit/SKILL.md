@@ -34,7 +34,9 @@ Der Nutzer ist Einsteiger. Erkläre jede Sicherheitsänderung in einem einfachen
 ## Wo Nova sich schützt
 
 - **Rate Limits pro IP:** `middleware.ts` (Upstash Redis, Tiers `auth` 5, `login` 20,
-  `ai` 20, `write` 15, `read` 60, `asset` 600 pro Minute). Vercel überschreibt
+  `ai` 20, `feed` 60 (nur `/api/feed`, seit 2026-11-12 – der Feed lädt pro Scroll viele
+  Kategorien/Ringe; die bezahlten Teile haben eigene Tagesbudgets), `write` 15, `read` 60,
+  `asset` 600 pro Minute). Vercel überschreibt
   `X-Forwarded-For` – IP-Fälschung umgeht die Limits nicht (getestet 2026-10-05).
 - **Das Middleware-Limit schützt NUR Novas eigene `/api/*`-Routen.** Die Supabase-
   REST-API ist mit dem öffentlichen Anon-Key direkt erreichbar. Grenzen, die

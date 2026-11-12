@@ -239,6 +239,8 @@ const SOURCE_DEADLINE_MS = 8_000;
 // sources ARE the content — cutting them off to save eight seconds would trade
 // the app's whole promise for a snappier empty feed.
 const SOURCE_PATIENT_MS = 22_000;
+// How long an empty (but successfully computed) page is remembered.
+const EMPTY_TTL_S = 300;
 
 type SourceResult = { source: string; posts: ApiPost[]; hasMore: boolean };
 
@@ -392,7 +394,9 @@ async function resolveFeed(request: NextRequest, onPartial?: PartialSink) {
 
   if (!noStore) {
     const cached = await cacheGet<{ posts: unknown[] }>(key);
-    if (cached && Array.isArray(cached.posts) && cached.posts.length > 0) {
+    // An empty page is only ever stored on purpose (EMPTY_TTL_S, a computed
+    // "nothing here"), so it is served like any other hit.
+    if (cached && Array.isArray(cached.posts)) {
       return NextResponse.json(cached, { headers: { 'Cache-Control': 'no-store', 'x-nova-cache': 'HIT' } });
     }
 
@@ -491,6 +495,13 @@ async function resolveFeed(request: NextRequest, onPartial?: PartialSink) {
   try {
     const payload = await res.clone().json() as { posts?: unknown[] };
     const got = Array.isArray(payload.posts) ? payload.posts.length : 0;
+    // An honest "nothing here" is worth remembering briefly too: computing it
+    // costs a cold town up to ~26 s, and without this every visitor paid it
+    // again. Short, so new listings still show up soon; never for an outage.
+    const reason = (payload as { reason?: string }).reason;
+    if (got === 0 && res.status === 200 && reason !== 'places_unavailable' && reason !== 'stream_failed') {
+      await cacheSet(key, payload, EMPTY_TTL_S);
+    }
     if (got > 0) {
       // A page computed while Overpass was cold or a source was rate-limited
       // comes back thin — and caching it pins that thin page in front of every
@@ -758,7 +769,13 @@ async function computeFeed(request: NextRequest, onPartial?: PartialSink) {
   // second. We take whatever has resolved by the soft deadline and return that;
   // the stragglers still finish and land in the Redis/DB cache, so the next page
   // (and the next visitor) gets them. Nothing is lost — only the waiting.
-  const results = await settleWithDeadline(tasks, SOURCE_DEADLINE_MS, count, SOURCE_PATIENT_MS);
+  // `quick=1` (the endless Discover stream) takes what has answered by the
+  // first deadline and skips the patience. That stream rotates through every
+  // category and town ring, so one slow source must not hold the whole feed:
+  // measured, Baden's own-town events took 26 s to come back empty, while its
+  // restaurants and sights sat ready in the database behind them.
+  const quick = searchParams.get('quick') === '1';
+  const results = await settleWithDeadline(tasks, SOURCE_DEADLINE_MS, count, quick ? SOURCE_DEADLINE_MS : SOURCE_PATIENT_MS);
   let pool = dropExpired(dedupePosts(results.flatMap(r => r.posts)));
   const sources = results.filter(r => r.posts.length > 0).map(r => r.source);
   let anyMore = results.some(r => r.hasMore);

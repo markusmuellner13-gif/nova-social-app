@@ -42,7 +42,9 @@ const BLEND_MAX_PAGES = 12;
 // One fetchMore() keeps requesting until it has added this many posts…
 const BLEND_MIN_NEW = 6;
 // …or spent this many requests (most are answered from the prefetch buffer).
-const BLEND_MAX_REQUESTS = 4;
+const BLEND_MAX_REQUESTS = 6;
+// Categories requested side by side within one call.
+const BLEND_PARALLEL = 3;
 
 // Posts requested per page. The feed route caps at 20; 16 gives big batches so
 // the user scrolls a long way between network round-trips.
@@ -298,8 +300,11 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
   const ringRef       = useRef(0);
   const catPageRef    = useRef<Map<string, number>>(new Map());
   const catDoneRef    = useRef<Set<string>>(new Set());
-  const catFailRef    = useRef<Map<string, number>>(new Map());
   const rotRef        = useRef(0);
+  // Bumped by reset(): identifies the current load (see fetchMore).
+  const genRef        = useRef(0);
+  // Until when the server has asked us to slow down (HTTP 429).
+  const rateLimitedUntilRef = useRef(0);
   // Neighbouring towns' posts met during the own-town phase, shown after it.
   const heldRef       = useRef<Post[]>([]);
   // What's on screen right now, readable synchronously inside fetchBlend.
@@ -465,7 +470,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
   // Coordinates rounded to ~100m so nearby users share the same edge-cache
   // entry. With no location at all, params are omitted entirely — the server
   // falls back to IP geolocation (free Vercel headers).
-  function buildParams(loc: LocationState | null, category: string, page: number, radius: number, days: number): string {
+  function buildParams(loc: LocationState | null, category: string, page: number, radius: number, days: number, quick = false): string {
     const p = new URLSearchParams({
       page:     page.toString(),
       radius:   radius.toString(),
@@ -483,7 +488,23 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     // The server ranks notable-over-near for those, so "where to eat in
     // Barcelona" stops answering with the nearest McDonald's.
     if (isVisiting()) p.set('visiting', '1');
+    // The endless Discover stream asks for whatever is ready now (see the
+    // quick note in the feed route) rather than waiting on the slowest source.
+    if (quick) p.set('quick', '1');
     return p.toString();
+  }
+
+  // A throttled request (HTTP 429) is a reason to WAIT, never a sign that a
+  // category is empty. Treating it as empty is how one burst over the rate limit
+  // ended the whole feed in a second (measured 2026-11-12): every category and
+  // every ring was "exhausted" by refusals. The hook remembers until when.
+  function readPage(res: Response): Promise<FeedResponse | null> | null {
+    if (res.status === 429) {
+      const ra = Number(res.headers.get('Retry-After'));
+      rateLimitedUntilRef.current = Date.now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 60) * 1000 : 15_000);
+      return null;
+    }
+    return res.ok ? (res.json() as Promise<FeedResponse>) : null;
   }
 
   // Fetch a feed page, preferring the prefetch buffer; always warms the next page.
@@ -494,28 +515,29 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
   // out of sight anyway and a plain JSON body is cheaper.
   function fetchFeedPage(
     loc: LocationState | null, category: string, page: number, radius: number, days: number,
-    onPartial?: (posts: Post[]) => void,
+    onPartial?: (posts: Post[]) => void, quick = false,
   ): Promise<FeedResponse | null> {
-    const params = buildParams(loc, category, page, radius, days);
+    const params = buildParams(loc, category, page, radius, days, quick);
+    const direct = () => fetchWithTimeout(apiUrl(`/api/feed?${params}`)).then(readPage).catch(() => null);
     const buffered = prefetchRef.current.get(params);
     if (buffered) {
       prefetchRef.current.delete(params);
-      return buffered;
+      // A prefetch that failed (throttled, timed out) is asked again rather
+      // than read as "nothing here".
+      return buffered.then(r => r ?? direct());
     }
     if (onPartial) return streamFeed(apiUrl(`/api/feed?${params}&stream=1`), onPartial);
-    return fetchWithTimeout(apiUrl(`/api/feed?${params}`))
-      .then(res => (res.ok ? (res.json() as Promise<FeedResponse>) : null))
-      .catch(() => null);
+    return direct();
   }
 
-  function prefetchNextPage(loc: LocationState | null, category: string, page: number, radius: number, days: number) {
-    const params = buildParams(loc, category, page, radius, days);
+  function prefetchNextPage(loc: LocationState | null, category: string, page: number, radius: number, days: number, quick = false) {
+    const params = buildParams(loc, category, page, radius, days, quick);
     if (prefetchRef.current.has(params)) return;
     if (prefetchRef.current.size > 16) prefetchRef.current.clear();
     prefetchRef.current.set(
       params,
       fetchWithTimeout(apiUrl(`/api/feed?${params}`))
-        .then(res => (res.ok ? (res.json() as Promise<FeedResponse>) : null))
+        .then(readPage)
         .catch(() => null)
     );
   }
@@ -559,7 +581,6 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     ringRef.current = 0;
     catPageRef.current = new Map();
     catDoneRef.current = new Set();
-    catFailRef.current = new Map();
     rotRef.current = 0;
     heldRef.current = [];
   }
@@ -608,7 +629,6 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     }
     catPageRef.current = new Map();
     catDoneRef.current = new Set();
-    catFailRef.current = new Map();
     rotRef.current = 0;
     if (nearbyStartRef.current === null) {
       nearbyStartRef.current = postsRef.current.length;
@@ -620,53 +640,73 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     return appendBlend(user ? byDistance(held, user) : held, city);
   }
 
-  async function fetchBlend(loc: LocationState | null, city: string) {
+  async function fetchBlend(loc: LocationState | null, city: string, gen: number) {
     const user = userPlace(loc);
     const days = DAYS_TIERS[DAYS_TIERS.length - 1];
     let added = 0;
     let requests = 0;
     while (added < BLEND_MIN_NEW && requests < BLEND_MAX_REQUESTS) {
-      const cat = nextBlendCategory(true);
-      if (!cat) {
+      // Throttled: wait it out (bounded) and carry on, instead of ending.
+      const wait = rateLimitedUntilRef.current - Date.now();
+      if (wait > 0) await new Promise(r => setTimeout(r, Math.min(wait, 20_000)));
+      // Superseded by a reset while waiting or loading: stop quietly.
+      if (gen !== genRef.current) return;
+
+      // A few categories at once, each shown the moment it answers — so a fast
+      // one (restaurants straight from the database) is on screen while a slow
+      // one (a cold events search) is still being looked up.
+      const batch: string[] = [];
+      while (batch.length < BLEND_PARALLEL) {
+        const c = nextBlendCategory(true);
+        if (!c || batch.includes(c)) break;
+        batch.push(c);
+      }
+      if (batch.length === 0) {
         const released = advanceBlend(loc, city);
         if (released < 0) { setHasMore(false); return; }
         added += released;
         continue;
       }
-      const page = catPageRef.current.get(cat) ?? 0;
       const radius = blendRadius(loc);
-      requests++;
-      const data = await fetchFeedPage(loc, cat, page, radius, days);
-      if (!data) {
-        // A failed request isn't "nothing here" — retry the category once, then
-        // move on so one broken source can't stall the stream.
-        const fails = (catFailRef.current.get(cat) ?? 0) + 1;
-        catFailRef.current.set(cat, fails);
-        if (fails >= 2) catDoneRef.current.add(cat);
-        continue;
-      }
-      catPageRef.current.set(cat, page + 1);
-      const got = filterExpired(data.posts ?? []);
-      if (got.length === 0 || data.hasMore === false || page + 1 >= BLEND_MAX_PAGES) catDoneRef.current.add(cat);
+      const phase = phaseRef.current;
+      requests += batch.length;
+      await Promise.all(batch.map(async cat => {
+        const page = catPageRef.current.get(cat) ?? 0;
+        const data = await fetchFeedPage(loc, cat, page, radius, days, undefined, true);
+        if (gen !== genRef.current || phaseRef.current !== phase) return;
+        // No answer (timeout / offline) — move on rather than retry: the next
+        // ring asks this category again anyway, and a retry here would cost the
+        // user another full timeout.
+        if (!data) {
+          // Throttled → leave the category open; it is asked again after the
+          // pause. Anything else (timeout, offline) → move on rather than
+          // retry, since the next ring asks this category again anyway.
+          if (Date.now() >= rateLimitedUntilRef.current) catDoneRef.current.add(cat);
+          return;
+        }
+        catPageRef.current.set(cat, page + 1);
+        const got = filterExpired(data.posts ?? []);
+        if (got.length === 0 || data.hasMore === false || page + 1 >= BLEND_MAX_PAGES) catDoneRef.current.add(cat);
 
-      const [local, away] = splitLocal(got, user);
-      if (phaseRef.current === 'city') {
-        heldRef.current.push(...away);
-        // Nova Brain ranks each page ONCE, as it arrives, and it is appended
-        // in that order. Re-ranking the whole list on every new page (what the
-        // feed used to do) moved cards the user was already looking at.
-        added += appendBlend(rankPosts(local, loc?.localKm ?? 20), city);
-      } else {
-        // Own-town posts were already shown in the city phase; a ring page only
-        // contributes the towns around it.
-        added += appendBlend(user ? byDistance(away, user) : away, city);
-      }
+        const [local, away] = splitLocal(got, user);
+        if (phase === 'city') {
+          heldRef.current.push(...away);
+          // Nova Brain ranks each page ONCE, as it arrives, and it is appended
+          // in that order. Re-ranking the whole list on every new page (what
+          // the feed used to do) moved cards the user was already looking at.
+          added += appendBlend(rankPosts(local, loc?.localKm ?? 20), city);
+        } else {
+          // Own-town posts were already shown in the city phase; a ring page
+          // only contributes the towns around it.
+          added += appendBlend(user ? byDistance(away, user) : away, city);
+        }
+      }));
 
-      // Warm the next two category pages of this phase, so the next call is
-      // usually answered from the buffer instead of the network.
-      for (const skip of [0, 1]) {
+      // Warm the next batch of this phase, so the next call is usually answered
+      // from the buffer instead of the network.
+      for (let skip = 0; skip < BLEND_PARALLEL; skip++) {
         const nc = nextBlendCategory(false, skip);
-        if (nc) prefetchNextPage(loc, nc, catPageRef.current.get(nc) ?? 0, radius, days);
+        if (nc) prefetchNextPage(loc, nc, catPageRef.current.get(nc) ?? 0, radius, days, true);
       }
     }
     setHasMore(true);
@@ -675,6 +715,9 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
   // ── fetchMore: paginate; expand radius, then date window, when exhausted ──
   const fetchMore = useCallback(async (category?: string) => {
     if (inFlightRef.current) return;
+    // Which load this is. reset() starts a new one; a superseded run must
+    // neither add posts nor release the in-flight lock the new run holds.
+    const gen = genRef.current;
     inFlightRef.current = true;
     setLoading(true);
 
@@ -697,12 +740,14 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       }
       blendStepRef.current += 1;
       try {
-        await fetchBlend(location, city);
+        await fetchBlend(location, city, gen);
       } catch (err) {
         console.error('[useAIFeed/blend]', err);
       } finally {
-        setLoading(false);
-        inFlightRef.current = false;
+        if (gen === genRef.current) {
+          setLoading(false);
+          inFlightRef.current = false;
+        }
       }
       return;
     }
@@ -733,6 +778,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
       // long before they're needed, so streaming them would buy nothing.
       const streamFirstPage = pageRef.current === 0
         ? (partial: Post[]) => {
+            if (gen !== genRef.current) return;
             const fresh = filterExpired(partial);
             if (fresh.length === 0) return;
             // Paint immediately. Deliberately no writeCache here: these cards
@@ -745,6 +791,11 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
         : undefined;
 
       const data = await fetchFeedPage(location, cat, pageRef.current, radius, days, streamFirstPage);
+      // Throttled: keep the page and radius as they are and try again on the
+      // next scroll, instead of reading the refusal as "nothing here" and
+      // widening the radius past the user's own town.
+      if (!data && Date.now() < rateLimitedUntilRef.current) return;
+      if (gen !== genRef.current) return;
       const newPosts = filterExpired(data?.posts ?? []);
       const apiHasMore = data?.hasMore !== false;
       // Remember WHY a page was empty (e.g. the places service was unreachable)
@@ -788,6 +839,7 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
         location, cat, 0,
         RADIUS_TIERS[radiusTierRef.current], DAYS_TIERS[daysTierRef.current]
       );
+      if (gen !== genRef.current) return;
       const expandedPosts = filterExpired(expanded?.posts ?? []);
       if (expandedPosts.length > 0) {
         merge(expandedPosts, 1);
@@ -799,8 +851,10 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     } catch (err) {
       console.error('[useAIFeed]', err);
     } finally {
-      setLoading(false);
-      inFlightRef.current = false;
+      if (gen === genRef.current) {
+        setLoading(false);
+        inFlightRef.current = false;
+      }
     }
   }, [location]);
 
@@ -811,7 +865,9 @@ export function useAIFeed(location: LocationState | null): UseAIFeedReturn {
     radiusTierRef.current = 0;
     daysTierRef.current   = 0;
     setHasMore(true);
+    genRef.current       += 1;
     inFlightRef.current   = false;
+    setLoading(false);
     prevCityRef.current   = null;
     blendStepRef.current  = 0;
     resetBlend();
