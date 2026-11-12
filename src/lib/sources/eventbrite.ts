@@ -5,6 +5,7 @@
 
 import { ApiPost, makeUser, slugify, todayStr } from './shared';
 import { upstreamPaused, pauseUpstream, retryAfterSeconds } from '@/lib/sourceBreaker';
+import { sameCityish } from '@/lib/cityMatch';
 
 // ── Throttling ───────────────────────────────────────────────────────────────
 // Eventbrite is a public page we read, not an API we have a contract with, and
@@ -28,36 +29,9 @@ export class EventbriteThrottledError extends Error {
   }
 }
 
-// Eventbrite's JSON-LD has no geo coordinates, so every event would otherwise be
-// stamped with the SEARCH-CITY centroid. On a small town's page Eventbrite spills
-// in big-city events (Baden's page lists Vienna events) — which then get stamped
-// AT the small town and pollute its feed. We can't geocode each venue cheaply, so
-// instead we drop events whose venue city is a *recognised different major city*
-// than the one searched. Unknown/suburb localities are kept (assumed local).
-const CITY_ALIASES: Record<string, string> = {
-  wien: 'vienna', vienna: 'vienna', muenchen: 'munich', munchen: 'munich', munich: 'munich',
-  koeln: 'cologne', koln: 'cologne', cologne: 'cologne', praha: 'prague', prague: 'prague',
-  roma: 'rome', rome: 'rome', firenze: 'florence', florence: 'florence', venezia: 'venice',
-  venice: 'venice', napoli: 'naples', naples: 'naples', milano: 'milan', milan: 'milan',
-  torino: 'turin', turin: 'turin', wenen: 'vienna', graz: 'graz', linz: 'linz',
-  salzburg: 'salzburg', innsbruck: 'innsbruck', berlin: 'berlin', hamburg: 'hamburg',
-  frankfurt: 'frankfurt', zurich: 'zurich', zuerich: 'zurich', london: 'london',
-  paris: 'paris', barcelona: 'barcelona', madrid: 'madrid', amsterdam: 'amsterdam',
-  budapest: 'budapest', lisbon: 'lisbon', lisboa: 'lisbon', dublin: 'dublin',
-};
-
-function normCity(s: string): string {
-  const n = s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z]/g, '');
-  return CITY_ALIASES[n] ?? n;
-}
-
-// True when the venue city is a recognised major city different from the search
-// city (→ drop it). Unknown localities return false (→ keep).
-function isDifferentMajorCity(venueCity: string, searchCity: string): boolean {
-  const v = normCity(venueCity);
-  if (!v || !(v in CITY_ALIASES) && !Object.values(CITY_ALIASES).includes(v)) return false;
-  return v !== normCity(searchCity);
-}
+// Eventbrite's JSON-LD has no geo coordinates, so every event is stamped with
+// the SEARCH-town centroid. Listings that name another town are therefore
+// dropped (see the sameCityish check in fetchEventbriteEvents).
 
 interface LdEvent {
   '@type'?: string;
@@ -156,10 +130,16 @@ export async function fetchEventbriteEvents(
         // Physical, upcoming events only — skip online webinar filler
         if (ev.location?.['@type'] !== 'Place') continue;
         if (!ev.startDate || ev.startDate.slice(0, 10) < today) continue;
-        // Drop big-city spill so a town's page doesn't get other cities' events
-        // stamped at its centroid (see CITY_ALIASES note above).
+        // Eventbrite's JSON-LD carries no coordinates, so every listing kept here
+        // is pinned at the SEARCHED town's centre. A listing that names another
+        // town can therefore only be kept by lying about where it is. The old
+        // rule rejected only ~30 recognised big cities, so everything else rode
+        // through: measured 2026-11-12, 2,236 production rows sat on centre
+        // points shared with other towns — Bratislava, Steyr and Freistadt
+        // events pinned on Mödling, 10 km from Baden. Same rule as the crawler
+        // now: a different town's listing is left for that town's own search.
         const loc = ev.location?.address?.addressLocality || '';
-        if (loc && isDifferentMajorCity(loc, city)) continue;
+        if (loc && !sameCityish(loc, city)) continue;
         events.push(ev);
       }
     } catch { /* skip malformed block */ }

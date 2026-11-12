@@ -12,6 +12,7 @@ import type { ApiPost } from '@/lib/sources/shared';
 import { parseTripQuery } from './trip';
 import { learnSkill, harvestPayloads } from './extractor';
 import { findEndedInteractions } from './expiry';
+import { mergeTowns } from './towns';
 
 function post(o: Partial<ApiPost> = {}): ApiPost {
   return {
@@ -334,6 +335,14 @@ describe('Nova Brain still does every job', () => {
     ];
     const ended = findEndedInteractions(kept, ['over', 'tonight', 'landmark'], '2026-07-31');
     expect([...ended]).toEqual(['over']);
+  });
+
+  it('JOB 8 — learns which towns to go and fill', () => {
+    const sweep = mergeTowns(
+      [{ city: 'Baden', country: 'Austria', lat: 48.0059, lng: 16.2342 }],
+      [{ city: 'Bad Vöslau', country: 'Austria', lat: 47.97, lng: 16.21 }],
+    );
+    expect(sweep.map(t => t.city)).toContain('Bad Vöslau');
   });
 
   it('JOB 6 (new) — learns to read a site whose format it has never seen', () => {

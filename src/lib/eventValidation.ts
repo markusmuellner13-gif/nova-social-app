@@ -30,7 +30,15 @@ export interface ValidationOptions {
 
 export interface ValidationResult { ok: boolean; reason?: string }
 
+// The post's own name. Posts have carried a real `title` since PR #45; before
+// that the caption's first line was the only name there was. Judging the CAPTION
+// line was a silent leak: crawled events put the whole description there (up to
+// 320 chars), so every listing with a decent description failed "title-length"
+// (> 240) and was dropped. Measured 2026-11-12: all 4 of the first Eventfrog
+// events in Vienna, each a real, dated, correctly-placed event.
 function titleOf(p: ApiPost): string {
+  const own = (p.title || '').trim();
+  if (own) return own;
   return (p.caption || '').split('\n')[0].trim();
 }
 

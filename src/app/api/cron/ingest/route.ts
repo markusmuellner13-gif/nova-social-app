@@ -9,6 +9,7 @@ import { backfillVenueCoords } from '@/lib/sources/venueGeo';
 import {
   loadDemand, demandScore, interleaveByDemand, partitionByDemand, buildSweepQueue,
 } from '@/lib/demand';
+import { loadLearnedTowns, mergeTowns } from '@/lib/brain/towns';
 import { readCursor, writeCursor, timeDerivedCursor } from '@/lib/ingestCursor';
 import { scheduleTier } from './schedule';
 import { appOrigin } from '@/lib/appOrigin';
@@ -151,6 +152,9 @@ const EXTRA_PAGES = 3;
 // Posts requested per (city × category × page). Was 12; the free sources return
 // more than that per page, so the extra was simply being discarded.
 const PER_PAGE = 20;
+// How many learned towns (most-opened first) join the sweep on top of CITIES.
+const LEARNED_TOWNS_MAX = 60;
+
 const SLOW_CATEGORIES = [
   'sightseeing', 'restaurants', 'hotels', 'rentals', 'shops',
   'food', 'fitness', 'lifestyle', 'tech', 'fashion', 'travel', 'pets', 'outdoors',
@@ -210,7 +214,14 @@ export async function GET(request: NextRequest) {
   // places, where page>0 mostly returns nothing — spending slices on empty
   // pages would make coverage worse, not better.
   const built: { city: string; country: string; lat: number; lng: number; category: string; page: number }[] = [];
-  for (const [city, country, lat, lng] of CITIES) {
+  // The hard-coded cities, plus the towns real users have been opening (Nova
+  // Brain JOB 8, src/lib/brain/towns.ts) — so a town that isn't on the list
+  // still gets filled in the background once people use the app there.
+  const towns = mergeTowns(
+    CITIES.map(([city, country, lat, lng]) => ({ city, country, lat, lng })),
+    await loadLearnedTowns(LEARNED_TOWNS_MAX).catch(() => []),
+  );
+  for (const { city, country, lat, lng } of towns) {
     for (const category of cats) {
       const pages = FAST_CATEGORIES.includes(category) ? EXTRA_PAGES : 1;
       for (let page = 0; page < pages; page++) built.push({ city, country, lat, lng, category, page });
@@ -483,7 +494,9 @@ export async function GET(request: NextRequest) {
         // per-slice DELETE ran 23,359 times and is a third of this app's write
         // traffic — the queue the timing-out upserts were stuck behind. See the
         // measurements in src/lib/eventsDb.ts.
-        purged = await purgeExpiredEvents().catch(() => 0);
+        purged = await purgeExpiredEvents({
+          knownCentres: towns.map(({ city, lat, lng }) => ({ city, lat, lng })),
+        }).catch(() => 0);
 
         // Feed curation outcomes into the source-reliability learner too, so the
         // engine gradually favours the sources whose listings actually survive.
